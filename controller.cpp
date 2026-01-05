@@ -83,76 +83,53 @@ Mesh make_character_mesh(character& c)
 
 //--------------------------------------
 
-// Basic functionality to get gamepad input including deadzone and 
-// squaring of the stick location to increase sensitivity. To make 
-// all the other code that uses this easier, we assume stick is 
-// oriented on floor (i.e. y-axis is zero)
+// Basic functionality to get keyboard and mouse input.
 
-enum
+vec3 keyboard_get_movement()
 {
-    GAMEPAD_PLAYER = 0,
-};
-
-enum
-{
-    GAMEPAD_STICK_LEFT,
-    GAMEPAD_STICK_RIGHT,
-};
-
-vec3 gamepad_get_stick(int stick, const float deadzone = 0.2f)
-{
-    float gamepadx = GetGamepadAxisMovement(GAMEPAD_PLAYER, stick == GAMEPAD_STICK_LEFT ? GAMEPAD_AXIS_LEFT_X : GAMEPAD_AXIS_RIGHT_X);
-    float gamepady = GetGamepadAxisMovement(GAMEPAD_PLAYER, stick == GAMEPAD_STICK_LEFT ? GAMEPAD_AXIS_LEFT_Y : GAMEPAD_AXIS_RIGHT_Y);
-    float gamepadmag = sqrtf(gamepadx*gamepadx + gamepady*gamepady);
-    
-    if (gamepadmag > deadzone)
+    vec3 movement = {0.0f, 0.0f, 0.0f};
+    if (IsKeyDown(KEY_S)) movement.z += 1.0f;
+    if (IsKeyDown(KEY_W)) movement.z -= 1.0f;
+    if (IsKeyDown(KEY_A)) movement.x -= 1.0f;
+    if (IsKeyDown(KEY_D)) movement.x += 1.0f;
+    if (length(movement) > 0.0f)
     {
-        float gamepaddirx = gamepadx / gamepadmag;
-        float gamepaddiry = gamepady / gamepadmag;
-        float gamepadclippedmag = gamepadmag > 1.0f ? 1.0f : gamepadmag*gamepadmag;
-        gamepadx = gamepaddirx * gamepadclippedmag;
-        gamepady = gamepaddiry * gamepadclippedmag;
+        movement = normalize(movement);
     }
-    else
-    {
-        gamepadx = 0.0f;
-        gamepady = 0.0f;
-    }
-    
-    return vec3(gamepadx, 0.0f, gamepady);
+    return movement;
 }
 
 //--------------------------------------
 
 float orbit_camera_update_azimuth(
-    const float azimuth, 
-    const vec3 gamepadstick_right,
+    const float azimuth,
     const bool desired_strafe,
     const float dt)
 {
-    vec3 gamepadaxis = desired_strafe ? vec3() : gamepadstick_right;
-    return azimuth + 2.0f * dt * -gamepadaxis.x;
+    if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON))
+    {
+        return azimuth + 2.0f * dt * -GetMouseDelta().x;
+    }
+    return azimuth;
 }
 
 float orbit_camera_update_altitude(
-    const float altitude, 
-    const vec3 gamepadstick_right,
+    const float altitude,
     const bool desired_strafe,
     const float dt)
 {
-    vec3 gamepadaxis = desired_strafe ? vec3() : gamepadstick_right;
-    return clampf(altitude + 2.0f * dt * gamepadaxis.z, 0.0, 0.4f * PIf);
+    if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON))
+    {
+        return clampf(altitude + 2.0f * dt * GetMouseDelta().y, 0.0, 0.4f * PIf);
+    }
+    return altitude;
 }
 
 float orbit_camera_update_distance(
-    const float distance, 
+    const float distance,
     const float dt)
 {
-    float gamepadzoom = 
-        IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_1)  ? +1.0f :
-        IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ? -1.0f : 0.0f;
-        
-    return clampf(distance +  10.0f * dt * gamepadzoom, 0.1f, 100.0f);
+    return clampf(distance - GetMouseWheelMove(), 0.1f, 100.0f);
 }
 
 // Updates the camera using the orbit cam controls
@@ -162,12 +139,11 @@ void orbit_camera_update(
     float& camera_altitude,
     float& camera_distance,
     const vec3 target,
-    const vec3 gamepadstick_right,
     const bool desired_strafe,
     const float dt)
 {
-    camera_azimuth = orbit_camera_update_azimuth(camera_azimuth, gamepadstick_right, desired_strafe, dt);
-    camera_altitude = orbit_camera_update_altitude(camera_altitude, gamepadstick_right, desired_strafe, dt);
+    camera_azimuth = orbit_camera_update_azimuth(camera_azimuth, desired_strafe, dt);
+    camera_altitude = orbit_camera_update_altitude(camera_altitude, desired_strafe, dt);
     camera_distance = orbit_camera_update_distance(camera_distance, dt);
     
     quat rotation_azimuth = quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0));
@@ -186,7 +162,7 @@ void orbit_camera_update(
 
 bool desired_strafe_update()
 {
-    return IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_2) > 0.5f;
+    return IsKeyDown(KEY_LEFT_SHIFT);
 }
 
 void desired_gait_update(
@@ -198,31 +174,31 @@ void desired_gait_update(
     simple_spring_damper_exact(
         desired_gait, 
         desired_gait_velocity,
-        IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ? 1.0f : 0.0f,
+        IsKeyDown(KEY_SPACE) ? 1.0f : 0.0f,
         gait_change_halflife,
         dt);
 }
 
 vec3 desired_velocity_update(
-    const vec3 gamepadstick_left,
+    const vec3 movement,
     const float camera_azimuth,
     const quat simulation_rotation,
     const float fwrd_speed,
     const float side_speed,
     const float back_speed)
 {
-    // Find stick position in world space by rotating using camera azimuth
-    vec3 global_stick_direction = quat_mul_vec3(
-        quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)), gamepadstick_left);
+    // Find movement direction in world space by rotating using camera azimuth
+    vec3 global_movement_direction = quat_mul_vec3(
+        quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)), movement);
     
-    // Find stick position local to current facing direction
-    vec3 local_stick_direction = quat_inv_mul_vec3(
-        simulation_rotation, global_stick_direction);
+    // Find movement direction local to current facing direction
+    vec3 local_movement_direction = quat_inv_mul_vec3(
+        simulation_rotation, global_movement_direction);
     
-    // Scale stick by forward, sideways and backwards speeds
-    vec3 local_desired_velocity = local_stick_direction.z > 0.0 ?
-        vec3(side_speed, 0.0f, fwrd_speed) * local_stick_direction :
-        vec3(side_speed, 0.0f, back_speed) * local_stick_direction;
+    // Scale movement by forward, sideways and backwards speeds
+    vec3 local_desired_velocity = local_movement_direction.z > 0.0 ?
+        vec3(side_speed, 0.0f, fwrd_speed) * local_movement_direction :
+        vec3(side_speed, 0.0f, back_speed) * local_movement_direction;
     
     // Re-orientate into the world space
     return quat_mul_vec3(simulation_rotation, local_desired_velocity);
@@ -230,8 +206,7 @@ vec3 desired_velocity_update(
 
 quat desired_rotation_update(
     const quat desired_rotation,
-    const vec3 gamepadstick_left,
-    const vec3 gamepadstick_right,
+    const vec3 movement,
     const float camera_azimuth,
     const bool desired_strafe,
     const vec3 desired_velocity)
@@ -245,17 +220,17 @@ quat desired_rotation_update(
     {
         vec3 desired_direction = quat_mul_vec3(quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)), vec3(0, 0, -1));
 
-        if (length(gamepadstick_right) > 0.01f)
+        if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON))
         {
-            desired_direction = quat_mul_vec3(quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)), normalize(gamepadstick_right));
+            desired_direction = quat_mul_vec3(quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)), vec3(GetMouseDelta().x, 0, GetMouseDelta().y));
         }
         
         return quat_from_angle_axis(atan2f(desired_direction.x, desired_direction.z), vec3(0, 1, 0));            
     }
     
-    // If strafe is not active the desired direction comes from the left 
-    // stick as long as that stick is being used
-    else if (length(gamepadstick_left) > 0.01f)
+    // If strafe is not active the desired direction comes from the movement
+    // keys as long as they are being pressed
+    else if (length(movement) > 0.01f)
     {
         
         vec3 desired_direction = normalize(desired_velocity);
@@ -660,8 +635,7 @@ void trajectory_desired_velocities_predict(
   const slice1d<quat> trajectory_rotations,
   const vec3 desired_velocity,
   const float camera_azimuth,
-  const vec3 gamepadstick_left,
-  const vec3 gamepadstick_right,
+  const vec3 movement,
   const bool desired_strafe,
   const float fwrd_speed,
   const float side_speed,
@@ -673,9 +647,9 @@ void trajectory_desired_velocities_predict(
     for (int i = 1; i < desired_velocities.size; i++)
     {
         desired_velocities(i) = desired_velocity_update(
-            gamepadstick_left,
+            movement,
             orbit_camera_update_azimuth(
-                camera_azimuth, gamepadstick_right, desired_strafe, i * dt),
+                camera_azimuth, desired_strafe, i * dt),
             trajectory_rotations(i),
             fwrd_speed,
             side_speed,
@@ -725,8 +699,7 @@ void trajectory_desired_rotations_predict(
   const slice1d<vec3> desired_velocities,
   const quat desired_rotation,
   const float camera_azimuth,
-  const vec3 gamepadstick_left,
-  const vec3 gamepadstick_right,
+  const vec3 movement,
   const bool desired_strafe,
   const float dt)
 {
@@ -736,10 +709,9 @@ void trajectory_desired_rotations_predict(
     {
         desired_rotations(i) = desired_rotation_update(
             desired_rotations(i-1),
-            gamepadstick_left,
-            gamepadstick_right,
+            movement,
             orbit_camera_update_azimuth(
-                camera_azimuth, gamepadstick_right, desired_strafe, i * dt),
+                camera_azimuth, desired_strafe, i * dt),
             desired_strafe,
             desired_velocities(i));
     }
@@ -1495,9 +1467,8 @@ int main(void)
     auto update_func = [&]()
     {
       
-        // Get gamepad stick states
-        vec3 gamepadstick_left = gamepad_get_stick(GAMEPAD_STICK_LEFT);
-        vec3 gamepadstick_right = gamepad_get_stick(GAMEPAD_STICK_RIGHT);
+        // Get keyboard movement
+        vec3 movement = keyboard_get_movement();
         
         // Get if strafe is desired
         bool desired_strafe = desired_strafe_update();
@@ -1515,7 +1486,7 @@ int main(void)
         
         // Get the desired velocity
         vec3 desired_velocity_curr = desired_velocity_update(
-            gamepadstick_left,
+            movement,
             camera_azimuth,
             simulation_rotation,
             simulation_fwrd_speed,
@@ -1525,8 +1496,7 @@ int main(void)
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
             desired_rotation,
-            gamepadstick_left,
-            gamepadstick_right,
+            movement,
             camera_azimuth,
             desired_strafe,
             desired_velocity_curr);
@@ -1563,8 +1533,7 @@ int main(void)
           trajectory_desired_velocities,
           desired_rotation,
           camera_azimuth,
-          gamepadstick_left,
-          gamepadstick_right,
+          movement,
           desired_strafe,
           20.0f * dt);
         
@@ -1582,8 +1551,7 @@ int main(void)
           trajectory_rotations,
           desired_velocity,
           camera_azimuth,
-          gamepadstick_left,
-          gamepadstick_right,
+          movement,
           desired_strafe,
           simulation_fwrd_speed,
           simulation_side_speed,
@@ -2101,7 +2069,6 @@ int main(void)
             camera_distance,
             bone_positions(0) + vec3(0, 1, 0),
             // simulation_position + vec3(0, 1, 0),
-            gamepadstick_right,
             desired_strafe,
             dt);
 
@@ -2275,12 +2242,11 @@ int main(void)
         
         GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 140 }, "controls");
         
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 200, 20 }, "Left Trigger - Strafe");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 200, 20 }, "Left Stick - Move");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 200, 20 }, "Right Stick - Camera / Facing (Stafe)");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 200, 20 }, "Left Shoulder - Zoom In");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 200, 20 }, "Right Shoulder - Zoom Out");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 200, 20 }, "A Button - Walk");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 200, 20 }, "Left Shift - Strafe");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 200, 20 }, "WASD - Move");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 200, 20 }, "Mouse - Camera");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 200, 20 }, "Mouse Wheel - Zoom");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 200, 20 }, "Space - Walk");
         
 
         
