@@ -1,0 +1,28 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "${workspaceFolder}/controller.cpp",
+                "-o", "${workspaceFolder}/controller.exe",
+
+                "-I", "${workspaceFolder}/include",
+                "-I", "C:/Self-Contained Executable Software/raylib-5.5_win64_mingw-w64/include",
+                "-L", "C:/Self-Contained Executable Software/raylib-5.5_win64_mingw-w64/lib",
+
+                "-lraylib", "-lopengl32", "-lgdi32", "-lwinmm",
+
+                "-std=c99",
+                "-Wall"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        }
+    ]
+}

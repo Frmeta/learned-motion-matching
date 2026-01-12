@@ -2283,6 +2283,70 @@ int main(void)
         GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 200, 20 }, "A Button - Walk");
         
 
+        //---------
+        
+        float ui_input_hei = 530;
+        GuiGroupBox((Rectangle){ 1010, ui_input_hei, 250, 180 }, "Gamepad Test");
+        
+        int center_x = 1010 + 125;
+        int start_y = ui_input_hei + 30;
+
+        // Shoulder Buttons
+        // L2
+        DrawRectangle(center_x - 80, start_y - 20, 30, 10, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_2) ? RED : LIGHTGRAY);
+        DrawRectangleLines(center_x - 80, start_y - 20, 30, 10, BLACK);
+        // L1
+        DrawRectangle(center_x - 80, start_y - 5, 30, 10, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_1) ? RED : LIGHTGRAY);
+        DrawRectangleLines(center_x - 80, start_y - 5, 30, 10, BLACK);
+        
+        // R2
+        DrawRectangle(center_x + 50, start_y - 20, 30, 10, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_TRIGGER_2) ? RED : LIGHTGRAY);
+        DrawRectangleLines(center_x + 50, start_y - 20, 30, 10, BLACK);
+        // R1
+        DrawRectangle(center_x + 50, start_y - 5, 30, 10, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ? RED : LIGHTGRAY);
+        DrawRectangleLines(center_x + 50, start_y - 5, 30, 10, BLACK);
+
+        // Sticks
+        // Left Stick
+        int ls_x = center_x - 50;
+        int ls_y = start_y + 60;
+        DrawCircleLines(ls_x, ls_y, 20, BLACK);
+        if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_THUMB)) DrawCircle(ls_x, ls_y, 20, Fade(RED, 0.3f));
+        DrawCircle(ls_x + (int)(gamepadstick_left.x * 20), ls_y - (int)(gamepadstick_left.z * 20), 4, RED);
+        
+        // Right Stick
+        int rs_x = center_x + 50;
+        int rs_y = start_y + 60;
+        DrawCircleLines(rs_x, rs_y, 20, BLACK);
+        if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_THUMB)) DrawCircle(rs_x, rs_y, 20, Fade(BLUE, 0.3f));
+        DrawCircle(rs_x + (int)(gamepadstick_right.x * 20), rs_y - (int)(gamepadstick_right.z * 20), 4, BLUE);
+
+        // D-Pad
+        int dp_x = center_x - 90;
+        int dp_y = start_y + 30;
+        int dp_size = 10;
+        DrawRectangle(dp_x, dp_y - dp_size, dp_size, dp_size, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_FACE_UP) ? GRAY : LIGHTGRAY);
+        DrawRectangleLines(dp_x, dp_y - dp_size, dp_size, dp_size, BLACK);
+        DrawRectangle(dp_x, dp_y + dp_size, dp_size, dp_size, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_FACE_DOWN) ? GRAY : LIGHTGRAY);
+        DrawRectangleLines(dp_x, dp_y + dp_size, dp_size, dp_size, BLACK);
+        DrawRectangle(dp_x - dp_size, dp_y, dp_size, dp_size, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_FACE_LEFT) ? GRAY : LIGHTGRAY);
+        DrawRectangleLines(dp_x - dp_size, dp_y, dp_size, dp_size, BLACK);
+        DrawRectangle(dp_x + dp_size, dp_y, dp_size, dp_size, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_FACE_RIGHT) ? GRAY : LIGHTGRAY);
+        DrawRectangleLines(dp_x + dp_size, dp_y, dp_size, dp_size, BLACK);
+
+        // Face Buttons
+        int fb_x = center_x + 90;
+        int fb_y = start_y + 30;
+        int fb_rad = 6;
+        DrawCircle(fb_x, fb_y - 12, fb_rad, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ? YELLOW : LIGHTGRAY);
+        DrawCircleLines(fb_x, fb_y - 12, fb_rad, BLACK);
+        DrawCircle(fb_x, fb_y + 12, fb_rad, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ? GREEN : LIGHTGRAY);
+        DrawCircleLines(fb_x, fb_y + 12, fb_rad, BLACK);
+        DrawCircle(fb_x - 12, fb_y, fb_rad, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ? BLUE : LIGHTGRAY);
+        DrawCircleLines(fb_x - 12, fb_y, fb_rad, BLACK);
+        DrawCircle(fb_x + 12, fb_y, fb_rad, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ? RED : LIGHTGRAY);
+        DrawCircleLines(fb_x + 12, fb_y, fb_rad, BLACK);
+
         
         //---------
         
