@@ -61,9 +61,9 @@ def to_xform_xy(x):
 def from_euler(e, order='zyx'):
 
     axis = {
-        'x': torch.as_tensor([1, 0, 0], dtype=torch.float32),
-        'y': torch.as_tensor([0, 1, 0], dtype=torch.float32),
-        'z': torch.as_tensor([0, 0, 1], dtype=torch.float32)}
+        'x': torch.as_tensor([1, 0, 0], dtype=torch.float32, device=e.device),
+        'y': torch.as_tensor([0, 1, 0], dtype=torch.float32, device=e.device),
+        'z': torch.as_tensor([0, 0, 1], dtype=torch.float32, device=e.device)}
 
     q0 = from_angle_axis(e[..., 0], axis[order[0]])
     q1 = from_angle_axis(e[..., 1], axis[order[1]])
@@ -113,7 +113,7 @@ def from_xform_xy(x):
         c2[...,None]], axis=-1))
 
 def inv(q):
-    return torch.as_tensor([1, -1, -1, -1], dtype=torch.float32) * q
+    return torch.as_tensor([1, -1, -1, -1], dtype=torch.float32, device=q.device) * q
 
 def mul(x, y):
     x0, x1, x2, x3 = x[...,0:1], x[...,1:2], x[...,2:3], x[...,3:4]

@@ -67,6 +67,8 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Fit acceleration structure for nearest neighbors search
     
     tree = BallTree(X)
@@ -79,24 +81,24 @@ if __name__ == '__main__':
     projector_mean_out = torch.as_tensor(np.hstack([
         X.mean(axis=0).ravel(),
         Z.mean(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     projector_std_out = torch.as_tensor(np.hstack([
         X.std(axis=0).ravel(),
         Z.std(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     projector_mean_in = torch.as_tensor(np.hstack([
         X.mean(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     projector_std_in = torch.as_tensor(np.hstack([
         X_scale.repeat(nfeatures),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     # Make networks
     
-    network_projector = Projector(nfeatures, nfeatures + nlatent)
+    network_projector = Projector(nfeatures, nfeatures + nlatent).to(device)
     
     # Function to generate test predictions
 
@@ -117,9 +119,9 @@ if __name__ == '__main__':
             
             nearest = tree.query(Xhat, k=1, return_distance=False)[:,0]
             
-            Xgnd = torch.as_tensor(X[nearest])
-            Zgnd = torch.as_tensor(Z[nearest])
-            Xhat = torch.as_tensor(Xhat)
+            Xgnd = torch.as_tensor(X[nearest], device=device)
+            Zgnd = torch.as_tensor(Z[nearest], device=device)
+            Xhat = torch.as_tensor(Xhat, device=device)
             
             # Project
             
@@ -192,15 +194,25 @@ if __name__ == '__main__':
         
         nsigma = np.random.uniform(size=[batchsize, 1]).astype(np.float32)
         noise = np.random.normal(size=[batchsize, nfeatures]).astype(np.float32)
-        Xhat = X[samples] + X_noise_std * nsigma * noise
+        
+        # Ensure operands are numpy for BallTree query preparation
+        X_samp = X[samples]
+        if isinstance(X_samp, torch.Tensor):
+            X_samp = X_samp.cpu().numpy()
+            
+        X_std = X_noise_std
+        if isinstance(X_std, torch.Tensor):
+            X_std = X_std.cpu().numpy()
+            
+        Xhat = X_samp + X_std * nsigma * noise
         
         # Find nearest
         
         nearest = tree.query(Xhat, k=1, return_distance=False)[:,0]
         
-        Xgnd = torch.as_tensor(X[nearest])
-        Zgnd = torch.as_tensor(Z[nearest])
-        Xhat = torch.as_tensor(Xhat)
+        Xgnd = torch.as_tensor(X[nearest], device=device)
+        Zgnd = torch.as_tensor(Z[nearest], device=device)
+        Xhat = torch.as_tensor(Xhat, device=device)
         Dgnd = torch.sqrt(torch.sum(torch.square(Xhat - Xgnd), dim=-1))
         
         # Projector

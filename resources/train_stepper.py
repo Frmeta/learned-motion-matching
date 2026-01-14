@@ -63,6 +63,8 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # Compute means/stds
     
     X_scale = X.std()
@@ -71,22 +73,22 @@ if __name__ == '__main__':
     stepper_mean_out = torch.as_tensor(np.hstack([
         ((X[1:] - X[:-1]) / dt).mean(axis=0).ravel(),
         ((Z[1:] - Z[:-1]) / dt).mean(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     stepper_std_out = torch.as_tensor(np.hstack([
         ((X[1:] - X[:-1]) / dt).std(axis=0).ravel(),
         ((Z[1:] - Z[:-1]) / dt).std(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     stepper_mean_in = torch.as_tensor(np.hstack([
         X.mean(axis=0).ravel(),
         Z.mean(axis=0).ravel(),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     stepper_std_in = torch.as_tensor(np.hstack([
         X_scale.repeat(nfeatures),
         Z_scale.repeat(nlatent),
-    ]).astype(np.float32))
+    ]).astype(np.float32), device=device)
     
     # Make PyTorch tensors
     
@@ -95,7 +97,7 @@ if __name__ == '__main__':
     
     # Make networks
     
-    network_stepper = Stepper(nfeatures + nlatent)
+    network_stepper = Stepper(nfeatures + nlatent).to(device)
     
     # Function to generate test predictions
     
@@ -108,8 +110,8 @@ if __name__ == '__main__':
             start = range_starts[2]
             stop = min(start + 1000, range_stops[2])
             
-            Xgnd = X[start:stop][np.newaxis]
-            Zgnd = Z[start:stop][np.newaxis]
+            Xgnd = X[start:stop].unsqueeze(0).to(device)
+            Zgnd = Z[start:stop].unsqueeze(0).to(device)
             
             # Predict, resetting every `window` frames
             
@@ -199,8 +201,8 @@ if __name__ == '__main__':
         
         batch = indices[torch.randint(0, len(indices), size=[batchsize])]
         
-        Xgnd = X[batch]
-        Zgnd = Z[batch]
+        Xgnd = X[batch].to(device)
+        Zgnd = Z[batch].to(device)
         
         # Predict
         
