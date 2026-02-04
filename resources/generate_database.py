@@ -33,11 +33,11 @@ def animation_mirror(lrot, lpos, names, parents):
 
 files = [
     # We just use a small section of this clip for the standing idle
-    ('pushAndStumble1_subject5.bvh', 194,  351), 
+    ('pushAndStumble1_subject2.bvh', 410,  470), 
     # Running
-    ('run1_subject5.bvh',             90, 7086),
+    ('run1_subject2.bvh',             300, 6500),
     # Walking
-    ('walk1_subject5.bvh',            80, 7791),
+    ('walk1_subject2.bvh',            110, 7700),
 ]
 
 """ We will accumulate data in these lists """
