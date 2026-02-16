@@ -105,7 +105,7 @@ for filename, start, stop in files:
         sim_rotation_joint = bvh_data['names'].index("Hips")
         
         # Position comes from spine joint
-        sim_position = np.array([1.0, 0.0, 1.0]) * global_positions[:,sim_position_joint:sim_position_joint+1]
+        sim_position = np.array([1.0, 0.0, 1.0]) * global_positions[:,sim_position_joint:sim_position_joint+1] # zeroes out Y
         sim_position = signal.savgol_filter(sim_position, 31, 3, axis=0, mode='interp')
         
         # Direction comes from projected hip forward direction
@@ -136,8 +136,8 @@ for filename, start, stop in files:
         velocities = np.empty_like(positions)
         velocities[1:-1] = (
             0.5 * (positions[2:  ] - positions[1:-1]) * 60.0 +
-            0.5 * (positions[1:-1] - positions[ :-2]) * 60.0)
-        velocities[ 0] = velocities[ 1] - (velocities[ 3] - velocities[ 2])
+            0.5 * (positions[1:-1] - positions[ :-2]) * 60.0) # [1:-1] cancel each other
+        velocities[ 0] = velocities[ 1] - (velocities[ 3] - velocities[ 2]) # linear extrapolation
         velocities[-1] = velocities[-2] + (velocities[-2] - velocities[-3])
         
         # Same for angular velocities
@@ -252,7 +252,7 @@ if True:
     root_velocities_walk = np.sqrt(np.sum(np.square(bone_velocities[walk_s:walk_e,0]), axis=-1))
     root_angular_velocities_walk = np.sqrt(np.sum(np.square(bone_angular_velocities[walk_s:walk_e,0]), axis=-1))
     
-    # Compute Acceleration
+    # Compute Walk Acceleration
     root_acceleration_walk = np.zeros_like(bone_velocities[walk_s:walk_e,0])
     root_acceleration_walk[1:-1] = (
         0.5 * (bone_velocities[walk_s+2:walk_e-0,0] - bone_velocities[walk_s+1:walk_e-1,0]) * 60.0 +
@@ -265,7 +265,7 @@ if True:
     root_velocities_run = np.sqrt(np.sum(np.square(bone_velocities[run_s:run_e,0]), axis=-1))
     root_angular_velocities_run = np.sqrt(np.sum(np.square(bone_angular_velocities[run_s:run_e,0]), axis=-1))
     
-    # Compute Acceleration
+    # Compute Run Acceleration
     root_acceleration_run = np.zeros_like(bone_velocities[run_s:run_e,0])
     root_acceleration_run[1:-1] = (
         0.5 * (bone_velocities[run_s+2:run_e-0,0] - bone_velocities[run_s+1:run_e-1,0]) * 60.0 +
