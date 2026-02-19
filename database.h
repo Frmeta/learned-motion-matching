@@ -99,7 +99,7 @@ int database_trajectory_index_clamp(database& db, int frame, int offset)
 
 void normalize_feature(
     slice2d<float> features,
-    slice1d<float> features_offset,
+    slice1d<float> features_offset, // mean
     slice1d<float> features_scale,
     const int offset, 
     const int size, 

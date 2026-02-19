@@ -105,8 +105,8 @@ if __name__ == '__main__':
     
     # Compute transformation matrix
     
-    Yxfm = quat.to_xform(Yrot)
-    Qxfm = quat.to_xform(Qrot)
+    Yxfm = quat.to_xform(Yrot) # useless
+    Qxfm = quat.to_xform(Qrot) # will be used later
     
     # Compute two-column transformation matrix
     
