@@ -37,9 +37,9 @@ files = [
     # Running
     ('resources/bvh/run1_subject5.bvh',             90, 7086), 
     # Walking
-    ('resources/bvh/walk1_subject5.bvh',            80, 4000), # decrease file size (original: 7791)
+    ('resources/bvh/walk1_subject5.bvh',            80, 7791), # decrease file size (original: 7791)
     # Terrain
-    ('resources/bvh/obstacles1_subject2.bvh',            231, 4972),
+    #('resources/bvh/obstacles1_subject2.bvh',       231, 4972),
 ]
 
 """ We will accumulate data in these lists """

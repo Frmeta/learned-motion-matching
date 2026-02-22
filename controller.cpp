@@ -1256,7 +1256,7 @@ int main(void)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "BluePlaneGround.glb";
+    const char* ground_glb_path = "resources/glb/04-FlatTerrainSlope.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -1295,7 +1295,7 @@ int main(void)
     float feature_weight_hip_velocity = 1.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
-    float feature_weight_terrain_heights = 1.5f;
+    float feature_weight_terrain_heights = 0.0f;
     
     database_build_matching_features(
         db,
