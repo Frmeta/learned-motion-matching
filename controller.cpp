@@ -1306,7 +1306,7 @@ int main(void)
         feature_weight_trajectory_directions,
         feature_weight_terrain_heights);
         
-    database_save_matching_features(db, "./resources/bin/features.bin");
+    database_save_matching_features(db, "./resources/bin/features.bin", true);
    
     // Pose & Inertializer Data
     

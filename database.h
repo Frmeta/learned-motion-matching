@@ -67,7 +67,7 @@ void database_load(database& db, const char* filename)
     fclose(f);
 }
 
-void database_save_matching_features(const database& db, const char* filename)
+void database_save_matching_features(const database& db, const char* filename, bool is_saved_as_csv = false)
 {
     FILE* f = fopen(filename, "wb");
     assert(f != NULL);
@@ -77,6 +77,58 @@ void database_save_matching_features(const database& db, const char* filename)
     array1d_write(db.features_scale, f);
     
     fclose(f);
+    
+    // Save as CSV if requested
+    if (is_saved_as_csv)
+    {
+        // Create CSV filename by replacing .bin with .csv
+        char csv_filename[512];
+        strcpy(csv_filename, filename);
+        char* dot = strrchr(csv_filename, '.');
+        if (dot != NULL)
+        {
+            strcpy(dot, ".csv");
+        }
+        else
+        {
+            strcat(csv_filename, ".csv");
+        }
+        
+        // Write features to CSV
+        FILE* csv_f = fopen(csv_filename, "w");
+        assert(csv_f != NULL);
+        
+        // Write header with offsets and scales
+        fprintf(csv_f, "# Features Offset:\n");
+        for (int j = 0; j < db.features_offset.size; j++)
+        {
+            fprintf(csv_f, "%f", db.features_offset(j));
+            if (j < db.features_offset.size - 1) fprintf(csv_f, ",");
+        }
+        fprintf(csv_f, "\n");
+        
+        fprintf(csv_f, "# Features Scale:\n");
+        for (int j = 0; j < db.features_scale.size; j++)
+        {
+            fprintf(csv_f, "%f", db.features_scale(j));
+            if (j < db.features_scale.size - 1) fprintf(csv_f, ",");
+        }
+        fprintf(csv_f, "\n");
+        
+        // Write features data
+        fprintf(csv_f, "# Features Data (rows=%d, cols=%d):\n", db.features.rows, db.features.cols);
+        for (int i = 0; i < db.features.rows; i++)
+        {
+            for (int j = 0; j < db.features.cols; j++)
+            {
+                fprintf(csv_f, "%f", db.features(i, j));
+                if (j < db.features.cols - 1) fprintf(csv_f, ",");
+            }
+            fprintf(csv_f, "\n");
+        }
+        
+        fclose(csv_f);
+    }
 }
 
 // When we add an offset to a frame in the database there is a chance
