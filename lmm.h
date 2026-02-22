@@ -17,6 +17,7 @@ void decompressor_evaluate(
     slice1d<quat> bone_rotations,
     slice1d<vec3> bone_angular_velocities,
     slice1d<bool> bone_contacts,
+    slice1d<vec3> future_toe_positions,
     nnet_evaluation& evaluation,
     const slice1d<float> features,
     const slice1d<float> latent,
@@ -117,6 +118,36 @@ void decompressor_evaluate(
     }
 
     offset += 2;
+    
+    // Extract future toe positions (predicted 2D XZ positions at +15, +30, +45 frames)
+    // These are used for terrain height sampling at runtime
+    if (future_toe_positions.data != nullptr && future_toe_positions.size >= 3)
+    {
+        // Unpack and transform from character space to world space
+        // Each timeframe has 4 values: left_toe_x, left_toe_z, right_toe_x, right_toe_z
+        for (int t = 0; t < 3 && t < future_toe_positions.size; t++)
+        {
+            // Get left and right toe positions from network output
+            vec3 left_toe_char = vec3(
+                output_layer(offset + t*4 + 0),
+                0.0f,
+                output_layer(offset + t*4 + 1));
+                
+            vec3 right_toe_char = vec3(
+                output_layer(offset + t*4 + 2),
+                0.0f,
+                output_layer(offset + t*4 + 3));
+            
+            // Average the two toe positions and transform to world space
+            vec3 avg_toe_char = (left_toe_char + right_toe_char) * 0.5f;
+            vec3 avg_toe_world = quat_mul_vec3(root_rotation, avg_toe_char) + root_position;
+            
+            // Store the world space position (we keep x, z; y is world height from ground)
+            future_toe_positions(t) = avg_toe_world;
+        }
+    }
+
+    offset += 12;
     
     // Check we got everything!
     assert(offset == nn.output_mean.size);

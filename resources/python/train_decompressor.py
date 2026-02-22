@@ -92,6 +92,30 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     
+    # Helper function to clamp frame index to animation range
+    def database_index_clamp(frame, offset, range_starts, range_stops):
+        """
+        Clamp a frame index with offset to stay within the animation range
+        that contains the given frame.
+        
+        Args:
+            frame: Current frame index
+            offset: Offset to add to frame
+            range_starts: Array of range start indices
+            range_stops: Array of range stop indices
+            
+        Returns:
+            Clamped frame index within the appropriate range
+        """
+        # Find which range this frame belongs to
+        for i in range(len(range_starts)):
+            if frame >= range_starts[i] and frame < range_stops[i]:
+                # Clamp the offset frame to stay within this range
+                return min(frame + offset, range_stops[i] - 1)
+        
+        # Should never reach here if frame is valid
+        return frame
+    
     # Compute world space
     
     Grot, Gpos, Gvel, Gang = quat.fk_vel(Yrot, Ypos, Yvel, Yang, parents)
@@ -122,6 +146,32 @@ if __name__ == '__main__':
     
     Yextra = contacts.astype(np.float32)
     
+    # Compute future toe positions (XY only) at 15, 30, 45 frames ahead
+    # These are used for terrain height sampling at runtime
+    
+    left_toe_idx = 5   # Bone_LeftToe
+    right_toe_idx = 9  # Bone_RightToe
+    
+    # Initialize future toe positions array
+    Yfuture_toe_xy = np.zeros([nframes, 12], dtype=np.float32)  # 3 frames × 2 toes × 2D
+    
+    # For each frame, compute future toe positions clamped to range boundaries
+    for i in range(nframes):
+        # Get clamped future frame indices using database_index_clamp
+        future_frames = [
+            database_index_clamp(i, 15, range_starts, range_stops),
+            database_index_clamp(i, 30, range_starts, range_stops),
+            database_index_clamp(i, 45, range_starts, range_stops),
+        ]
+        
+        # Extract XY positions (x, z in world space) of toes at future frames
+        # Store in character space (relative to root)
+        for t, future_frame in enumerate(future_frames):
+            Yfuture_toe_xy[i, t*4 + 0] = Qpos[future_frame, left_toe_idx, 0]   # left toe X
+            Yfuture_toe_xy[i, t*4 + 1] = Qpos[future_frame, left_toe_idx, 2]   # left toe Z
+            Yfuture_toe_xy[i, t*4 + 2] = Qpos[future_frame, right_toe_idx, 0]  # right toe X
+            Yfuture_toe_xy[i, t*4 + 3] = Qpos[future_frame, right_toe_idx, 2]  # right toe Z
+    
     # Compute means/stds
     
     Ypos_scale = Ypos[:,1:].std()
@@ -137,6 +187,7 @@ if __name__ == '__main__':
     Yrvel_scale = Yrvel.std()
     Yrang_scale = Yrang.std()
     Yextra_scale = Yextra.std()
+    Yfuture_toe_xy_scale = Yfuture_toe_xy.std()
     
     decompressor_mean_out = torch.as_tensor(np.hstack([
         Ypos[:,1:].mean(axis=0).ravel(),
@@ -146,6 +197,7 @@ if __name__ == '__main__':
         Yrvel.mean(axis=0).ravel(),
         Yrang.mean(axis=0).ravel(),
         Yextra.mean(axis=0).ravel(),
+        Yfuture_toe_xy.mean(axis=0).ravel(),
     ]).astype(np.float32))
     
     decompressor_std_out = torch.as_tensor(np.hstack([
@@ -156,6 +208,7 @@ if __name__ == '__main__':
         Yrvel.std(axis=0).ravel(),
         Yrang.std(axis=0).ravel(),
         Yextra.std(axis=0).ravel(),
+        Yfuture_toe_xy.std(axis=0).ravel(),
     ]).astype(np.float32))
     
     decompressor_mean_in = torch.zeros([nfeatures + nlatent], dtype=torch.float32)
@@ -207,6 +260,7 @@ if __name__ == '__main__':
     Yrvel = torch.as_tensor(Yrvel)
     Yrang = torch.as_tensor(Yrang)
     Yextra = torch.as_tensor(Yextra)
+    Yfuture_toe_xy = torch.as_tensor(Yfuture_toe_xy)
     
     X = torch.as_tensor(X)
     
@@ -267,6 +321,7 @@ if __name__ == '__main__':
             Ygnd_rvel = Yrvel[start:stop][np.newaxis]
             Ygnd_rang = Yrang[start:stop][np.newaxis]
             Ygnd_extra = Yextra[start:stop][np.newaxis]
+            Ygnd_future_toe_xy = Yfuture_toe_xy[start:stop][np.newaxis]
             
             Xgnd = X[start:stop][np.newaxis]
             
@@ -425,6 +480,7 @@ if __name__ == '__main__':
         Ygnd_rang = Yrang[batch]
         
         Ygnd_extra = Yextra[batch]
+        Ygnd_future_toe_xy = Yfuture_toe_xy[batch]
         
         # Encode
         
@@ -454,6 +510,7 @@ if __name__ == '__main__':
         Ytil_rvel = Ytil[:,:,15*(nbones-1)+0:15*(nbones-1)+3].reshape([batchsize, window, 3])
         Ytil_rang = Ytil[:,:,15*(nbones-1)+3:15*(nbones-1)+6].reshape([batchsize, window, 3])
         Ytil_extra = Ytil[:,:,15*(nbones-1)+6:15*(nbones-1)+8].reshape([batchsize, window, nextra])
+        Ytil_future_toe_xy = Ytil[:,:,15*(nbones-1)+8:15*(nbones-1)+20].reshape([batchsize, window, 12])
         
         # Add root bone from ground
         
@@ -499,6 +556,7 @@ if __name__ == '__main__':
         loss_loc_rvel = torch.mean(2.0 * torch.abs(Ygnd_rvel - Ytil_rvel))
         loss_loc_rang = torch.mean(2.0 * torch.abs(Ygnd_rang - Ytil_rang))
         loss_loc_extra = torch.mean(2.0 * torch.abs(Ygnd_extra - Ytil_extra))
+        loss_future_toe_xy = torch.mean(5.0 * torch.abs(Ygnd_future_toe_xy - Ytil_future_toe_xy))
         
         loss_chr_pos = torch.mean(15.0 * torch.abs(Qgnd_pos - Qtil_pos))
         loss_chr_xfm = torch.mean( 5.0 * torch.abs(Qgnd_xfm - Qtil_xfm))
@@ -522,6 +580,7 @@ if __name__ == '__main__':
             loss_loc_rvel + 
             loss_loc_rang + 
             loss_loc_extra + 
+            loss_future_toe_xy +
             loss_chr_pos + 
             loss_chr_xfm + 
             loss_chr_vel + 

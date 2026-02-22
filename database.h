@@ -4,6 +4,7 @@
 #include "vec.h"
 #include "quat.h"
 #include "array.h"
+#include "character.h"
 
 #include <assert.h>
 #include <float.h>
@@ -81,7 +82,7 @@ void database_save_matching_features(const database& db, const char* filename)
 // When we add an offset to a frame in the database there is a chance
 // it will go out of the relevant range so here we can clamp it to 
 // the last frame of that range.
-int database_trajectory_index_clamp(database& db, int frame, int offset)
+int database_index_clamp(database& db, int frame, int offset)
 {
     for (int i = 0; i < db.nranges(); i++)
     {
@@ -445,9 +446,9 @@ void compute_trajectory_position_feature(database& db, int& offset, float weight
 {
     for (int i = 0; i < db.nframes(); i++)
     {
-        int t0 = database_trajectory_index_clamp(db, i, 20);
-        int t1 = database_trajectory_index_clamp(db, i, 40);
-        int t2 = database_trajectory_index_clamp(db, i, 60);
+        int t0 = database_index_clamp(db, i, 20);
+        int t1 = database_index_clamp(db, i, 40);
+        int t2 = database_index_clamp(db, i, 60);
         
         vec3 trajectory_pos0 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t0, 0) - db.bone_positions(i, 0));
         vec3 trajectory_pos1 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t1, 0) - db.bone_positions(i, 0));
@@ -471,9 +472,9 @@ void compute_trajectory_direction_feature(database& db, int& offset, float weigh
 {
     for (int i = 0; i < db.nframes(); i++)
     {
-        int t0 = database_trajectory_index_clamp(db, i, 20);
-        int t1 = database_trajectory_index_clamp(db, i, 40);
-        int t2 = database_trajectory_index_clamp(db, i, 60);
+        int t0 = database_index_clamp(db, i, 20);
+        int t1 = database_index_clamp(db, i, 40);
+        int t2 = database_index_clamp(db, i, 60);
         
         vec3 trajectory_dir0 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), quat_mul_vec3(db.bone_rotations(t0, 0), vec3(0, 0, 1)));
         vec3 trajectory_dir1 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), quat_mul_vec3(db.bone_rotations(t1, 0), vec3(0, 0, 1)));
@@ -491,6 +492,184 @@ void compute_trajectory_direction_feature(database& db, int& offset, float weigh
 
     offset += 6;
 }
+
+// Helper function to build terrain height map from foot contact points
+// Extracts all foot contact points and builds a nearest neighbor lookup structure
+void build_terrain_height_map(
+    const database& db,
+    array1d<vec3>& terrain_points,  // (x, y, height) for each contact point
+    array1d<int>& contact_bone_indices) // bone index for each contact point
+{
+    // Collect all foot contact points (LeftFoot=4, RightFoot=8)
+    int left_foot = Bone_LeftFoot;
+    int right_foot = Bone_RightFoot;
+    
+    int contact_count = 0;
+    
+    // First pass: count total contact points
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        if (db.contact_states(i, 0)) contact_count++; // Left foot
+        if (db.contact_states(i, 1)) contact_count++; // Right foot
+    }
+    
+    // Allocate storage
+    terrain_points.resize(contact_count);
+    contact_bone_indices.resize(contact_count);
+    
+    // Second pass: extract contact points
+    int contact_idx = 0;
+    for (int frame = 0; frame < db.nframes(); frame++)
+    {
+        // Get hip position for reference
+        vec3 hip_position;
+        quat hip_rotation;
+        forward_kinematics(
+            hip_position,
+            hip_rotation,
+            db.bone_positions(frame),
+            db.bone_rotations(frame),
+            db.bone_parents,
+            Bone_Hips);
+        
+        // Extract left foot contact points
+        if (db.contact_states(frame, 0))
+        {
+            vec3 foot_position;
+            quat foot_rotation;
+            forward_kinematics(
+                foot_position,
+                foot_rotation,
+                db.bone_positions(frame),
+                db.bone_rotations(frame),
+                db.bone_parents,
+                left_foot);
+            
+            terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
+            contact_bone_indices(contact_idx) = left_foot;
+            contact_idx++;
+        }
+        
+        // Extract right foot contact points
+        if (db.contact_states(frame, 1))
+        {
+            vec3 foot_position;
+            quat foot_rotation;
+            forward_kinematics(
+                foot_position,
+                foot_rotation,
+                db.bone_positions(frame),
+                db.bone_rotations(frame),
+                db.bone_parents,
+                right_foot);
+            
+            terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
+            contact_bone_indices(contact_idx) = right_foot;
+            contact_idx++;
+        }
+    }
+}
+
+// Query terrain height at a given (x, y) position using nearest neighbor
+// Returns the height of the nearest foot contact point
+float query_terrain_height(
+    const array1d<vec3>& terrain_points,
+    float query_x,
+    float query_y)
+{
+    if (terrain_points.size == 0)
+        return 0.0f;
+    
+    float min_distance_sq = FLT_MAX;
+    float height = 0.0f;
+    
+    for (int i = 0; i < terrain_points.size; i++)
+    {
+        float dx = terrain_points(i).x - query_x;
+        float dy = terrain_points(i).y - query_y;
+        float distance_sq = dx * dx + dy * dy;
+        
+        if (distance_sq < min_distance_sq)
+        {
+            min_distance_sq = distance_sq;
+            height = terrain_points(i).z;
+        }
+    }
+    
+    return height;
+}
+
+void compute_terrain_height_feature(database& db, int& offset, int bone, float weight = 1.0f)
+{
+    // Build terrain height map from all foot contact points
+    array1d<vec3> terrain_points;
+    array1d<int> contact_bone_indices;
+    build_terrain_height_map(db, terrain_points, contact_bone_indices);
+    
+    // Sample terrain height at future frames
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        // Get hip position and rotation for current frame
+        vec3 hip_position;
+        quat hip_rotation;
+        forward_kinematics(
+            hip_position,
+            hip_rotation,
+            db.bone_positions(i),
+            db.bone_rotations(i),
+            db.bone_parents,
+            Bone_Hips);
+        
+        // Sample at 4 future time points
+        int t0 = database_index_clamp(db, i, 0);
+        int t1 = database_index_clamp(db, i, 15);
+        int t2 = database_index_clamp(db, i, 30);
+        int t3 = database_index_clamp(db, i, 45);
+        
+        // Get toe positions at future frames
+        vec3 future_hip_pos0;
+        vec3 future_hip_pos1;
+        vec3 future_hip_pos2;
+        vec3 future_hip_pos3;
+
+        quat temp_rot;
+
+        // FK to get global position of toe
+        forward_kinematics(future_hip_pos0, temp_rot, 
+            db.bone_positions(t0), db.bone_rotations(t0), 
+            db.bone_parents, bone);
+        
+        forward_kinematics(future_hip_pos1, temp_rot, 
+            db.bone_positions(t1), db.bone_rotations(t1), 
+            db.bone_parents, bone);
+        
+        forward_kinematics(future_hip_pos2, temp_rot, 
+            db.bone_positions(t2), db.bone_rotations(t2), 
+            db.bone_parents, bone);
+        
+        forward_kinematics(future_hip_pos3, temp_rot, 
+            db.bone_positions(t3), db.bone_rotations(t3), 
+            db.bone_parents, bone);
+        
+        // Query terrain height relative to current hip position
+        // Transform query positions to match terrain map (x->x, z->y, y->height)
+        float height0 = query_terrain_height(terrain_points, future_hip_pos0.x, future_hip_pos0.z);
+        float height1 = query_terrain_height(terrain_points, future_hip_pos1.x, future_hip_pos1.z);
+        float height2 = query_terrain_height(terrain_points, future_hip_pos2.x, future_hip_pos2.z);
+        float height3 = query_terrain_height(terrain_points, future_hip_pos3.x, future_hip_pos3.z);
+        
+        // Store height relative to current hip height
+        db.features(i, offset + 0) = height0 - hip_position.y;
+        db.features(i, offset + 1) = height1 - hip_position.y;
+        db.features(i, offset + 2) = height2 - hip_position.y;
+        db.features(i, offset + 3) = height3 - hip_position.y;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 4, weight);
+
+    offset += 4;
+}
+
 
 // Build the Motion Matching search acceleration structure. Here we
 // just use axis aligned bounding boxes regularly spaced at BOUND_SM_SIZE
@@ -532,7 +711,8 @@ void database_build_matching_features(
     const float feature_weight_foot_velocity,
     const float feature_weight_hip_velocity,
     const float feature_weight_trajectory_positions,
-    const float feature_weight_trajectory_directions)
+    const float feature_weight_trajectory_directions,
+    const float feature_weight_terrain_heights)
 {
     int nfeatures = 
         3 + // Left Foot Position
@@ -541,7 +721,8 @@ void database_build_matching_features(
         3 + // Right Foot Velocity
         3 + // Hip Velocity
         6 + // Trajectory Positions 2D
-        6 ; // Trajectory Directions 2D
+        6 + // Trajectory Directions 2D
+        8; // Terrain Heights
         
     db.features.resize(db.nframes(), nfeatures);
     db.features_offset.resize(nfeatures);
@@ -555,6 +736,8 @@ void database_build_matching_features(
     compute_bone_velocity_feature(db, offset, Bone_Hips, feature_weight_hip_velocity);
     compute_trajectory_position_feature(db, offset, feature_weight_trajectory_positions);
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
+    compute_terrain_height_feature(db, offset, Bone_LeftFoot, feature_weight_terrain_heights);
+    compute_terrain_height_feature(db, offset, Bone_RightFoot, feature_weight_terrain_heights);
     
     assert(offset == nfeatures);
     

@@ -568,6 +568,23 @@ void query_compute_trajectory_direction_feature(
     offset += 6;
 }
 
+// Add terrain height features to query
+void query_compute_terrain_height_feature(
+    slice1d<float> query,
+    int& offset,
+    const slice1d<vec2> future_terrain_heights)
+{
+    // For each time sample (0, 15, 30, 45 frames)
+    // Add both left and right toe terrain heights
+    for (int i = 0; i < 4; i++)
+    {
+        query(offset + i * 2 + 0) = future_terrain_heights(i).x; // Left toe height
+        query(offset + i * 2 + 1) = future_terrain_heights(i).y; // Right toe height
+    }
+    
+    offset += 8;
+}
+
 //--------------------------------------
 
 // Collide against the obscales which are
@@ -1238,10 +1255,25 @@ int main(void)
     
     // Ground Plane
     
-    Shader ground_plane_shader = LoadShader("./resources/shaders/checkerboard.vs", "./resources/shaders/checkerboard.fs");
-    Mesh ground_plane_mesh = GenMeshPlane(20.0f, 20.0f, 10, 10);
-    Model ground_plane_model = LoadModelFromMesh(ground_plane_mesh);
-    ground_plane_model.materials[0].shader = ground_plane_shader;
+    // Try to load .glb model first, fallback to procedural plane
+    const char* ground_glb_path = "BluePlaneGround.glb";
+    Model ground_plane_model;
+    Shader ground_plane_shader = { 0 };
+    bool using_glb_ground = false;
+    
+    if (FileExists(ground_glb_path))
+    {
+        ground_plane_model = LoadModel(ground_glb_path);
+        using_glb_ground = true;
+    }
+    else
+    {
+        // Fallback to procedural ground plane with checkerboard shader
+        ground_plane_shader = LoadShader("./resources/shaders/checkerboard.vs", "./resources/shaders/checkerboard.fs");
+        Mesh ground_plane_mesh = GenMeshPlane(20.0f, 20.0f, 10, 10);
+        ground_plane_model = LoadModelFromMesh(ground_plane_mesh);
+        ground_plane_model.materials[0].shader = ground_plane_shader;
+    }
     
     // Character
     
@@ -1263,6 +1295,7 @@ int main(void)
     float feature_weight_hip_velocity = 1.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
+    float feature_weight_terrain_heights = 1.5f;
     
     database_build_matching_features(
         db,
@@ -1270,7 +1303,8 @@ int main(void)
         feature_weight_foot_velocity,
         feature_weight_hip_velocity,
         feature_weight_trajectory_positions,
-        feature_weight_trajectory_directions);
+        feature_weight_trajectory_directions,
+        feature_weight_terrain_heights);
         
     database_save_matching_features(db, "./resources/bin/features.bin");
    
@@ -1488,6 +1522,16 @@ int main(void)
     array1d<float> latent_proj(32); latent_proj.zero();
     array1d<float> latent_curr(32); latent_curr.zero();
     
+    // Future toe positions at 4 time samples (0, 15, 30, 45 frames)
+    // Contains 3 frames x 2 toes x 2D positions for predicting terrain
+    array1d<vec3> future_toe_position(4);
+    for (int i = 0; i < 4; i++) { future_toe_position(i) = vec3(0.0f, 0.0f, 0.0f); }
+    
+    // Future terrain heights at 4 time samples (0, 15, 30, 45 frames)  
+    // Each vec2: x=left toe height, y=right toe height (all relative to hips)
+    array1d<vec2> future_terrain_heights(4);
+    for (int i = 0; i < 4; i++) { future_terrain_heights(i) = vec2(0.0f, 0.0f); }
+    
     // Go
 
     float dt = 1.0f / 60.0f;
@@ -1602,6 +1646,105 @@ int main(void)
             20.0f * dt,
             obstacles_positions,
             obstacles_scales);
+        
+        // Compute future toe terrain heights relative to hips
+        // 4 time samples: current (0), +15, +30, +45 frames
+        // future_toe_position contains: 3 frames x 2 toes x 2D positions
+        {
+            float hip_height = bone_positions(0).y;
+            
+            // Store relative heights for both toes at each time sample
+            for (int time_idx = 0; time_idx < 4; time_idx++)
+            {
+                vec3 left_toe_pos;
+                vec3 right_toe_pos;
+                
+                if (time_idx == 0)
+                {
+                    // Current frame: get actual toe bone positions
+                    forward_kinematics_velocity(
+                        left_toe_pos,
+                        bone_velocities(contact_bones(0)),
+                        bone_rotations(contact_bones(0)),
+                        bone_angular_velocities(contact_bones(0)),
+                        bone_positions,
+                        bone_velocities,
+                        bone_rotations,
+                        bone_angular_velocities,
+                        db.bone_parents,
+                        contact_bones(0));
+                    
+                    forward_kinematics_velocity(
+                        right_toe_pos,
+                        bone_velocities(contact_bones(1)),
+                        bone_rotations(contact_bones(1)),
+                        bone_angular_velocities(contact_bones(1)),
+                        bone_positions,
+                        bone_velocities,
+                        bone_rotations,
+                        bone_angular_velocities,
+                        db.bone_parents,
+                        contact_bones(1));
+                }
+                else
+                {
+                    // Future frames: extract from future_toe_position
+                    // future_toe_position(i) contains positions for frame i+1
+                    // Assuming: x,y = left toe 2D (x,z), z = offset to get right toe data
+                    int future_idx = time_idx - 1;
+                    
+                    // Extract left toe position (x, z from 2D)
+                    left_toe_pos = vec3(
+                        future_toe_position(future_idx).x, 
+                        0.0f, 
+                        future_toe_position(future_idx).y);
+                    
+                    // Extract right toe position from next elements
+                    // If structured as flattened: [left_x, left_z, right_x] [right_z, ...]
+                    if (future_idx * 2 + 1 < 4)
+                    {
+                        right_toe_pos = vec3(
+                            future_toe_position(future_idx).z,
+                            0.0f,
+                            future_toe_position(future_idx * 2 + 1).x);
+                    }
+                    else
+                    {
+                        // Fallback: mirror left toe position
+                        right_toe_pos = left_toe_pos;
+                    }
+                }
+                
+                // Raycast from above to find terrain height
+                float left_terrain_height = 0.0f;
+                float right_terrain_height = 0.0f;
+                
+                // Cast rays from 10 units above down to 10 units below
+                Ray left_ray = { to_Vector3(left_toe_pos + vec3(0, 10, 0)), {0, -1, 0} };
+                Ray right_ray = { to_Vector3(right_toe_pos + vec3(0, 10, 0)), {0, -1, 0} };
+                
+                // Check collision with ground plane meshes
+                for (int i = 0; i < ground_plane_model.meshCount; i++)
+                {
+                    RayCollision left_collision = GetRayCollisionMesh(left_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+                    if (left_collision.hit && (left_terrain_height == 0.0f || left_collision.point.y > left_terrain_height))
+                    {
+                        left_terrain_height = left_collision.point.y;
+                    }
+                    
+                    RayCollision right_collision = GetRayCollisionMesh(right_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+                    if (right_collision.hit && (right_terrain_height == 0.0f || right_collision.point.y > right_terrain_height))
+                    {
+                        right_terrain_height = right_collision.point.y;
+                    }
+                }
+                
+                // Store relative to hip height
+                future_terrain_heights(time_idx) = vec2(
+                    left_terrain_height - hip_height,
+                    right_terrain_height - hip_height);
+            }
+        }
            
         // Make query vector for search.
         // In theory this only needs to be done when a search is 
@@ -1621,11 +1764,12 @@ int main(void)
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
         query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
         query_compute_trajectory_direction_feature(query, offset, bone_rotations(0), trajectory_rotations);
+        query_compute_terrain_height_feature(query, offset, future_terrain_heights);
         
         assert(offset == db.nfeatures());
 
         // Check if we reached the end of the current anim
-        bool end_of_anim = database_trajectory_index_clamp(db, frame_index, 1) == frame_index;
+        bool end_of_anim = database_index_clamp(db, frame_index, 1) == frame_index;
         
         // Do we need to search?
         if (force_search || search_timer <= 0.0f || end_of_anim)
@@ -1659,6 +1803,7 @@ int main(void)
                         trns_bone_rotations,
                         trns_bone_angular_velocities,
                         trns_bone_contacts,
+                        future_toe_position,
                         decompressor_evaluation,
                         features_proj,
                         latent_proj,
@@ -1767,6 +1912,7 @@ int main(void)
                 curr_bone_rotations,
                 curr_bone_angular_velocities,
                 curr_bone_contacts,
+                future_toe_position,
                 decompressor_evaluation,
                 features_curr,
                 latent_curr,
@@ -2350,7 +2496,7 @@ int main(void)
         
         //---------
         
-        GuiGroupBox((Rectangle){ 20, 20, 290, 190 }, "feature weights");
+        GuiGroupBox((Rectangle){ 20, 20, 290, 220 }, "feature weights");
         
         GuiSliderBar(
             (Rectangle){ 150, 30, 120, 20 }, 
@@ -2381,8 +2527,14 @@ int main(void)
             "trajectory directions", 
             TextFormat("%5.3f", feature_weight_trajectory_directions), 
             &feature_weight_trajectory_directions, 0.001f, 3.0f);
+        
+        GuiSliderBar(
+            (Rectangle){ 150, 180, 120, 20 }, 
+            "terrain heights", 
+            TextFormat("%5.3f", feature_weight_terrain_heights), 
+            &feature_weight_terrain_heights, 0.001f, 3.0f);
             
-        if (GuiButton((Rectangle){ 150, 180, 120, 20 }, "rebuild database"))
+        if (GuiButton((Rectangle){ 150, 210, 120, 20 }, "rebuild database"))
         {
             database_build_matching_features(
                 db,
@@ -2390,7 +2542,8 @@ int main(void)
                 feature_weight_foot_velocity,
                 feature_weight_hip_velocity,
                 feature_weight_trajectory_positions,
-                feature_weight_trajectory_directions);
+                feature_weight_trajectory_directions,
+                feature_weight_terrain_heights);
         }
         
         //---------
@@ -2543,7 +2696,10 @@ int main(void)
     UnloadModel(character_model);
     UnloadModel(ground_plane_model);
     UnloadShader(character_shader);
-    UnloadShader(ground_plane_shader);
+    if (!using_glb_ground)
+    {
+        UnloadShader(ground_plane_shader);
+    }
 
     CloseWindow();
 
