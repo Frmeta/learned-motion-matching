@@ -17,7 +17,7 @@ void decompressor_evaluate(
     slice1d<quat> bone_rotations,
     slice1d<vec3> bone_angular_velocities,
     slice1d<bool> bone_contacts,
-    slice1d<vec3> future_toe_positions,
+    slice1d<vec3> future_toe_positions ,
     nnet_evaluation& evaluation,
     const slice1d<float> features,
     const slice1d<float> latent,

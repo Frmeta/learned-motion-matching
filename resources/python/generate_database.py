@@ -33,11 +33,13 @@ def animation_mirror(lrot, lpos, names, parents):
 
 files = [
     # We just use a small section of this clip for the standing idle
-    ('resources/bvh/pushAndStumble1_subject2.bvh', 194,  351), 
+    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351), 
     # Running
-    ('resources/bvh/run1_subject2.bvh',             90, 7086), 
+    ('resources/bvh/run1_subject5.bvh',             90, 7086), 
     # Walking
-    ('resources/bvh/walk1_subject2.bvh',            80, 4000), # decrease file size (original: 7791)
+    ('resources/bvh/walk1_subject5.bvh',            80, 4000), # decrease file size (original: 7791)
+    # Terrain
+    ('resources/bvh/obstacles1_subject2.bvh',            231, 4972),
 ]
 
 """ We will accumulate data in these lists """
