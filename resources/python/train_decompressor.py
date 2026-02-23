@@ -66,6 +66,7 @@ if __name__ == '__main__':
     contacts = database['contact_states']
     range_starts = database['range_starts']
     range_stops = database['range_stops']
+    future_toe_positions = database['future_toe_positions']
     
     X = load_features('resources/bin/features.bin')['features'].astype(np.float32)
     Ypos = database['bone_positions'].astype(np.float32)
@@ -91,30 +92,6 @@ if __name__ == '__main__':
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.set_num_threads(1)
-    
-    # Helper function to clamp frame index to animation range
-    def database_index_clamp(frame, offset, range_starts, range_stops):
-        """
-        Clamp a frame index with offset to stay within the animation range
-        that contains the given frame.
-        
-        Args:
-            frame: Current frame index
-            offset: Offset to add to frame
-            range_starts: Array of range start indices
-            range_stops: Array of range stop indices
-            
-        Returns:
-            Clamped frame index within the appropriate range
-        """
-        # Find which range this frame belongs to
-        for i in range(len(range_starts)):
-            if frame >= range_starts[i] and frame < range_stops[i]:
-                # Clamp the offset frame to stay within this range
-                return min(frame + offset, range_stops[i] - 1)
-        
-        # Should never reach here if frame is valid
-        return frame
     
     # Compute world space
     
@@ -146,31 +123,9 @@ if __name__ == '__main__':
     
     Yextra = contacts.astype(np.float32)
     
-    # Compute future toe positions (XY only) at 15, 30, 45 frames ahead
+    # Load future toe positions from database (task-specific output o*)
     # These are used for terrain height sampling at runtime
-    
-    left_toe_idx = 5   # Bone_LeftToe
-    right_toe_idx = 9  # Bone_RightToe
-    
-    # Initialize future toe positions array
-    Yfuture_toe_xy = np.zeros([nframes, 12], dtype=np.float32)  # 3 frames × 2 toes × 2D
-    
-    # For each frame, compute future toe positions clamped to range boundaries
-    for i in range(nframes):
-        # Get clamped future frame indices using database_index_clamp
-        future_frames = [
-            database_index_clamp(i, 15, range_starts, range_stops),
-            database_index_clamp(i, 30, range_starts, range_stops),
-            database_index_clamp(i, 45, range_starts, range_stops),
-        ]
-        
-        # Extract XY positions (x, z in world space) of toes at future frames
-        # Store in character space (relative to root)
-        for t, future_frame in enumerate(future_frames):
-            Yfuture_toe_xy[i, t*4 + 0] = Qpos[future_frame, left_toe_idx, 0]   # left toe X
-            Yfuture_toe_xy[i, t*4 + 1] = Qpos[future_frame, left_toe_idx, 2]   # left toe Z
-            Yfuture_toe_xy[i, t*4 + 2] = Qpos[future_frame, right_toe_idx, 0]  # right toe X
-            Yfuture_toe_xy[i, t*4 + 3] = Qpos[future_frame, right_toe_idx, 2]  # right toe Z
+    Yfuture_toe_xy = future_toe_positions.astype(np.float32)
     
     # Compute means/stds
     
@@ -226,6 +181,7 @@ if __name__ == '__main__':
         Yrvel.mean(axis=0).ravel(),
         Yrang.mean(axis=0).ravel(),
         Yextra.mean(axis=0).ravel(),
+        Yfuture_toe_xy.mean(axis=0).ravel(),
     ]).astype(np.float32))
     
     compressor_std_in = torch.as_tensor(np.hstack([
@@ -240,6 +196,7 @@ if __name__ == '__main__':
         Yrvel_scale.repeat(3),
         Yrang_scale.repeat(3),
         Yextra_scale.repeat(nextra),
+        Yfuture_toe_xy_scale.repeat(12),
     ]).astype(np.float32))
     
     # Make PyTorch tensors
@@ -289,6 +246,7 @@ if __name__ == '__main__':
                 Yrvel.reshape([1, nframes, -1]),
                 Yrang.reshape([1, nframes, -1]),
                 Yextra.reshape([1, nframes, -1]),
+                Yfuture_toe_xy.reshape([1, nframes, -1]),
             ], dim=-1) - compressor_mean_in) / compressor_std_in)[0]
             
             # Write latent variables
@@ -339,6 +297,7 @@ if __name__ == '__main__':
                 Ygnd_rvel.reshape([1, stop-start, -1]),
                 Ygnd_rang.reshape([1, stop-start, -1]),
                 Ygnd_extra.reshape([1, stop-start, -1]),
+                Ygnd_future_toe_xy.reshape([1, stop-start, -1]),
             ], dim=-1) - compressor_mean_in) / compressor_std_in)
             
             # Pass through decompressor
@@ -496,6 +455,7 @@ if __name__ == '__main__':
             Ygnd_rvel.reshape([batchsize, window, -1]),
             Ygnd_rang.reshape([batchsize, window, -1]),
             Ygnd_extra.reshape([batchsize, window, -1]),
+            Ygnd_future_toe_xy.reshape([batchsize, window, -1]),
         ], dim=-1) - compressor_mean_in) / compressor_std_in)
             
         # Decode

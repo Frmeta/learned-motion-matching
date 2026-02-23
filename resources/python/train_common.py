@@ -30,6 +30,10 @@ def load_database(filename):
         nframes, ncontacts = struct.unpack('II', f.read(8))
         contact_states = np.frombuffer(f.read(nframes*ncontacts), dtype=np.int8, count=nframes*ncontacts).reshape([nframes, ncontacts])
         
+        # Read future toe positions (task-specific output o*)
+        nframes, nfuture_toe = struct.unpack('II', f.read(8))
+        future_toe_positions = np.frombuffer(f.read(nframes*nfuture_toe*4), dtype=np.float32, count=nframes*nfuture_toe).reshape([nframes, nfuture_toe])
+        
     return {
         'bone_positions': bone_positions,
         'bone_rotations': bone_rotations,
@@ -39,6 +43,7 @@ def load_database(filename):
         'range_starts': range_starts,
         'range_stops': range_stops,
         'contact_states': contact_states,
+        'future_toe_positions': future_toe_positions,
     }
         
 

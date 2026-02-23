@@ -36,6 +36,8 @@ struct database
     
     array2d<bool> contact_states;
     
+    array2d<float> future_toe_positions;  // 12 floats per frame (6 vec2: L15, R15, L30, R30, L45, R45)
+    
     array2d<float> bound_sm_min;
     array2d<float> bound_sm_max;
     array2d<float> bound_lr_min;
@@ -63,6 +65,8 @@ void database_load(database& db, const char* filename)
     array1d_read(db.range_stops, f);
     
     array2d_read(db.contact_states, f);
+    
+    array2d_read(db.future_toe_positions, f);  // Load precomputed future toe positions
     
     fclose(f);
 }
@@ -553,9 +557,9 @@ void build_terrain_height_map(
     array1d<int>& contact_bone_indices, // bone index for each contact point
     array1d<int>& contact_frame_indices) // frame index for each contact point
 {
-    // Collect all foot contact points (LeftFoot=4, RightFoot=8)
-    int left_foot = Bone_LeftFoot;
-    int right_foot = Bone_RightFoot;
+    // Collect all foot contact points
+    int left_toe = Bone_LeftToe;
+    int right_toe = Bone_RightToe;
     
     int contact_count = 0;
     
@@ -597,10 +601,10 @@ void build_terrain_height_map(
                 db.bone_positions(frame),
                 db.bone_rotations(frame),
                 db.bone_parents,
-                left_foot);
+                left_toe);
             
             terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
-            contact_bone_indices(contact_idx) = left_foot;
+            contact_bone_indices(contact_idx) = left_toe;
             contact_frame_indices(contact_idx) = frame;
             contact_idx++;
         }
@@ -616,10 +620,10 @@ void build_terrain_height_map(
                 db.bone_positions(frame),
                 db.bone_rotations(frame),
                 db.bone_parents,
-                right_foot);
+                right_toe);
             
             terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
-            contact_bone_indices(contact_idx) = right_foot;
+            contact_bone_indices(contact_idx) = right_toe;
             contact_frame_indices(contact_idx) = frame;
             contact_idx++;
         }

@@ -205,6 +205,67 @@ range_stops = np.array(range_stops).astype(np.int32)
 
 contact_states = np.concatenate(contact_states, axis=0).astype(np.uint8)
 
+""" Compute Future Toe Positions for Rough Terrain Navigation """
+
+print("Computing Future Toe Positions...")
+
+# Get total number of frames
+nframes = bone_positions.shape[0]
+
+# Get toe joint indices
+left_toe_idx = bone_names.index("LeftToe")
+right_toe_idx = bone_names.index("RightToe")
+
+# Compute global positions for all frames
+global_rotations, global_positions = quat.fk(bone_rotations, bone_positions, bone_parents)
+
+# Initialize future toe positions array (12D per frame: 2 toes × 3 timeframes × 2D)
+future_toe_positions = np.zeros([nframes, 12], dtype=np.float32)
+
+# Define look-ahead frames at 60Hz (15, 30, 45 frames = 0.25s, 0.5s, 0.75s)
+look_ahead_frames = [15, 30, 45]
+
+# For each frame, compute future toe positions in current frame's local space
+for i in range(nframes):
+    
+    # Find which animation range this frame belongs to
+    current_range_idx = -1
+    for r in range(len(range_starts)):
+        if i >= range_starts[r] and i < range_stops[r]:
+            current_range_idx = r
+            break
+    
+    # Get current frame's root rotation and position
+    current_root_rot = global_rotations[i, 0]
+    current_root_pos = global_positions[i, 0]
+    
+    # For each look-ahead time
+    for t_idx, offset in enumerate(look_ahead_frames):
+        future_frame = i + offset
+        
+        # Clamp to current animation range to handle clip boundaries
+        if current_range_idx != -1:
+            future_frame = min(future_frame, range_stops[current_range_idx] - 1)
+        else:
+            future_frame = min(future_frame, nframes - 1)
+        
+        # Get global toe positions at future frame
+        left_toe_global_pos = global_positions[future_frame, left_toe_idx]
+        right_toe_global_pos = global_positions[future_frame, right_toe_idx]
+        
+        # Transform to current frame's local space (character-relative)
+        left_toe_local = quat.mul_vec(quat.inv(current_root_rot), left_toe_global_pos - current_root_pos)
+        right_toe_local = quat.mul_vec(quat.inv(current_root_rot), right_toe_global_pos - current_root_pos)
+        
+        # Extract 2D ground-plane coordinates (X and Z, ignoring Y/height)
+        # Store in format: [L_x, L_z, R_x, R_z] for each timeframe
+        future_toe_positions[i, t_idx * 4 + 0] = left_toe_local[0]   # Left toe X
+        future_toe_positions[i, t_idx * 4 + 1] = left_toe_local[2]   # Left toe Z
+        future_toe_positions[i, t_idx * 4 + 2] = right_toe_local[0]  # Right toe X
+        future_toe_positions[i, t_idx * 4 + 3] = right_toe_local[2]  # Right toe Z
+
+print("Future Toe Positions Computed: %d frames × 12 values" % nframes)
+
 """ Visualize Stats """
 
 if True:
@@ -405,6 +466,7 @@ with open('resources/bin/database.bin', 'wb') as f:
     nbones = bone_positions.shape[1]
     nranges = range_starts.shape[0]
     ncontacts = contact_states.shape[1]
+    nfuture_toe = future_toe_positions.shape[1]  # Should be 12
     
     f.write(struct.pack('II', nframes, nbones) + bone_positions.ravel().tobytes())
     f.write(struct.pack('II', nframes, nbones) + bone_velocities.ravel().tobytes())
@@ -416,6 +478,11 @@ with open('resources/bin/database.bin', 'wb') as f:
     f.write(struct.pack('I', nranges) + range_stops.ravel().tobytes())
     
     f.write(struct.pack('II', nframes, ncontacts) + contact_states.ravel().tobytes())
+    
+    # Write future toe positions (task-specific output o*)
+    f.write(struct.pack('II', nframes, nfuture_toe) + future_toe_positions.ravel().tobytes())
+
+print("Database written successfully with future toe positions!")
 
     
     

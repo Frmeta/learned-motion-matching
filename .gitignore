@@ -8,3 +8,5 @@ controller.wasm
 *.bvh
 *.log
 resources/runs*
+
+local/

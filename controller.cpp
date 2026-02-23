@@ -18,6 +18,7 @@
 
 #include <initializer_list>
 #include <functional>
+#include <iostream> // TODO: Remove this when not used
 
 //--------------------------------------
 
@@ -574,12 +575,17 @@ void query_compute_terrain_height_feature(
     int& offset,
     const slice1d<vec2> future_terrain_heights)
 {
-    // For each time sample (0, 15, 30, 45 frames)
-    // Add both left and right toe terrain heights
+    // Store all left toe heights first (4 time samples)
     for (int i = 0; i < 4; i++)
     {
-        query(offset + i * 2 + 0) = future_terrain_heights(i).x; // Left toe height
-        query(offset + i * 2 + 1) = future_terrain_heights(i).y; // Right toe height
+        query(offset + i) = future_terrain_heights(i).x; // Left toe heights at t0, t1, t2, t3
+        // std::cout << future_terrain_heights(i).x << std::endl;
+    }
+    
+    // Then all right toe heights (4 time samples)
+    for (int i = 0; i < 4; i++)
+    {
+        query(offset + 4 + i) = future_terrain_heights(i).y; // Right toe heights at t0, t1, t2, t3
     }
     
     offset += 8;
@@ -985,7 +991,15 @@ void draw_axis(const vec3 pos, const quat rot, const float scale = 1.0f)
     DrawLine3D(to_Vector3(pos), to_Vector3(axis2), BLUE);
 }
 
-void draw_features(const slice1d<float> features, const vec3 pos, const quat rot, const Color color)
+void draw_features(
+    const slice1d<float> features, 
+    const vec3 pos, 
+    const quat rot, 
+    const Color color,
+    const slice1d<vec2> future_toe_position,
+    const vec3 hip_global_position,
+    const slice1d<vec3> global_bone_positions,
+    const slice1d<int> contact_bones)
 {
     vec3 lfoot_pos = quat_mul_vec3(rot, vec3(features( 0), features( 1), features( 2))) + pos;
     vec3 rfoot_pos = quat_mul_vec3(rot, vec3(features( 3), features( 4), features( 5))) + pos;
@@ -1010,7 +1024,61 @@ void draw_features(const slice1d<float> features, const vec3 pos, const quat rot
     
     DrawLine3D(to_Vector3(traj0_pos), to_Vector3(traj0_pos + 0.25f * traj0_dir), color);
     DrawLine3D(to_Vector3(traj1_pos), to_Vector3(traj1_pos + 0.25f * traj1_dir), color);
-    DrawLine3D(to_Vector3(traj2_pos), to_Vector3(traj2_pos + 0.25f * traj2_dir), color); 
+    DrawLine3D(to_Vector3(traj2_pos), to_Vector3(traj2_pos + 0.25f * traj2_dir), color);
+    
+    // Draw terrain height features (8 values: 4 time samples x 2 toes)
+    // Features 27-30: left toe terrain heights at t0, t1, t2, t3
+    // Features 31-34: right toe terrain heights at t0, t1, t2, t3
+    Color terrain_colors[4] = {
+        ColorAlpha(color, 0.1f),    // Current frame - full opacity
+        ColorAlpha(color, 0.2f),   // +15 frames
+        ColorAlpha(color, 0.3f),    // +30 frames
+        ColorAlpha(color, 1.0f)    // +45 frames
+    };
+    
+    for (int i = 0; i < 4; i++)
+    {
+        float left_terrain_height = features(27 + i);        // Left toe heights: 27, 28, 29, 30
+        float right_terrain_height = features(31 + i);       // Right toe heights: 31, 32, 33, 34
+        
+        vec3 left_toe_xz;
+        vec3 right_toe_xz;
+        
+        if (i == 0)
+        {
+            // Current frame: use actual global toe positions
+            left_toe_xz = vec3(global_bone_positions(contact_bones(0)).x, 0, global_bone_positions(contact_bones(0)).z);
+            right_toe_xz = vec3(global_bone_positions(contact_bones(1)).x, 0, global_bone_positions(contact_bones(1)).z);
+        }
+        else
+        {
+            // Future frames: use future_toe_position array
+            // future_toe_position stores [left0, right0, left1, right1, left2, right2]
+            // for frames +15, +30, +45 (indices 1, 2, 3 map to array indices 0, 1, 2)
+            int future_idx = i - 1;
+            left_toe_xz = vec3(future_toe_position(future_idx * 2 + 0).x, 0, future_toe_position(future_idx * 2 + 0).y);
+            right_toe_xz = vec3(future_toe_position(future_idx * 2 + 1).x, 0, future_toe_position(future_idx * 2 + 1).y);
+        }
+
+        // Relative to root
+        left_toe_xz = quat_mul_vec3(rot, left_toe_xz) + pos;
+        right_toe_xz = quat_mul_vec3(rot, right_toe_xz) + pos;
+        
+        // Position spheres at toe XZ position with Y = terrain_height + hip_height
+        vec3 left_terrain_pos = vec3(left_toe_xz.x, hip_global_position.y + left_terrain_height, left_toe_xz.z);
+        vec3 right_terrain_pos = vec3(right_toe_xz.x, hip_global_position.y + right_terrain_height, right_toe_xz.z);
+        
+        // Draw small spheres at terrain height positions
+        DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, terrain_colors[i]);
+        DrawSphereWires(to_Vector3(right_terrain_pos), 0.03f, 4, 6, terrain_colors[i]);
+        
+        // Draw vertical lines from toe XZ position at hip height down to terrain
+        vec3 left_hip_level = vec3(left_toe_xz.x, hip_global_position.y, left_toe_xz.z);
+        vec3 right_hip_level = vec3(right_toe_xz.x, hip_global_position.y, right_toe_xz.z);
+        
+        DrawLine3D(to_Vector3(left_hip_level), to_Vector3(left_terrain_pos), terrain_colors[i]);
+        DrawLine3D(to_Vector3(right_hip_level), to_Vector3(right_terrain_pos), terrain_colors[i]);
+    }
 }
 
 void draw_trajectory(
@@ -1295,7 +1363,7 @@ int main(void)
     float feature_weight_hip_velocity = 1.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
-    float feature_weight_terrain_heights = 0.8f;
+    float feature_weight_terrain_heights = 1.0f;
     
     database_build_matching_features(
         db,
@@ -1397,7 +1465,7 @@ int main(void)
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
     
-    vec3 simulation_position;
+    vec3 simulation_position = vec3(0.0f, 1.2f, 0.0f);
     vec3 simulation_velocity;
     vec3 simulation_acceleration;
     quat simulation_rotation;
@@ -1651,7 +1719,18 @@ int main(void)
         // 4 time samples: current (0), +15, +30, +45 frames
         // future_toe_position contains: 3 frames x 2 toes x 2D positions
         {
-            float hip_height = bone_positions(0).y;
+            // Compute forward kinematics to get hip global position
+            global_bone_computed.zero();
+            forward_kinematics_partial(
+                global_bone_positions,
+                global_bone_rotations,
+                global_bone_computed,
+                bone_positions,
+                bone_rotations,
+                db.bone_parents,
+                Bone_Hips);
+            
+            float hip_height = global_bone_positions(Bone_Hips).y;
             
             // Store relative heights for both toes at each time sample
             for (int time_idx = 0; time_idx < 4; time_idx++)
@@ -1730,9 +1809,15 @@ int main(void)
                 }
                 
                 // Store relative to hip height
+                
                 future_terrain_heights(time_idx) = vec2(
                     left_terrain_height - hip_height,
                     right_terrain_height - hip_height);
+
+                std::cout << "LeftToe Terrain World Terrain height: " << left_terrain_height << std::endl;
+                std::cout << "Hip's world position: " << hip_height << std::endl;
+                std::cout << "Player's world position: " << bone_positions(0).x << " " << bone_positions(0).y << " " << bone_positions(0).z << std::endl;
+                std::cout << std::endl;
             }
         }
            
@@ -1922,6 +2007,16 @@ int main(void)
             curr_bone_rotations = db.bone_rotations(frame_index);
             curr_bone_angular_velocities = db.bone_angular_velocities(frame_index);
             curr_bone_contacts = db.contact_states(frame_index);
+            
+            // Retrieve precomputed future_toe_position from database
+            // Database stores 12 floats per frame: [L15_x, L15_z, R15_x, R15_z, L30_x, L30_z, R30_x, R30_z, L45_x, L45_z, R45_x, R45_z]
+            // Convert to 6 vec2 values: [left0, right0, left1, right1, left2, right2]
+            for (int i = 0; i < 6; i++)
+            {
+                future_toe_position(i) = vec2(
+                    db.future_toe_positions(frame_index, i * 2 + 0),
+                    db.future_toe_positions(frame_index, i * 2 + 1));
+            }
         }
         
         // Update inertializer
@@ -2317,13 +2412,14 @@ int main(void)
             global_bone_rotations,
             db.bone_parents);
         
-        DrawModel(character_model, (Vector3){0.0f, 1.2f, 0.0f}, 1.0f, RAYWHITE);
+        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
         
         // Draw matched features
         
         array1d<float> current_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
         denormalize_features(current_features, db.features_offset, db.features_scale);        
-        draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON);
+        draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON,
+            future_toe_position, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones);
         
         // Draw Simuation Bone
         
