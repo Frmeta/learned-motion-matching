@@ -997,6 +997,7 @@ void draw_features(
     const quat rot, 
     const Color color,
     const slice1d<vec2> future_toe_position,
+    const slice1d<vec2> future_terrain_heights,
     const vec3 hip_global_position,
     const slice1d<vec3> global_bone_positions,
     const slice1d<int> contact_bones)
@@ -1030,16 +1031,17 @@ void draw_features(
     // Features 27-30: left toe terrain heights at t0, t1, t2, t3
     // Features 31-34: right toe terrain heights at t0, t1, t2, t3
     Color terrain_colors[4] = {
-        ColorAlpha(color, 0.1f),    // Current frame - full opacity
-        ColorAlpha(color, 0.2f),   // +15 frames
-        ColorAlpha(color, 0.3f),    // +30 frames
-        ColorAlpha(color, 1.0f)    // +45 frames
+        ColorAlpha(color, 1.0f),    // Current frame - full opacity
+        ColorAlpha(color, 0.8f),   // +15 frames
+        ColorAlpha(color, 0.6f),    // +30 frames
+        ColorAlpha(color, 0.4f)    // +45 frames
     };
     
     for (int i = 0; i < 4; i++)
     {
-        float left_terrain_height = features(27 + i);        // Left toe heights: 27, 28, 29, 30
-        float right_terrain_height = features(31 + i);       // Right toe heights: 31, 32, 33, 34
+        // Use actual terrain heights computed from raycasting
+        float left_terrain_height = future_terrain_heights(i).x;
+        float right_terrain_height = future_terrain_heights(i).y;
         
         vec3 left_toe_xz;
         vec3 right_toe_xz;
@@ -1052,21 +1054,25 @@ void draw_features(
         }
         else
         {
-            // Future frames: use future_toe_position array
-            // future_toe_position stores [left0, right0, left1, right1, left2, right2]
-            // for frames +15, +30, +45 (indices 1, 2, 3 map to array indices 0, 1, 2)
+            // Future frames: transform future_toe_position from local to world space
+            // future_toe_position stores positions in character-local space
             int future_idx = i - 1;
+            
+            // Convert 2D local positions to 3D
             left_toe_xz = vec3(future_toe_position(future_idx * 2 + 0).x, 0, future_toe_position(future_idx * 2 + 0).y);
             right_toe_xz = vec3(future_toe_position(future_idx * 2 + 1).x, 0, future_toe_position(future_idx * 2 + 1).y);
+
+            // Relative to root
+            left_toe_xz = quat_mul_vec3(rot, left_toe_xz) + pos;
+            right_toe_xz = quat_mul_vec3(rot, right_toe_xz) + pos;
+            
         }
 
-        // Relative to root
-        left_toe_xz = quat_mul_vec3(rot, left_toe_xz) + pos;
-        right_toe_xz = quat_mul_vec3(rot, right_toe_xz) + pos;
+        
         
         // Position spheres at toe XZ position with Y = terrain_height + hip_height
-        vec3 left_terrain_pos = vec3(left_toe_xz.x, hip_global_position.y + left_terrain_height, left_toe_xz.z);
-        vec3 right_terrain_pos = vec3(right_toe_xz.x, hip_global_position.y + right_terrain_height, right_toe_xz.z);
+        vec3 left_terrain_pos = vec3(left_toe_xz.x, hip_global_position.y + left_terrain_height + 0.01f, left_toe_xz.z);
+        vec3 right_terrain_pos = vec3(right_toe_xz.x, hip_global_position.y + right_terrain_height + 0.01f, right_toe_xz.z);
         
         // Draw small spheres at terrain height positions
         DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, terrain_colors[i]);
@@ -1324,7 +1330,7 @@ int main(void)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "resources/glb/04-FlatTerrainSlope.glb";
+    const char* ground_glb_path = "resources/glb/05-Playground.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -1333,6 +1339,16 @@ int main(void)
     {
         ground_plane_model = LoadModel(ground_glb_path);
         using_glb_ground = true;
+
+        // Generate a procedural checkerboard image
+        Image img = GenImageChecked(256, 256, 32, 32, DARKGRAY, WHITE);
+        Texture2D texture = LoadTextureFromImage(img);
+        UnloadImage(img); // Unload CPU image
+
+        // Assign to model material
+        for (int i = 0; i < ground_plane_model.materialCount; i++){
+            ground_plane_model.materials[i].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
+        }
     }
     else
     {
@@ -1633,6 +1649,33 @@ int main(void)
             simulation_fwrd_speed,
             simulation_side_speed,
             simulation_back_speed);
+
+        // Override: Add vertical velocity to move root toward hip raycast height + 1.2f
+        global_bone_computed.zero();
+        forward_kinematics_partial(
+            global_bone_positions,
+            global_bone_rotations,
+            global_bone_computed,
+            bone_positions,
+            bone_rotations,
+            db.bone_parents,
+            Bone_Hips);
+        float hip_ground_height = 0.0f;
+        Ray hip_ray = { to_Vector3(global_bone_positions(Bone_Hips) + vec3(0, 10, 0)), {0, -1, 0} };
+        for (int i = 0; i < ground_plane_model.meshCount; i++)
+        {
+            RayCollision hip_collision = GetRayCollisionMesh(hip_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+            if (hip_collision.hit && (hip_ground_height == 0.0f || hip_collision.point.y > hip_ground_height))
+            {
+                hip_ground_height = hip_collision.point.y;
+            }
+        }
+        float target_root_height = hip_ground_height + 1.2f;
+        float height_error = target_root_height - simulation_position.y;
+        const float max_vertical_speed = 2.0f;
+        const float min_vertical_speed = -8.0f; // because gravity
+        const float vertical_gain = 4.0f;
+        desired_velocity_curr.y = clampf(height_error * vertical_gain, min_vertical_speed, max_vertical_speed);
             
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
@@ -1772,16 +1815,20 @@ int main(void)
                     int future_idx = time_idx - 1;
                     
                     // Extract left toe position (x, z) to 3D (x, 0, z)
-                    left_toe_pos = vec3(
+                    vec3 left_toe_local = vec3(
                         future_toe_position(future_idx * 2 + 0).x, 
                         0.0f, 
                         future_toe_position(future_idx * 2 + 0).y);
                     
                     // Extract right toe position (x, z) to 3D (x, 0, z)
-                    right_toe_pos = vec3(
+                    vec3 right_toe_local = vec3(
                         future_toe_position(future_idx * 2 + 1).x,
                         0.0f,
                         future_toe_position(future_idx * 2 + 1).y);
+                    
+                    // Transform from character-local to world space
+                    left_toe_pos = quat_mul_vec3(bone_rotations(0), left_toe_local) + bone_positions(0);
+                    right_toe_pos = quat_mul_vec3(bone_rotations(0), right_toe_local) + bone_positions(0);
                 }
                 
                 // Raycast from above to find terrain height
@@ -1814,10 +1861,10 @@ int main(void)
                     left_terrain_height - hip_height,
                     right_terrain_height - hip_height);
 
-                std::cout << "LeftToe Terrain World Terrain height: " << left_terrain_height << std::endl;
-                std::cout << "Hip's world position: " << hip_height << std::endl;
-                std::cout << "Player's world position: " << bone_positions(0).x << " " << bone_positions(0).y << " " << bone_positions(0).z << std::endl;
-                std::cout << std::endl;
+                // std::cout << "LeftToe Terrain World Terrain height: " << left_terrain_height << std::endl;
+                // std::cout << "Hip's world position: " << hip_height << std::endl;
+                // std::cout << "Player's world position: " << bone_positions(0).x << " " << bone_positions(0).y << " " << bone_positions(0).z << std::endl;
+                // std::cout << std::endl;
             }
         }
            
@@ -2419,7 +2466,7 @@ int main(void)
         array1d<float> current_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
         denormalize_features(current_features, db.features_offset, db.features_scale);        
         draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON,
-            future_toe_position, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones);
+            future_toe_position, future_terrain_heights, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones);
         
         // Draw Simuation Bone
         
