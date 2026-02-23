@@ -550,7 +550,8 @@ void compute_trajectory_direction_feature(database& db, int& offset, float weigh
 void build_terrain_height_map(
     const database& db,
     array1d<vec3>& terrain_points,  // (x, y, height) for each contact point
-    array1d<int>& contact_bone_indices) // bone index for each contact point
+    array1d<int>& contact_bone_indices, // bone index for each contact point
+    array1d<int>& contact_frame_indices) // frame index for each contact point
 {
     // Collect all foot contact points (LeftFoot=4, RightFoot=8)
     int left_foot = Bone_LeftFoot;
@@ -568,6 +569,7 @@ void build_terrain_height_map(
     // Allocate storage
     terrain_points.resize(contact_count);
     contact_bone_indices.resize(contact_count);
+    contact_frame_indices.resize(contact_count);
     
     // Second pass: extract contact points
     int contact_idx = 0;
@@ -599,6 +601,7 @@ void build_terrain_height_map(
             
             terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
             contact_bone_indices(contact_idx) = left_foot;
+            contact_frame_indices(contact_idx) = frame;
             contact_idx++;
         }
         
@@ -617,15 +620,19 @@ void build_terrain_height_map(
             
             terrain_points(contact_idx) = vec3(foot_position.x, foot_position.z, foot_position.y);
             contact_bone_indices(contact_idx) = right_foot;
+            contact_frame_indices(contact_idx) = frame;
             contact_idx++;
         }
     }
 }
 
 // Query terrain height at a given (x, y) position using nearest neighbor
-// Returns the height of the nearest foot contact point
+// Returns the height of the nearest foot contact point within the specified range
 float query_terrain_height(
     const array1d<vec3>& terrain_points,
+    const array1d<int>& contact_frame_indices,
+    int range_start,
+    int range_stop,
     float query_x,
     float query_y)
 {
@@ -637,6 +644,10 @@ float query_terrain_height(
     
     for (int i = 0; i < terrain_points.size; i++)
     {
+        // Only search contact points within the current animation range
+        if (contact_frame_indices(i) < range_start || contact_frame_indices(i) >= range_stop)
+            continue;
+        
         float dx = terrain_points(i).x - query_x;
         float dy = terrain_points(i).y - query_y;
         float distance_sq = dx * dx + dy * dy;
@@ -656,11 +667,25 @@ void compute_terrain_height_feature(database& db, int& offset, int bone, float w
     // Build terrain height map from all foot contact points
     array1d<vec3> terrain_points;
     array1d<int> contact_bone_indices;
-    build_terrain_height_map(db, terrain_points, contact_bone_indices);
+    array1d<int> contact_frame_indices;
+    build_terrain_height_map(db, terrain_points, contact_bone_indices, contact_frame_indices);
     
     // Sample terrain height at future frames
     for (int i = 0; i < db.nframes(); i++)
     {
+        // Find which animation range the current frame belongs to
+        int range_start = 0;
+        int range_stop = db.nframes();
+        for (int r = 0; r < db.nranges(); r++)
+        {
+            if (i >= db.range_starts(r) && i < db.range_stops(r))
+            {
+                range_start = db.range_starts(r);
+                range_stop = db.range_stops(r);
+                break;
+            }
+        }
+        
         // Get hip position and rotation for current frame
         vec3 hip_position;
         quat hip_rotation;
@@ -679,36 +704,35 @@ void compute_terrain_height_feature(database& db, int& offset, int bone, float w
         int t3 = database_index_clamp(db, i, 45);
         
         // Get toe positions at future frames
-        vec3 future_hip_pos0;
-        vec3 future_hip_pos1;
-        vec3 future_hip_pos2;
-        vec3 future_hip_pos3;
+        vec3 future_toe_pos0;
+        vec3 future_toe_pos1;
+        vec3 future_toe_pos2;
+        vec3 future_toe_pos3;
 
         quat temp_rot;
 
         // FK to get global position of toe
-        forward_kinematics(future_hip_pos0, temp_rot, 
+        forward_kinematics(future_toe_pos0, temp_rot, 
             db.bone_positions(t0), db.bone_rotations(t0), 
             db.bone_parents, bone);
         
-        forward_kinematics(future_hip_pos1, temp_rot, 
+        forward_kinematics(future_toe_pos1, temp_rot, 
             db.bone_positions(t1), db.bone_rotations(t1), 
             db.bone_parents, bone);
         
-        forward_kinematics(future_hip_pos2, temp_rot, 
+        forward_kinematics(future_toe_pos2, temp_rot, 
             db.bone_positions(t2), db.bone_rotations(t2), 
             db.bone_parents, bone);
         
-        forward_kinematics(future_hip_pos3, temp_rot, 
+        forward_kinematics(future_toe_pos3, temp_rot, 
             db.bone_positions(t3), db.bone_rotations(t3), 
             db.bone_parents, bone);
         
-        // Query terrain height relative to current hip position
-        // Transform query positions to match terrain map (x->x, z->y, y->height)
-        float height0 = query_terrain_height(terrain_points, future_hip_pos0.x, future_hip_pos0.z);
-        float height1 = query_terrain_height(terrain_points, future_hip_pos1.x, future_hip_pos1.z);
-        float height2 = query_terrain_height(terrain_points, future_hip_pos2.x, future_hip_pos2.z);
-        float height3 = query_terrain_height(terrain_points, future_hip_pos3.x, future_hip_pos3.z);
+        // Query terrain height from xy of both toes within current animation range
+        float height0 = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, future_toe_pos0.x, future_toe_pos0.z);
+        float height1 = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, future_toe_pos1.x, future_toe_pos1.z);
+        float height2 = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, future_toe_pos2.x, future_toe_pos2.z);
+        float height3 = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, future_toe_pos3.x, future_toe_pos3.z);
         
         // Store height relative to current hip height
         db.features(i, offset + 0) = height0 - hip_position.y;
@@ -788,8 +812,8 @@ void database_build_matching_features(
     compute_bone_velocity_feature(db, offset, Bone_Hips, feature_weight_hip_velocity);
     compute_trajectory_position_feature(db, offset, feature_weight_trajectory_positions);
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
-    compute_terrain_height_feature(db, offset, Bone_LeftFoot, feature_weight_terrain_heights);
-    compute_terrain_height_feature(db, offset, Bone_RightFoot, feature_weight_terrain_heights);
+    compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
+    compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
     
     assert(offset == nfeatures);
     

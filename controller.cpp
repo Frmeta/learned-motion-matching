@@ -1295,7 +1295,7 @@ int main(void)
     float feature_weight_hip_velocity = 1.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
-    float feature_weight_terrain_heights = 0.0f;
+    float feature_weight_terrain_heights = 0.8f;
     
     database_build_matching_features(
         db,
@@ -1306,7 +1306,7 @@ int main(void)
         feature_weight_trajectory_directions,
         feature_weight_terrain_heights);
         
-    database_save_matching_features(db, "./resources/bin/features.bin", true);
+    database_save_matching_features(db, "./resources/bin/features.bin", false);
    
     // Pose & Inertializer Data
     
@@ -1522,10 +1522,10 @@ int main(void)
     array1d<float> latent_proj(32); latent_proj.zero();
     array1d<float> latent_curr(32); latent_curr.zero();
     
-    // Future toe positions at 4 time samples (0, 15, 30, 45 frames)
-    // Contains 3 frames x 2 toes x 2D positions for predicting terrain
-    array1d<vec3> future_toe_position(4);
-    for (int i = 0; i < 4; i++) { future_toe_position(i) = vec3(0.0f, 0.0f, 0.0f); }
+    // Future toe positions at 3 future time samples (15, 30, 45 frames)
+    // Contains 3 frames x 2 toes = 6 entries: [left0, right0, left1, right1, left2, right2]
+    array1d<vec2> future_toe_position(6);
+    for (int i = 0; i < 6; i++) { future_toe_position(i) = vec2(0.0f, 0.0f); }
     
     // Future terrain heights at 4 time samples (0, 15, 30, 45 frames)  
     // Each vec2: x=left toe height, y=right toe height (all relative to hips)
@@ -1689,30 +1689,20 @@ int main(void)
                 else
                 {
                     // Future frames: extract from future_toe_position
-                    // future_toe_position(i) contains positions for frame i+1
-                    // Assuming: x,y = left toe 2D (x,z), z = offset to get right toe data
+                    // Array stores: [left0, right0, left1, right1, left2, right2]
                     int future_idx = time_idx - 1;
                     
-                    // Extract left toe position (x, z from 2D)
+                    // Extract left toe position (x, z) to 3D (x, 0, z)
                     left_toe_pos = vec3(
-                        future_toe_position(future_idx).x, 
+                        future_toe_position(future_idx * 2 + 0).x, 
                         0.0f, 
-                        future_toe_position(future_idx).y);
+                        future_toe_position(future_idx * 2 + 0).y);
                     
-                    // Extract right toe position from next elements
-                    // If structured as flattened: [left_x, left_z, right_x] [right_z, ...]
-                    if (future_idx * 2 + 1 < 4)
-                    {
-                        right_toe_pos = vec3(
-                            future_toe_position(future_idx).z,
-                            0.0f,
-                            future_toe_position(future_idx * 2 + 1).x);
-                    }
-                    else
-                    {
-                        // Fallback: mirror left toe position
-                        right_toe_pos = left_toe_pos;
-                    }
+                    // Extract right toe position (x, z) to 3D (x, 0, z)
+                    right_toe_pos = vec3(
+                        future_toe_position(future_idx * 2 + 1).x,
+                        0.0f,
+                        future_toe_position(future_idx * 2 + 1).y);
                 }
                 
                 // Raycast from above to find terrain height
@@ -2121,6 +2111,19 @@ int main(void)
                     db.bone_parents,
                     toe_bone);
                 
+                // Raycast to find terrain height under this foot
+                float terrain_height = 0.0f;
+                Ray foot_ray = { to_Vector3(global_bone_positions(toe_bone) + vec3(0, 10, 0)), {0, -1, 0} };
+                for (int mesh_idx = 0; mesh_idx < ground_plane_model.meshCount; mesh_idx++)
+                {
+                    RayCollision collision = GetRayCollisionMesh(foot_ray, ground_plane_model.meshes[mesh_idx], ground_plane_model.transform);
+                    if (collision.hit && (terrain_height == 0.0f || collision.point.y > terrain_height))
+                    {
+                        terrain_height = collision.point.y;
+                    }
+                }
+                float foot_target_height = terrain_height + ik_foot_height;
+                
                 // Update the contact state
                 contact_update(
                     contact_states(i),
@@ -2134,13 +2137,13 @@ int main(void)
                     global_bone_positions(toe_bone),
                     curr_bone_contacts(i),
                     ik_unlock_radius,
-                    ik_foot_height,
+                    foot_target_height,
                     ik_blending_halflife,
                     dt);
                 
                 // Ensure contact position never goes through floor
                 vec3 contact_position_clamp = contact_positions(i);
-                contact_position_clamp.y = maxf(contact_position_clamp.y, ik_foot_height);
+                contact_position_clamp.y = maxf(contact_position_clamp.y, foot_target_height);
                 
                 // Re-compute toe, heel, knee, hip, and root bone positions
                 for (int bone : {heel_bone, knee_bone, hip_bone, root_bone})
@@ -2314,7 +2317,7 @@ int main(void)
             global_bone_rotations,
             db.bone_parents);
         
-        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
+        DrawModel(character_model, (Vector3){0.0f, 1.2f, 0.0f}, 1.0f, RAYWHITE);
         
         // Draw matched features
         

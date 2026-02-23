@@ -39,7 +39,7 @@ files = [
     # Walking
     ('resources/bvh/walk1_subject5.bvh',            80, 7791), # decrease file size (original: 7791)
     # Terrain
-    #('resources/bvh/obstacles1_subject2.bvh',       231, 4972),
+    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972),
 ]
 
 """ We will accumulate data in these lists """
@@ -107,7 +107,7 @@ for filename, start, stop in files:
         sim_rotation_joint = bvh_data['names'].index("Hips")
         
         # Position comes from spine joint
-        sim_position = np.array([1.0, 0.0, 1.0]) * global_positions[:,sim_position_joint:sim_position_joint+1] # zeroes out Y
+        sim_position = np.array([1.0, 1.0, 1.0]) * global_positions[:,sim_position_joint:sim_position_joint+1] # zeroes out Y
         sim_position = signal.savgol_filter(sim_position, 31, 3, axis=0, mode='interp')
         
         # Direction comes from projected hip forward direction

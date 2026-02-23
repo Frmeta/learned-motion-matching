@@ -17,7 +17,7 @@ void decompressor_evaluate(
     slice1d<quat> bone_rotations,
     slice1d<vec3> bone_angular_velocities,
     slice1d<bool> bone_contacts,
-    slice1d<vec3> future_toe_positions ,
+    slice1d<vec2> future_toe_positions ,
     nnet_evaluation& evaluation,
     const slice1d<float> features,
     const slice1d<float> latent,
@@ -121,11 +121,11 @@ void decompressor_evaluate(
     
     // Extract future toe positions (predicted 2D XZ positions at +15, +30, +45 frames)
     // These are used for terrain height sampling at runtime
-    if (future_toe_positions.data != nullptr && future_toe_positions.size >= 3)
+    if (future_toe_positions.data != nullptr && future_toe_positions.size >= 6)
     {
         // Unpack and transform from character space to world space
         // Each timeframe has 4 values: left_toe_x, left_toe_z, right_toe_x, right_toe_z
-        for (int t = 0; t < 3 && t < future_toe_positions.size; t++)
+        for (int t = 0; t < 3; t++)
         {
             // Get left and right toe positions from network output
             vec3 left_toe_char = vec3(
@@ -138,12 +138,13 @@ void decompressor_evaluate(
                 0.0f,
                 output_layer(offset + t*4 + 3));
             
-            // Average the two toe positions and transform to world space
-            vec3 avg_toe_char = (left_toe_char + right_toe_char) * 0.5f;
-            vec3 avg_toe_world = quat_mul_vec3(root_rotation, avg_toe_char) + root_position;
+            // Transform to world space
+            vec3 left_toe_world = quat_mul_vec3(root_rotation, left_toe_char) + root_position;
+            vec3 right_toe_world = quat_mul_vec3(root_rotation, right_toe_char) + root_position;
             
-            // Store the world space position (we keep x, z; y is world height from ground)
-            future_toe_positions(t) = avg_toe_world;
+            // Store left and right toes separately: [left0, right0, left1, right1, left2, right2]
+            future_toe_positions(t * 2 + 0) = vec2(left_toe_world.x, left_toe_world.z);
+            future_toe_positions(t * 2 + 1) = vec2(right_toe_world.x, right_toe_world.z);
         }
     }
 
