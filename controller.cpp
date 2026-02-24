@@ -1291,15 +1291,17 @@ void update_callback(void* args)
 
 int main(void)
 {
-    // Init Window
-    
-    const int screen_width = 1280;
-    const int screen_height = 720;
-    
-    SetConfigFlags(FLAG_VSYNC_HINT);
-    SetConfigFlags(FLAG_MSAA_4X_HINT);
-    InitWindow(screen_width, screen_height, "raylib [data vs code driven displacement]");
-    SetTargetFPS(60);
+    try
+    {
+        // Init Window
+        
+        const int screen_width = 1280;
+        const int screen_height = 720;
+        
+        SetConfigFlags(FLAG_VSYNC_HINT);
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        InitWindow(screen_width, screen_height, "raylib [data vs code driven displacement]");
+        SetTargetFPS(60);
     
     // Camera
 
@@ -1371,8 +1373,12 @@ int main(void)
     
     // Load Animation Data and build Matching Database
     
+    std::cout << "Loading database..." << std::endl;
+    
     database db;
     database_load(db, "./resources/bin/database.bin");
+    
+    std::cout << "Database loaded. Building matching features..." << std::endl;
     
     float feature_weight_foot_position = 0.75f;
     float feature_weight_foot_velocity = 1.0f;
@@ -1381,18 +1387,26 @@ int main(void)
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 1.0f;
     
-    database_build_matching_features(
-        db,
-        feature_weight_foot_position,
-        feature_weight_foot_velocity,
-        feature_weight_hip_velocity,
-        feature_weight_trajectory_positions,
-        feature_weight_trajectory_directions,
-        feature_weight_terrain_heights);
+    // Check if features file already exists to avoid rebuilding
+    if (FileExists("./resources/bin/features.bin"))
+    {
+        database_build_matching_features(
+            db,
+            feature_weight_foot_position,
+            feature_weight_foot_velocity,
+            feature_weight_hip_velocity,
+            feature_weight_trajectory_positions,
+            feature_weight_trajectory_directions,
+            feature_weight_terrain_heights);
         
-    database_save_matching_features(db, "./resources/bin/features.bin", false);
-   
-    // Pose & Inertializer Data
+        database_save_matching_features(db, "./resources/bin/features.bin", false);
+    }
+    else
+    {
+        std::cout << "Features.bin not found" << std::endl;
+    }
+    
+    std::cout << "Features saved. Initializing pose data..." << std::endl;
     
     int frame_index = db.range_starts(0);
     float inertialize_blending_halflife = 0.1f;
@@ -1591,16 +1605,24 @@ int main(void)
     
     bool lmm_enabled = false;
     
+    std::cout << "Loading neural networks..." << std::endl;
+    
     nnet decompressor, stepper, projector;    
+    std::cout << "Loading decompressor..." << std::endl;
     nnet_load(decompressor, "./resources/bin/decompressor.bin");
+    std::cout << "Loading stepper..." << std::endl;
     nnet_load(stepper, "./resources/bin/stepper.bin");
+    std::cout << "Loading projector..." << std::endl;
     nnet_load(projector, "./resources/bin/projector.bin");
+    
+    std::cout << "Setting up evaluations..." << std::endl;
 
     nnet_evaluation decompressor_evaluation, stepper_evaluation, projector_evaluation;
     decompressor_evaluation.resize(decompressor);
     stepper_evaluation.resize(stepper);
     projector_evaluation.resize(projector);
-
+    
+    std::cout << "Initializing features..." << std::endl;
     array1d<float> features_proj = db.features(frame_index);
     array1d<float> features_curr = db.features(frame_index);
     array1d<float> latent_proj(32); latent_proj.zero();
@@ -1619,10 +1641,16 @@ int main(void)
     // Go
 
     float dt = 1.0f / 60.0f;
+    
+    // Metrics tracking
+    float frame_time_ms = 0.0f;
+    float fps_display = 0.0f;
+
+    std::cout << "hm" << std::endl;
 
     auto update_func = [&]()
     {
-      
+        std::cout << "update" << std::endl;
         // Get gamepad stick states
         vec3 gamepadstick_left = gamepad_get_stick(GAMEPAD_STICK_LEFT);
         vec3 gamepadstick_right = gamepad_get_stick(GAMEPAD_STICK_RIGHT);
@@ -1682,7 +1710,8 @@ int main(void)
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         // desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
-
+        
+        std::cout << "test6" << std::endl;
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
             desired_rotation,
@@ -1873,6 +1902,7 @@ int main(void)
                 // std::cout << std::endl;
             }
         }
+        std::cout << "test5" << std::endl;
            
         // Make query vector for search.
         // In theory this only needs to be done when a search is 
@@ -1881,25 +1911,39 @@ int main(void)
         array1d<float> query(db.nfeatures());
                 
         // Compute the features of the query vector
+        std::cout << "Getting query features..." << std::endl;
+        std::cout << "frame_index=" << frame_index << std::endl;
 
-        slice1d<float> query_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
-
-        int offset = 0;
-        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Position
-        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Position
-        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Velocity
-        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Velocity
-        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
-        query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
-        query_compute_trajectory_direction_feature(query, offset, bone_rotations(0), trajectory_rotations);
-        query_compute_terrain_height_feature(query, offset, future_terrain_heights);
         
+        slice1d<float> query_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
+        std::cout << "Got query features, size=" << query_features.size << std::endl;
+        
+        int offset = 0;
+        std::cout << "Query" << std::endl;
+        std::cout << "  Copying left foot position..." << std::endl;
+        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Position
+        std::cout << "  Copying right foot position..." << std::endl;
+        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Position
+        std::cout << "  Copying left foot velocity..." << std::endl;
+        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Velocity
+        std::cout << "  Copying right foot velocity..." << std::endl;
+        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Velocity
+        std::cout << "  Copying hip velocity..." << std::endl;
+        query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
+        std::cout << "  Computing trajectory position feature..." << std::endl;
+        query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
+        std::cout << "  Computing trajectory direction feature..." << std::endl;
+        query_compute_trajectory_direction_feature(query, offset, bone_rotations(0), trajectory_rotations);
+        std::cout << "  Computing terrain height feature..." << std::endl;
+        query_compute_terrain_height_feature(query, offset, future_terrain_heights);
+        std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
-
+        std::cout << "Done assert" << std::endl;
         // Check if we reached the end of the current anim
         bool end_of_anim = database_index_clamp(db, frame_index, 1) == frame_index;
         
         // Do we need to search?
+        std::cout << "Do we?" << std::endl;
         if (force_search || search_timer <= 0.0f || end_of_anim)
         {
             if (lmm_enabled)
@@ -1982,7 +2026,7 @@ int main(void)
                     query);
                 
                 // Transition if better frame found
-                
+                std::cout << "Do2" << std::endl;
                 if (best_index != frame_index)
                 {
                     trns_bone_positions = db.bone_positions(best_index);
@@ -2022,6 +2066,7 @@ int main(void)
         
         // Tick down search timer
         search_timer -= dt;
+        std::cout << "test4" << std::endl;
 
         if (lmm_enabled)
         {
@@ -2095,6 +2140,7 @@ int main(void)
             dt);
         
         // Update Simulation
+        std::cout << "test3" << std::endl;
         
         vec3 simulation_position_prev = simulation_position;
         
@@ -2151,6 +2197,7 @@ int main(void)
         }
         
         // Adjustment 
+        std::cout << "test2" << std::endl;
         
         if (!synchronization_enabled && adjustment_enabled)
         {   
@@ -2235,7 +2282,7 @@ int main(void)
 
         adjusted_bone_positions = bone_positions;
         adjusted_bone_rotations = bone_rotations;
-
+        std::cout << "test1" << std::endl;
         if (ik_enabled)
         {
             for (int i = 0; i < contact_bones.size; i++)
@@ -2404,6 +2451,12 @@ int main(void)
 
         // Render
         
+        // Calculate metrics
+        std::cout << "Collecting metrics" << std::endl;
+        frame_time_ms = GetFrameTime() * 1000.0f;  // Convert to milliseconds
+        fps_display = GetFPS();
+        std::cout << "Done collecting frame & fps" << std::endl;
+        
         BeginDrawing();
         ClearBackground(RAYWHITE);
         
@@ -2491,8 +2544,24 @@ int main(void)
         // UI
         
         //---------
+        // Performance Metrics Panel
         
-        float ui_sim_hei = 20;
+        float ui_metrics_hei = 20;
+        float ui_metrics_wid = 300;
+        
+        GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, 70 }, "performance metrics");
+        
+        // Frame time display
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 15, 260, 20 },
+            TextFormat("Frame Time:  %6.2f ms", frame_time_ms));
+        
+        // FPS display
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 35, 260, 20 },
+            TextFormat("FPS:         %6d fps", (int)fps_display));
+        
+        //---------
+        
+        float ui_sim_hei = 110;
         
         GuiGroupBox((Rectangle){ 970, ui_sim_hei, 290, 250 }, "simulation object");
 
@@ -2856,4 +2925,17 @@ int main(void)
     CloseWindow();
 
     return 0;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Exception error: " << e.what() << std::endl;
+        std::cout << "EXCEPTION: " << e.what() << std::endl;
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "Unknown error occurred" << std::endl;
+        std::cout << "UNKNOWN ERROR during initialization" << std::endl;
+        return 1;
+    }
 }
