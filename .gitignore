@@ -5,8 +5,9 @@ controller.html
 controller.wasm
 *__pycache__*
 *.png
-*.bvh
+#*.bvh
 *.log
 resources/runs*
 
 local/
+database.bin

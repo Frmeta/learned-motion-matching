@@ -40,6 +40,7 @@ files = [
     ('resources/bvh/walk1_subject5.bvh',            80, 7791), # decrease file size (original: 7791)
     # Terrain
     ('resources/bvh/obstacles1_subject2.bvh',       231, 4972),
+    ('resources/bvh/obstacles2_subject5.bvh',       250, 5750),
 ]
 
 """ We will accumulate data in these lists """

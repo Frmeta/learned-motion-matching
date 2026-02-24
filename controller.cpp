@@ -1341,7 +1341,7 @@ int main(void)
         using_glb_ground = true;
 
         // Generate a procedural checkerboard image
-        Image img = GenImageChecked(256, 256, 32, 32, DARKGRAY, WHITE);
+        Image img = GenImageChecked(256, 256, 32, 32, LIGHTGRAY, WHITE);
         Texture2D texture = LoadTextureFromImage(img);
         UnloadImage(img); // Unload CPU image
 
@@ -1481,7 +1481,7 @@ int main(void)
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
     
-    vec3 simulation_position = vec3(0.0f, 1.2f, 0.0f);
+    vec3 simulation_position;
     vec3 simulation_velocity;
     vec3 simulation_acceleration;
     quat simulation_rotation;
@@ -1676,7 +1676,13 @@ int main(void)
         const float min_vertical_speed = -8.0f; // because gravity
         const float vertical_gain = 4.0f;
         desired_velocity_curr.y = clampf(height_error * vertical_gain, min_vertical_speed, max_vertical_speed);
-            
+        
+        // Blend a small amount of root velocity to reduce abrupt target changes.
+        const float desired_velocity_root_blend = 0.1f;
+        vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
+        // desired_velocity_blended.y = desired_velocity_curr.y;
+        desired_velocity_curr = desired_velocity_blended;
+
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
             desired_rotation,
@@ -2390,7 +2396,7 @@ int main(void)
             camera_azimuth,
             camera_altitude,
             camera_distance,
-            bone_positions(0) + vec3(0, 1, 0),
+            bone_positions(0) + vec3(0, 0, 0),
             // simulation_position + vec3(0, 1, 0),
             gamepadstick_right,
             desired_strafe,
