@@ -120,10 +120,9 @@ void decompressor_evaluate(
     offset += 2;
     
     // Extract future toe positions (predicted 2D XZ positions at +15, +30, +45 frames)
-    // These are used for terrain height sampling at runtime
+    // Keep in character-local space; controller applies world transform when needed.
     if (future_toe_positions.data != nullptr && future_toe_positions.size >= 6)
     {
-        // Unpack and transform from character space to world space
         // Each timeframe has 4 values: left_toe_x, left_toe_z, right_toe_x, right_toe_z
         for (int t = 0; t < 3; t++)
         {
@@ -137,14 +136,10 @@ void decompressor_evaluate(
                 output_layer(offset + t*4 + 2),
                 0.0f,
                 output_layer(offset + t*4 + 3));
-            
-            // Transform to world space
-            vec3 left_toe_world = quat_mul_vec3(root_rotation, left_toe_char) + root_position;
-            vec3 right_toe_world = quat_mul_vec3(root_rotation, right_toe_char) + root_position;
-            
+
             // Store left and right toes separately: [left0, right0, left1, right1, left2, right2]
-            future_toe_positions(t * 2 + 0) = vec2(left_toe_world.x, left_toe_world.z);
-            future_toe_positions(t * 2 + 1) = vec2(right_toe_world.x, right_toe_world.z);
+            future_toe_positions(t * 2 + 0) = vec2(left_toe_char.x, left_toe_char.z);
+            future_toe_positions(t * 2 + 1) = vec2(right_toe_char.x, right_toe_char.z);
         }
     }
 

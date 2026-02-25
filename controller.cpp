@@ -1678,39 +1678,6 @@ int main(void)
             simulation_side_speed,
             simulation_back_speed);
 
-        // Override: Add vertical velocity to move root toward hip raycast height + 1.2f
-        global_bone_computed.zero();
-        forward_kinematics_partial(
-            global_bone_positions,
-            global_bone_rotations,
-            global_bone_computed,
-            bone_positions,
-            bone_rotations,
-            db.bone_parents,
-            Bone_Hips);
-        float hip_ground_height = 0.0f;
-        Ray hip_ray = { to_Vector3(global_bone_positions(Bone_Hips) + vec3(0, 10, 0)), {0, -1, 0} };
-        for (int i = 0; i < ground_plane_model.meshCount; i++)
-        {
-            RayCollision hip_collision = GetRayCollisionMesh(hip_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-            if (hip_collision.hit && (hip_ground_height == 0.0f || hip_collision.point.y > hip_ground_height))
-            {
-                hip_ground_height = hip_collision.point.y;
-            }
-        }
-        float target_root_height = hip_ground_height + 1.2f;
-        float height_error = target_root_height - simulation_position.y;
-        const float max_vertical_speed = 2.0f;
-        const float min_vertical_speed = -8.0f; // because gravity
-        const float vertical_gain = 4.0f;
-        desired_velocity_curr.y = clampf(height_error * vertical_gain, min_vertical_speed, max_vertical_speed);
-        
-        // Blend a small amount of root velocity to reduce abrupt target changes.
-        const float desired_velocity_root_blend = 0.1f;
-        vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
-        // desired_velocity_blended.y = desired_velocity_curr.y;
-        desired_velocity_curr = desired_velocity_blended;
-        
         std::cout << "test6" << std::endl;
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
@@ -1792,6 +1759,37 @@ int main(void)
             20.0f * dt,
             obstacles_positions,
             obstacles_scales);
+
+        // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
+        float traj_ground_height = 0.0f;
+        bool traj_hit = false;
+        for (int t = 1; t < trajectory_positions.size; t++)
+        {
+            Ray traj_ray = { to_Vector3(trajectory_positions(trajectory_positions.size-1-t) + vec3(0, 10, 0)), {0, -1, 0} };
+            for (int i = 0; i < ground_plane_model.meshCount; i++)
+            {
+                RayCollision traj_collision = GetRayCollisionMesh(traj_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+                if (traj_collision.hit && (!traj_hit || traj_collision.point.y > traj_ground_height))
+                {
+                    traj_ground_height = traj_collision.point.y;
+                    traj_hit = true;
+                }
+            }
+        }
+
+        float target_root_height = traj_ground_height + 1.2f;
+        float height_error = target_root_height - simulation_position.y;
+        const float max_vertical_speed = 2.0f;
+        const float min_vertical_speed = -8.0f; // because gravity
+        const float vertical_gain = 4.0f;
+        desired_velocity_curr.y = clampf(height_error * vertical_gain, min_vertical_speed, max_vertical_speed);
+
+        // Blend a small amount of root velocity to reduce abrupt target changes.
+        const float desired_velocity_root_blend = 0.1f;
+        vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
+        // desired_velocity_blended.y = desired_velocity_curr.y;
+        desired_velocity_curr = desired_velocity_blended;
+        desired_velocity.y = desired_velocity_curr.y;
         
         // Compute future toe terrain heights relative to hips
         // 4 time samples: current (0), +15, +30, +45 frames
@@ -2455,6 +2453,7 @@ int main(void)
         std::cout << "Collecting metrics" << std::endl;
         frame_time_ms = GetFrameTime() * 1000.0f;  // Convert to milliseconds
         fps_display = GetFPS();
+        
         std::cout << "Done collecting frame & fps" << std::endl;
         
         BeginDrawing();
@@ -2548,8 +2547,9 @@ int main(void)
         
         float ui_metrics_hei = 20;
         float ui_metrics_wid = 300;
+        float ui_metrics_hgt = 70;
         
-        GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, 70 }, "performance metrics");
+        GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, ui_metrics_hgt }, "performance metrics");
         
         // Frame time display
         GuiLabel((Rectangle){ 510, ui_metrics_hei + 15, 260, 20 },
@@ -2561,7 +2561,7 @@ int main(void)
         
         //---------
         
-        float ui_sim_hei = 110;
+        float ui_sim_hei = 20;
         
         GuiGroupBox((Rectangle){ 970, ui_sim_hei, 290, 250 }, "simulation object");
 
