@@ -135,6 +135,18 @@ void database_save_matching_features(const database& db, const char* filename, b
     }
 }
 
+void database_load_matching_features(database& db, const char* filename)
+{
+    FILE* f = fopen(filename, "rb");
+    assert(f != NULL);
+
+    array2d_read(db.features, f);
+    array1d_read(db.features_offset, f);
+    array1d_read(db.features_scale, f);
+
+    fclose(f);
+}
+
 // When we add an offset to a frame in the database there is a chance
 // it will go out of the relevant range so here we can clamp it to 
 // the last frame of that range.

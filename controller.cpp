@@ -19,6 +19,26 @@
 #include <initializer_list>
 #include <functional>
 #include <iostream> // TODO: Remove this when not used
+#include <sys/stat.h>
+
+// Rebuild features when they do not exist yet, or when database.bin is newer.
+static bool should_rebuild_features(const char* database_path, const char* features_path)
+{
+    struct _stat db_info;
+    if (_stat(database_path, &db_info) != 0)
+    {
+        // If database is missing/unreadable, keep previous behavior and attempt build.
+        return true;
+    }
+
+    struct _stat features_info;
+    if (_stat(features_path, &features_info) != 0)
+    {
+        return true;
+    }
+
+    return db_info.st_mtime > features_info.st_mtime;
+}
 
 //--------------------------------------
 
@@ -1378,7 +1398,18 @@ int main(void)
     database db;
     database_load(db, "./resources/bin/database.bin");
     
-    std::cout << "Database loaded. Building matching features..." << std::endl;
+    const char* database_path = "./resources/bin/database.bin";
+    const char* features_path = "./resources/bin/features.bin";
+
+    bool rebuild_features = should_rebuild_features(database_path, features_path);
+    if (rebuild_features)
+    {
+        std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
+    }
+    else
+    {
+        std::cout << "features.bin is up to date. Skipping feature rebuild." << std::endl;
+    }
     
     float feature_weight_foot_position = 0.75f;
     float feature_weight_foot_velocity = 1.0f;
@@ -1387,8 +1418,8 @@ int main(void)
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 1.0f;
     
-    // Check if features file already exists to avoid rebuilding
-    if (FileExists("./resources/bin/features.bin"))
+    
+    if (rebuild_features)
     {
         database_build_matching_features(
             db,
@@ -1399,14 +1430,15 @@ int main(void)
             feature_weight_trajectory_directions,
             feature_weight_terrain_heights);
         
-        database_save_matching_features(db, "./resources/bin/features.bin", false);
+        database_save_matching_features(db, features_path, false);
+        std::cout << "Features saved. Initializing pose data..." << std::endl;
     }
     else
     {
-        std::cout << "Features.bin not found" << std::endl;
+        database_load_matching_features(db, features_path);
+        database_build_bounds(db);
+        std::cout << "Using existing features.bin. Initializing pose data..." << std::endl;
     }
-    
-    std::cout << "Features saved. Initializing pose data..." << std::endl;
     
     int frame_index = db.range_starts(0);
     float inertialize_blending_halflife = 0.1f;
