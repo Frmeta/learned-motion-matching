@@ -20,6 +20,101 @@
 #include <functional>
 #include <iostream> // TODO: Remove this when not used
 #include <sys/stat.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+#if defined(_WIN32)
+struct runtime_metrics
+{
+    float cpu_percent = 0.0f;
+    float gpu_percent = -1.0f; // Not available via raylib/OpenGL without platform-specific APIs.
+    float process_memory_mb = 0.0f;
+    float system_memory_percent = 0.0f;
+
+    unsigned long long last_proc_time_100ns = 0;
+    unsigned long long last_wall_time_100ns = 0;
+    unsigned int cpu_count = 1;
+};
+
+static unsigned long long filetime_to_u64(const FILETIME& ft)
+{
+    ULARGE_INTEGER u;
+    u.LowPart = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    return u.QuadPart;
+}
+
+static void runtime_metrics_init(runtime_metrics& m)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    m.cpu_count = si.dwNumberOfProcessors > 0 ? si.dwNumberOfProcessors : 1;
+
+    FILETIME create_time, exit_time, kernel_time, user_time;
+    if (GetProcessTimes(GetCurrentProcess(), &create_time, &exit_time, &kernel_time, &user_time))
+    {
+        m.last_proc_time_100ns = filetime_to_u64(kernel_time) + filetime_to_u64(user_time);
+    }
+
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    m.last_wall_time_100ns = filetime_to_u64(now);
+}
+
+static void runtime_metrics_update(runtime_metrics& m)
+{
+    FILETIME create_time, exit_time, kernel_time, user_time;
+    FILETIME now;
+
+    if (GetProcessTimes(GetCurrentProcess(), &create_time, &exit_time, &kernel_time, &user_time))
+    {
+        unsigned long long proc_now = filetime_to_u64(kernel_time) + filetime_to_u64(user_time);
+        GetSystemTimeAsFileTime(&now);
+        unsigned long long wall_now = filetime_to_u64(now);
+
+        unsigned long long proc_delta = proc_now - m.last_proc_time_100ns;
+        unsigned long long wall_delta = wall_now - m.last_wall_time_100ns;
+
+        if (wall_delta > 0)
+        {
+            double cpu = (100.0 * (double)proc_delta) / ((double)wall_delta * (double)m.cpu_count);
+            if (cpu < 0.0) cpu = 0.0;
+            if (cpu > 100.0) cpu = 100.0;
+            m.cpu_percent = (float)cpu;
+        }
+
+        m.last_proc_time_100ns = proc_now;
+        m.last_wall_time_100ns = wall_now;
+    }
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+    {
+        m.process_memory_mb = (float)pmc.WorkingSetSize / (1024.0f * 1024.0f);
+    }
+
+    MEMORYSTATUSEX mem_status;
+    mem_status.dwLength = sizeof(mem_status);
+    if (GlobalMemoryStatusEx(&mem_status))
+    {
+        m.system_memory_percent = (float)mem_status.dwMemoryLoad;
+    }
+}
+#endif
 
 // Rebuild features when they do not exist yet, or when database.bin is newer.
 static bool should_rebuild_features(const char* database_path, const char* features_path)
@@ -1677,6 +1772,12 @@ int main(void)
     // Metrics tracking
     float frame_time_ms = 0.0f;
     float fps_display = 0.0f;
+#if defined(_WIN32)
+    runtime_metrics perf_metrics;
+    runtime_metrics_init(perf_metrics);
+    float perf_sample_timer = 0.0f;
+    const float perf_sample_interval = 0.25f;
+#endif
 
     std::cout << "hm" << std::endl;
 
@@ -2487,6 +2588,14 @@ int main(void)
         fps_display = GetFPS();
         
         std::cout << "Done collecting frame & fps" << std::endl;
+    #if defined(_WIN32)
+        perf_sample_timer += dt;
+        if (perf_sample_timer >= perf_sample_interval)
+        {
+            runtime_metrics_update(perf_metrics);
+            perf_sample_timer = 0.0f;
+        }
+    #endif
         
         BeginDrawing();
         ClearBackground(RAYWHITE);
@@ -2579,7 +2688,7 @@ int main(void)
         
         float ui_metrics_hei = 20;
         float ui_metrics_wid = 300;
-        float ui_metrics_hgt = 70;
+        float ui_metrics_hgt = 130;
         
         GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, ui_metrics_hgt }, "performance metrics");
         
@@ -2590,6 +2699,28 @@ int main(void)
         // FPS display
         GuiLabel((Rectangle){ 510, ui_metrics_hei + 35, 260, 20 },
             TextFormat("FPS:         %6d fps", (int)fps_display));
+
+#if defined(_WIN32)
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 55, 260, 20 },
+            TextFormat("CPU:         %6.2f %%", perf_metrics.cpu_percent));
+
+        if (perf_metrics.gpu_percent >= 0.0f)
+        {
+            GuiLabel((Rectangle){ 510, ui_metrics_hei + 75, 260, 20 },
+                TextFormat("GPU:         %6.2f %%", perf_metrics.gpu_percent));
+        }
+        else
+        {
+            GuiLabel((Rectangle){ 510, ui_metrics_hei + 75, 260, 20 },
+                "GPU:         N/A");
+        }
+
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 95, 260, 20 },
+            TextFormat("Memory:      %6.1f MB  (%5.1f%% sys)", perf_metrics.process_memory_mb, perf_metrics.system_memory_percent));
+#else
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 55, 260, 20 },
+            "CPU/GPU/Memory metrics are only implemented on Windows");
+#endif
         
         //---------
         
@@ -2801,7 +2932,7 @@ int main(void)
         
         //---------
         
-        float ui_sync_hei = 220;
+        float ui_sync_hei = 250;
         
         GuiGroupBox((Rectangle){ 20, ui_sync_hei, 290, 70 }, "synchronization");
 
@@ -2818,7 +2949,7 @@ int main(void)
 
         //---------
         
-        float ui_adj_hei = 300;
+        float ui_adj_hei = 330;
         
         GuiGroupBox((Rectangle){ 20, ui_adj_hei, 290, 130 }, "adjustment");
         
@@ -2846,7 +2977,7 @@ int main(void)
         
         //---------
         
-        float ui_clamp_hei = 440;
+        float ui_clamp_hei = 470;
         
         GuiGroupBox((Rectangle){ 20, ui_clamp_hei, 290, 100 }, "clamping");
         
@@ -2869,7 +3000,7 @@ int main(void)
         
         //---------
         
-        float ui_ik_hei = 550;
+        float ui_ik_hei = 580;
         
         GuiGroupBox((Rectangle){ 20, ui_ik_hei, 290, 100 }, "inverse kinematics");
         
