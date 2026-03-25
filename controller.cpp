@@ -215,6 +215,42 @@ enum
     GAMEPAD_STICK_RIGHT,
 };
 
+static float keyboard_axis(int negative_key, int positive_key)
+{
+    return (IsKeyDown(positive_key) ? 1.0f : 0.0f) - (IsKeyDown(negative_key) ? 1.0f : 0.0f);
+}
+
+static vec3 keyboard_get_stick(int stick)
+{
+    float keyboardx = 0.0f;
+    float keyboardy = 0.0f;
+
+    if (stick == GAMEPAD_STICK_LEFT)
+    {
+        // WASD drives character movement.
+        keyboardx = keyboard_axis(KEY_A, KEY_D);
+        keyboardy = keyboard_axis(KEY_W, KEY_S);
+    }
+    else
+    {
+        // Arrow keys emulate right stick for camera/facing.
+        keyboardx = keyboard_axis(KEY_LEFT, KEY_RIGHT);
+        keyboardy = keyboard_axis(KEY_UP, KEY_DOWN);
+    }
+
+    if (keyboardx != 0.0f || keyboardy != 0.0f)
+    {
+        float mag = sqrtf(keyboardx * keyboardx + keyboardy * keyboardy);
+        if (mag > 1.0f)
+        {
+            keyboardx /= mag;
+            keyboardy /= mag;
+        }
+    }
+
+    return vec3(keyboardx, 0.0f, keyboardy);
+}
+
 vec3 gamepad_get_stick(int stick, const float deadzone = 0.2f)
 {
     float gamepadx = GetGamepadAxisMovement(GAMEPAD_PLAYER, stick == GAMEPAD_STICK_LEFT ? GAMEPAD_AXIS_LEFT_X : GAMEPAD_AXIS_RIGHT_X);
@@ -233,6 +269,17 @@ vec3 gamepad_get_stick(int stick, const float deadzone = 0.2f)
     {
         gamepadx = 0.0f;
         gamepady = 0.0f;
+    }
+
+    vec3 keyboard_stick = keyboard_get_stick(stick);
+    gamepadx += keyboard_stick.x;
+    gamepady += keyboard_stick.z;
+
+    float merged_mag = sqrtf(gamepadx * gamepadx + gamepady * gamepady);
+    if (merged_mag > 1.0f)
+    {
+        gamepadx /= merged_mag;
+        gamepady /= merged_mag;
     }
     
     return vec3(gamepadx, 0.0f, gamepady);
@@ -267,8 +314,11 @@ float orbit_camera_update_distance(
     float gamepadzoom = 
         IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_1)  ? +1.0f :
         IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ? -1.0f : 0.0f;
+
+    float keyboard_zoom = keyboard_axis(KEY_E, KEY_Q);
+    float zoom_input = clampf(gamepadzoom + keyboard_zoom, -1.0f, 1.0f);
         
-    return clampf(distance +  10.0f * dt * gamepadzoom, 0.1f, 100.0f);
+    return clampf(distance +  10.0f * dt * zoom_input, 0.1f, 100.0f);
 }
 
 // Updates the camera using the orbit cam controls
@@ -302,7 +352,8 @@ void orbit_camera_update(
 
 bool desired_strafe_update()
 {
-    return IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_2) > 0.5f;
+    return IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_2) > 0.5f ||
+           IsKeyDown(KEY_LEFT_SHIFT);
 }
 
 void desired_gait_update(
@@ -314,7 +365,7 @@ void desired_gait_update(
     simple_spring_damper_exact(
         desired_gait, 
         desired_gait_velocity,
-        IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ? 1.0f : 0.0f,
+        (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) || IsKeyDown(KEY_LEFT_CONTROL)) ? 1.0f : 0.0f,
         gait_change_halflife,
         dt);
 }
@@ -2803,14 +2854,15 @@ int main(void)
         
         float ui_ctrl_hei = 380;
         
-        GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 140 }, "controls");
+        GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 170 }, "controls");
         
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 200, 20 }, "Left Trigger - Strafe");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 200, 20 }, "Left Stick - Move");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 200, 20 }, "Right Stick - Camera / Facing (Stafe)");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 200, 20 }, "Left Shoulder - Zoom In");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 200, 20 }, "Right Shoulder - Zoom Out");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 200, 20 }, "A Button - Walk");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or Left Shift");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Left Ctrl");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 220, 20 }, "Zoom In: Left Shoulder or E");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 220, 20 }, "Zoom Out: Right Shoulder or Q");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 130, 220, 20 }, "Both gamepad and keyboard can mix");
         
 
         //---------
