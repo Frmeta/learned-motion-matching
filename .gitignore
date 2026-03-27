@@ -11,3 +11,6 @@ resources/runs*
 
 local/
 database.bin
+
+features.csv
+database.csv

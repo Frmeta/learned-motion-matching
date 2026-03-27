@@ -33,14 +33,16 @@ def animation_mirror(lrot, lpos, names, parents):
 
 files = [
     # We just use a small section of this clip for the standing idle
-    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351), 
+    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351, False), 
     # Running
-    ('resources/bvh/run1_subject5.bvh',             90, 7086), 
+    ('resources/bvh/run1_subject5.bvh',             90, 7086, False), 
     # Walking
-    ('resources/bvh/walk1_subject5.bvh',            80, 7791), # decrease file size (original: 7791)
+    ('resources/bvh/walk1_subject5.bvh',            80, 7791, False), # decrease file size (original: 7791)
     # Terrain
-    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972),
-    ('resources/bvh/obstacles2_subject5.bvh',       250, 5750),
+    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False),
+    ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False),
+    # Walk on rope
+    ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
 ]
 
 """ We will accumulate data in these lists """
@@ -56,10 +58,11 @@ range_starts = []
 range_stops = []
 
 contact_states = []
+walk_on_rope_states = []
 
 """ Loop Over Files """
 
-for filename, start, stop in files:
+for filename, start, stop, is_walk_on_rope in files:
     
     # For each file we process it mirrored and not mirrored
     for mirror in [False, True]:
@@ -191,6 +194,7 @@ for filename, start, stop in files:
         range_stops.append(offset + len(positions))
         
         contact_states.append(contacts)
+        walk_on_rope_states.append(np.full((len(positions), 1), 1 if is_walk_on_rope else 0, dtype=np.uint8))
     
     
 """ Concatenate Data """
@@ -205,6 +209,7 @@ range_starts = np.array(range_starts).astype(np.int32)
 range_stops = np.array(range_stops).astype(np.int32)
 
 contact_states = np.concatenate(contact_states, axis=0).astype(np.uint8)
+walk_on_rope_states = np.concatenate(walk_on_rope_states, axis=0).astype(np.uint8)
 
 """ Compute Future Toe Positions for Rough Terrain Navigation """
 
@@ -467,6 +472,7 @@ with open('resources/bin/database.bin', 'wb') as f:
     nbones = bone_positions.shape[1]
     nranges = range_starts.shape[0]
     ncontacts = contact_states.shape[1]
+    nrope = walk_on_rope_states.shape[1]
     nfuture_toe = future_toe_positions.shape[1]  # Should be 12
     
     f.write(struct.pack('II', nframes, nbones) + bone_positions.ravel().tobytes())
@@ -483,7 +489,48 @@ with open('resources/bin/database.bin', 'wb') as f:
     # Write future toe positions (task-specific output o*)
     f.write(struct.pack('II', nframes, nfuture_toe) + future_toe_positions.ravel().tobytes())
 
-print("Database written successfully with future toe positions!")
+    # Write walk-on-rope state (1 column: 1 for rope-walk clip frames, 0 otherwise)
+    f.write(struct.pack('II', nframes, nrope) + walk_on_rope_states.ravel().tobytes())
+
+print("Database written successfully with future toe positions and walk-on-rope labels!")
+
+
+""" Write Database CSV (debug/inspection format) """
+
+print("Writing database.csv...")
+
+def _write_csv_section(csv_file, name, data_2d):
+    csv_file.write("# %s (rows=%d, cols=%d)\n" % (name, data_2d.shape[0], data_2d.shape[1]))
+    for row in data_2d:
+        csv_file.write(",".join(str(v) for v in row))
+        csv_file.write("\n")
+
+
+with open('resources/bin/database.csv', 'w') as csv_f:
+    csv_preview_frames = min(nframes, 100)
+
+    # Keep a compact metadata header for easier downstream parsing.
+    csv_f.write("# Database Metadata\n")
+    csv_f.write("nframes,%d\n" % nframes)
+    csv_f.write("nframes_csv,%d\n" % csv_preview_frames)
+    csv_f.write("nbones,%d\n" % nbones)
+    csv_f.write("nranges,%d\n" % nranges)
+    csv_f.write("ncontacts,%d\n" % ncontacts)
+    csv_f.write("nfuture_toe,%d\n" % nfuture_toe)
+    csv_f.write("nrope,%d\n" % nrope)
+
+    _write_csv_section(csv_f, "bone_positions", bone_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "bone_velocities", bone_velocities[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "bone_rotations", bone_rotations[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "bone_angular_velocities", bone_angular_velocities[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "bone_parents", bone_parents.reshape(1, -1))
+    _write_csv_section(csv_f, "range_starts", range_starts.reshape(1, -1))
+    _write_csv_section(csv_f, "range_stops", range_stops.reshape(1, -1))
+    _write_csv_section(csv_f, "contact_states", contact_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "future_toe_positions", future_toe_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "walk_on_rope_states", walk_on_rope_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
+
+print("database.csv written successfully!")
 
     
     

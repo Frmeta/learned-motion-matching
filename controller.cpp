@@ -359,13 +359,18 @@ bool desired_strafe_update()
 void desired_gait_update(
     float& desired_gait, 
     float& desired_gait_velocity,
+    const bool desired_walk_on_rope,
     const float dt,
     const float gait_change_halflife = 0.1f)
 {
+    // Rope-walk mode enforces walking gait while the button is held.
+    float gait_target =
+        (desired_walk_on_rope || IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) ? 1.0f : 0.0f;
+
     simple_spring_damper_exact(
         desired_gait, 
         desired_gait_velocity,
-        (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) || IsKeyDown(KEY_LEFT_CONTROL)) ? 1.0f : 0.0f,
+        gait_target,
         gait_change_halflife,
         dt);
 }
@@ -1672,6 +1677,7 @@ int main(void)
     
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
+    bool desired_walk_on_rope_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -1841,11 +1847,13 @@ int main(void)
         
         // Get if strafe is desired
         bool desired_strafe = desired_strafe_update();
+        bool desired_walk_on_rope = IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP);
         
         // Get the desired gait (walk / run)
         desired_gait_update(
             desired_gait,
             desired_gait_velocity,
+            desired_walk_on_rope,
             dt);
         
         // Get the desired simulation speeds based on the gait
@@ -1882,6 +1890,13 @@ int main(void)
         desired_rotation =  desired_rotation_curr;
         
         bool force_search = false;
+
+        if (desired_walk_on_rope != desired_walk_on_rope_prev)
+        {
+            force_search = true;
+            force_search_timer = search_time;
+            desired_walk_on_rope_prev = desired_walk_on_rope;
+        }
 
         if (force_search_timer <= 0.0f && (
             (length(desired_velocity_change_prev) >= desired_velocity_change_threshold && 
@@ -2118,6 +2133,13 @@ int main(void)
         query_compute_trajectory_direction_feature(query, offset, bone_rotations(0), trajectory_rotations);
         std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
+        if (db.nfeatures() >= 36)
+        {
+            const float walk_on_rope_feature_strength = 6.0f;
+            std::cout << "  Setting walk-on-rope flag..." << std::endl;
+            query(offset) = desired_walk_on_rope ? walk_on_rope_feature_strength : 0.0f;
+            offset += 1;
+        }
         std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
         std::cout << "Done assert" << std::endl;
