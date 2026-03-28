@@ -762,6 +762,47 @@ void query_compute_terrain_height_feature(
 
 //--------------------------------------
 
+static bool sample_terrain_height(
+    const Model& ground_plane_model,
+    const vec3 position,
+    float& out_height)
+{
+    bool hit = false;
+    float highest = 0.0f;
+    Ray ray = { to_Vector3(position + vec3(0.0f, 20.0f, 0.0f)), {0.0f, -1.0f, 0.0f} };
+
+    for (int i = 0; i < ground_plane_model.meshCount; i++)
+    {
+        RayCollision collision = GetRayCollisionMesh(ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+        if (collision.hit && (!hit || collision.point.y > highest))
+        {
+            highest = collision.point.y;
+            hit = true;
+        }
+    }
+
+    if (hit)
+    {
+        out_height = highest;
+    }
+
+    return hit;
+}
+
+static void clamp_position_min_terrain_y(
+    vec3& position,
+    const Model& ground_plane_model,
+    const float terrain_height_offset)
+{
+    float terrain_height = 0.0f;
+    if (sample_terrain_height(ground_plane_model, position, terrain_height))
+    {
+        position.y = maxf(position.y, terrain_height + terrain_height_offset);
+    }
+}
+
+//--------------------------------------
+
 // Collide against the obscales which are
 // essentially bounding boxes of a given size
 vec3 simulation_collide_obstacles(
@@ -1685,6 +1726,7 @@ int main(void)
     
     float simulation_velocity_halflife = 0.27f;
     float simulation_rotation_halflife = 0.27f;
+    float terrain_y_clamp_offset = 0.8f;
     
     // All speeds in m/s
     float simulation_run_fwrd_speed = 4.0f;
@@ -2497,6 +2539,12 @@ int main(void)
                 adjusted_position,
                 adjusted_rotation);
         }
+
+        // Keep player simulation root above terrain floor each frame.
+        clamp_position_min_terrain_y(
+            simulation_position,
+            ground_plane_model,
+            terrain_y_clamp_offset);
         
         // Contact fixup with foot locking and IK
 
