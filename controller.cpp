@@ -359,13 +359,11 @@ bool desired_strafe_update()
 void desired_gait_update(
     float& desired_gait, 
     float& desired_gait_velocity,
-    const bool desired_walk_on_rope,
+    const bool desired_walk,
     const float dt,
     const float gait_change_halflife = 0.1f)
 {
-    // Rope-walk mode enforces walking gait while the button is held.
-    float gait_target =
-        (desired_walk_on_rope || IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) ? 1.0f : 0.0f;
+    float gait_target = desired_walk ? 1.0f : 0.0f;
 
     simple_spring_damper_exact(
         desired_gait, 
@@ -1696,6 +1694,10 @@ int main(void)
     float simulation_walk_fwrd_speed = 1.75f;
     float simulation_walk_side_speed = 1.5f;
     float simulation_walk_back_speed = 1.25f;
+
+    float simulation_rope_fwrd_speed = 1.2f;
+    float simulation_rope_side_speed = 0.45f;
+    float simulation_rope_back_speed = 0.3f;
     
     array1d<vec3> trajectory_desired_velocities(4);
     array1d<quat> trajectory_desired_rotations(4);
@@ -1847,19 +1849,33 @@ int main(void)
         
         // Get if strafe is desired
         bool desired_strafe = desired_strafe_update();
-        bool desired_walk_on_rope = IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP);
+        bool desired_walk =
+            IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
+            IsKeyDown(KEY_LEFT_CONTROL) ||
+            IsKeyDown(KEY_RIGHT_CONTROL);
+        bool desired_walk_on_rope =
+            IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
+            IsKeyDown(KEY_LEFT_ALT) ||
+            IsKeyDown(KEY_RIGHT_ALT);
         
         // Get the desired gait (walk / run)
         desired_gait_update(
             desired_gait,
             desired_gait_velocity,
-            desired_walk_on_rope,
+            desired_walk,
             dt);
         
         // Get the desired simulation speeds based on the gait
         float simulation_fwrd_speed = lerpf(simulation_run_fwrd_speed, simulation_walk_fwrd_speed, desired_gait);
         float simulation_side_speed = lerpf(simulation_run_side_speed, simulation_walk_side_speed, desired_gait);
         float simulation_back_speed = lerpf(simulation_run_back_speed, simulation_walk_back_speed, desired_gait);
+
+        if (desired_walk_on_rope)
+        {
+            simulation_fwrd_speed = simulation_rope_fwrd_speed;
+            simulation_side_speed = simulation_rope_side_speed;
+            simulation_back_speed = simulation_rope_back_speed;
+        }
         
         // Get the desired velocity
         vec3 desired_velocity_curr = desired_velocity_update(
@@ -2876,15 +2892,16 @@ int main(void)
         
         float ui_ctrl_hei = 380;
         
-        GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 170 }, "controls");
+        GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 190 }, "controls");
         
         GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
         GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
         GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or Left Shift");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Left Ctrl");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 220, 20 }, "Zoom In: Left Shoulder or E");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 220, 20 }, "Zoom Out: Right Shoulder or Q");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 130, 220, 20 }, "Both gamepad and keyboard can mix");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Ctrl");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or Alt");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
+        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");
         
 
         //---------
