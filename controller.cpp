@@ -1607,8 +1607,8 @@ int main(void)
     {
         // Init Window
         
-        const int screen_width = 1280;
-        const int screen_height = 720;
+        const int screen_width = 1720;
+        const int screen_height = 920;
         
         SetConfigFlags(FLAG_VSYNC_HINT);
         SetConfigFlags(FLAG_MSAA_4X_HINT);
@@ -2902,6 +2902,10 @@ int main(void)
 
         // UI
         
+        // Responsive positioning for right-side panels
+        float ui_right_panel_x = screen_width - 320;  // 290px width + 20px margin
+        float ui_right_panel_sm_x = screen_width - 270;  // 250px width + 20px margin
+        
         //---------
         // Performance Metrics Panel
         
@@ -2945,52 +2949,52 @@ int main(void)
         
         float ui_sim_hei = 20;
         
-        GuiGroupBox((Rectangle){ 970, ui_sim_hei, 290, 250 }, "simulation object");
+        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_sim_hei, 290, 250 }, "simulation object");
 
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 10, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 10, 120, 20 }, 
             "velocity halflife", 
             TextFormat("%5.3f", simulation_velocity_halflife), 
             &simulation_velocity_halflife, 0.0f, 0.5f);
             
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 40, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 40, 120, 20 }, 
             "rotation halflife", 
             TextFormat("%5.3f", simulation_rotation_halflife), 
             &simulation_rotation_halflife, 0.0f, 0.5f);
             
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 70, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 70, 120, 20 }, 
             "run forward speed", 
             TextFormat("%5.3f", simulation_run_fwrd_speed), 
             &simulation_run_fwrd_speed, 0.0f, 10.0f);
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 100, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 100, 120, 20 }, 
             "run sideways speed", 
             TextFormat("%5.3f", simulation_run_side_speed), 
             &simulation_run_side_speed, 0.0f, 10.0f);
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 130, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 130, 120, 20 }, 
             "run backwards speed", 
             TextFormat("%5.3f", simulation_run_back_speed), 
             &simulation_run_back_speed, 0.0f, 10.0f);
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 160, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 160, 120, 20 }, 
             "walk forward speed", 
             TextFormat("%5.3f", simulation_walk_fwrd_speed), 
             &simulation_walk_fwrd_speed, 0.0f, 5.0f);
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 190, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 190, 120, 20 }, 
             "walk sideways speed", 
             TextFormat("%5.3f", simulation_walk_side_speed), 
             &simulation_walk_side_speed, 0.0f, 5.0f);
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_sim_hei + 220, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_sim_hei + 220, 120, 20 }, 
             "walk backwards speed", 
             TextFormat("%5.3f", simulation_walk_back_speed), 
             &simulation_walk_back_speed, 0.0f, 5.0f);
@@ -2999,10 +3003,10 @@ int main(void)
         
         float ui_inert_hei = 280;
         
-        GuiGroupBox((Rectangle){ 970, ui_inert_hei, 290, 40 }, "inertiaization blending");
+        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_inert_hei, 290, 40 }, "inertiaization blending");
         
         GuiSliderBar(
-            (Rectangle){ 1100, ui_inert_hei + 10, 120, 20 }, 
+            (Rectangle){ ui_right_panel_x + 130, ui_inert_hei + 10, 120, 20 }, 
             "halflife", 
             TextFormat("%5.3f", inertialize_blending_halflife), 
             &inertialize_blending_halflife, 0.0f, 0.3f);
@@ -3011,10 +3015,10 @@ int main(void)
         
         float ui_lmm_hei = 330;
         
-        GuiGroupBox((Rectangle){ 970, ui_lmm_hei, 290, 40 }, "learned motion matching");
+        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
         
         GuiCheckBox(
-            (Rectangle){ 1000, ui_lmm_hei + 10, 20, 20 }, 
+            (Rectangle){ ui_right_panel_x + 30, ui_lmm_hei + 10, 20, 20 }, 
             "enabled",
             &lmm_enabled);
         
@@ -3022,24 +3026,24 @@ int main(void)
         
         float ui_ctrl_hei = 380;
         
-        GuiGroupBox((Rectangle){ 1010, ui_ctrl_hei, 250, 190 }, "controls");
+        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_ctrl_hei, 250, 190 }, "controls");
         
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or Left Shift");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Ctrl");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or Alt");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
-        GuiLabel((Rectangle){ 1030, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or Left Shift");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Ctrl");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or Alt");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");
         
 
         //---------
         
-        float ui_input_hei = 530;
-        GuiGroupBox((Rectangle){ 1010, ui_input_hei, 250, 180 }, "Gamepad Test");
+        float ui_input_hei = 580;
+        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_input_hei, 250, 180 }, "Gamepad Test");
         
-        int center_x = 1010 + 125;
+        int center_x = (int)ui_right_panel_sm_x + 125;
         int start_y = ui_input_hei + 30;
 
         // Shoulder Buttons
