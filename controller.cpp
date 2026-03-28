@@ -19,8 +19,14 @@
 #include <initializer_list>
 #include <functional>
 #include <iostream> // TODO: Remove this when not used
+#include <cstring>
+#include <ctime>
+#include <string>
+#include <algorithm>
+#include <vector>
 #include <sys/stat.h>
 #if defined(_WIN32)
+#include <direct.h>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -133,6 +139,203 @@ static bool should_rebuild_features(const char* database_path, const char* featu
     }
 
     return db_info.st_mtime > features_info.st_mtime;
+}
+
+struct joystick_record_sample
+{
+    int frame = 0;
+    float time_seconds = 0.0f;
+    vec3 left_stick;
+    vec3 right_stick;
+    vec3 player_position;
+};
+
+static bool save_joystick_recording_csv(
+    const char* filename,
+    const std::vector<joystick_record_sample>& samples)
+{
+    FILE* f = fopen(filename, "w");
+    if (f == NULL)
+    {
+        return false;
+    }
+
+    fprintf(f, "frame,time_seconds,left_x,left_z,right_x,right_z,player_x,player_y,player_z\n");
+
+    for (size_t i = 0; i < samples.size(); i++)
+    {
+        const joystick_record_sample& s = samples[i];
+        fprintf(
+            f,
+            "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            s.frame,
+            s.time_seconds,
+            s.left_stick.x,
+            s.left_stick.z,
+            s.right_stick.x,
+            s.right_stick.z,
+            s.player_position.x,
+            s.player_position.y,
+            s.player_position.z);
+    }
+
+    fclose(f);
+    return true;
+}
+
+static bool load_joystick_recording_csv(
+    const char* filename,
+    std::vector<joystick_record_sample>& samples)
+{
+    FILE* f = fopen(filename, "r");
+    if (f == NULL)
+    {
+        return false;
+    }
+
+    samples.clear();
+
+    char line[512];
+    bool first_line = true;
+
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+        {
+            continue;
+        }
+
+        if (first_line)
+        {
+            first_line = false;
+            if (strstr(line, "frame,time_seconds") != NULL)
+            {
+                continue;
+            }
+        }
+
+        joystick_record_sample s;
+        float left_x, left_z, right_x, right_z;
+        float player_x, player_y, player_z;
+
+        int parsed = sscanf(
+            line,
+            "%d,%f,%f,%f,%f,%f,%f,%f,%f",
+            &s.frame,
+            &s.time_seconds,
+            &left_x,
+            &left_z,
+            &right_x,
+            &right_z,
+            &player_x,
+            &player_y,
+            &player_z);
+
+        if (parsed == 9)
+        {
+            s.left_stick = vec3(left_x, 0.0f, left_z);
+            s.right_stick = vec3(right_x, 0.0f, right_z);
+            s.player_position = vec3(player_x, player_y, player_z);
+            samples.push_back(s);
+        }
+    }
+
+    fclose(f);
+    return !samples.empty();
+}
+
+static std::string joystick_recording_timestamp_string()
+{
+    std::time_t now = std::time(NULL);
+    std::tm local_now = {};
+
+#if defined(_WIN32)
+    localtime_s(&local_now, &now);
+#else
+    local_now = *std::localtime(&now);
+#endif
+
+    char timestamp[32];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &local_now);
+    return std::string(timestamp);
+}
+
+static std::string joystick_recording_make_output_path(const char* folder)
+{
+    std::string base_folder = (folder != NULL && folder[0] != '\0') ? folder : ".";
+
+    while (!base_folder.empty() &&
+           (base_folder.back() == '/' || base_folder.back() == '\\'))
+    {
+        base_folder.pop_back();
+    }
+
+    if (base_folder.empty())
+    {
+        base_folder = ".";
+    }
+
+    return base_folder + "/joystick_recording_" + joystick_recording_timestamp_string() + ".csv";
+}
+
+static void joystick_recording_refresh_csv_files(
+    const char* folder,
+    std::vector<std::string>& files)
+{
+    files.clear();
+
+#if defined(_WIN32)
+    char search_pattern[768];
+    snprintf(search_pattern, sizeof(search_pattern), "%s/*.csv", folder);
+
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle = FindFirstFileA(search_pattern, &find_data);
+    if (find_handle == INVALID_HANDLE_VALUE)
+    {
+        return;
+    }
+
+    do
+    {
+        if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        {
+            files.push_back(find_data.cFileName);
+        }
+    }
+    while (FindNextFileA(find_handle, &find_data));
+
+    FindClose(find_handle);
+#endif
+
+    std::sort(files.begin(), files.end());
+}
+
+static void joystick_recording_build_dropdown_text(
+    const std::vector<std::string>& files,
+    char* output,
+    size_t output_size)
+{
+    if (output_size == 0)
+    {
+        return;
+    }
+
+    output[0] = '\0';
+
+    if (files.empty())
+    {
+        snprintf(output, output_size, "<no csv files>");
+        return;
+    }
+
+    for (size_t i = 0; i < files.size(); i++)
+    {
+        if (i > 0)
+        {
+            strncat(output, ";", output_size - strlen(output) - 1);
+        }
+        strncat(output, files[i].c_str(), output_size - strlen(output) - 1);
+    }
 }
 
 //--------------------------------------
@@ -1969,6 +2172,71 @@ int main(void)
     const float perf_sample_interval = 0.25f;
 #endif
 
+    char joystick_recording_folder[512] = "./resources/input-recording";
+    char joystick_recording_output_file[768] = "./resources/input-recording/joystick_recording.csv";
+    char joystick_recording_last_saved_file[768] = "./resources/input-recording/joystick_recording.csv";
+    char joystick_recording_loaded_file[768] = "./resources/input-recording/joystick_recording.csv";
+    bool joystick_recording_enabled = false;
+    bool joystick_recording_last_save_ok = true;
+    int joystick_recording_last_saved_count = 0;
+    int joystick_recording_frame = 0;
+    float joystick_recording_time = 0.0f;
+    std::vector<joystick_record_sample> joystick_recording_samples;
+    std::vector<joystick_record_sample> joystick_playback_samples;
+    bool joystick_playback_enabled = false;
+    bool joystick_playback_last_load_ok = false;
+    int joystick_playback_last_loaded_count = 0;
+    int joystick_playback_index = 0;
+    std::vector<std::string> joystick_recording_csv_files;
+    int joystick_recording_csv_selected_index = 0;
+    bool joystick_recording_csv_dropdown_edit = false;
+    char joystick_recording_csv_dropdown_text[4096] = "<no csv files>";
+    vec3 joystick_recording_start_position = bone_positions(0);
+    quat joystick_recording_start_rotation = bone_rotations(0);
+    Camera3D joystick_recording_start_camera = camera;
+    float joystick_recording_start_camera_azimuth = camera_azimuth;
+    float joystick_recording_start_camera_altitude = camera_altitude;
+    float joystick_recording_start_camera_distance = camera_distance;
+
+    auto reset_motion_to_recording_start = [&]()
+    {
+        simulation_position = joystick_recording_start_position;
+        simulation_velocity = vec3();
+        simulation_acceleration = vec3();
+        simulation_rotation = joystick_recording_start_rotation;
+        simulation_angular_velocity = vec3();
+
+        desired_velocity = vec3();
+        desired_velocity_change_curr = vec3();
+        desired_velocity_change_prev = vec3();
+        desired_rotation = joystick_recording_start_rotation;
+        desired_rotation_change_curr = vec3();
+        desired_rotation_change_prev = vec3();
+
+        trajectory_positions.set(simulation_position);
+        trajectory_velocities.set(vec3());
+        trajectory_accelerations.set(vec3());
+        trajectory_rotations.set(simulation_rotation);
+        trajectory_angular_velocities.set(vec3());
+        trajectory_desired_velocities.set(vec3());
+        trajectory_desired_rotations.set(simulation_rotation);
+
+        camera = joystick_recording_start_camera;
+        camera_azimuth = joystick_recording_start_camera_azimuth;
+        camera_altitude = joystick_recording_start_camera_altitude;
+        camera_distance = joystick_recording_start_camera_distance;
+    };
+
+#if defined(_WIN32)
+    _mkdir(joystick_recording_folder);
+#endif
+
+    joystick_recording_refresh_csv_files(joystick_recording_folder, joystick_recording_csv_files);
+    joystick_recording_build_dropdown_text(
+        joystick_recording_csv_files,
+        joystick_recording_csv_dropdown_text,
+        sizeof(joystick_recording_csv_dropdown_text));
+
     std::cout << "hm" << std::endl;
 
     auto update_func = [&]()
@@ -1977,6 +2245,35 @@ int main(void)
         // Get gamepad stick states
         vec3 gamepadstick_left = gamepad_get_stick(GAMEPAD_STICK_LEFT);
         vec3 gamepadstick_right = gamepad_get_stick(GAMEPAD_STICK_RIGHT);
+
+        if (joystick_playback_enabled)
+        {
+            if (joystick_playback_index < (int)joystick_playback_samples.size())
+            {
+                const joystick_record_sample& sample = joystick_playback_samples[joystick_playback_index];
+                gamepadstick_left = sample.left_stick;
+                gamepadstick_right = sample.right_stick;
+                joystick_playback_index += 1;
+            }
+            else
+            {
+                joystick_playback_enabled = false;
+            }
+        }
+
+        if (joystick_recording_enabled)
+        {
+            joystick_recording_samples.push_back(
+                joystick_record_sample{
+                    joystick_recording_frame,
+                    joystick_recording_time,
+                    gamepadstick_left,
+                    gamepadstick_right,
+                    simulation_position
+                });
+            joystick_recording_frame += 1;
+            joystick_recording_time += dt;
+        }
         
         // Get if strafe is desired
         bool desired_strafe = desired_strafe_update();
@@ -1988,6 +2285,13 @@ int main(void)
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
             IsKeyDown(KEY_LEFT_ALT) ||
             IsKeyDown(KEY_RIGHT_ALT);
+
+        if (joystick_playback_enabled)
+        {
+            desired_strafe = false;
+            desired_walk = false;
+            desired_walk_on_rope = false;
+        }
         
         // Get the desired gait (walk / run)
         desired_gait_update(
@@ -3039,11 +3343,121 @@ int main(void)
         
 
         //---------
+
+        float ui_record_hei = 560;
+        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 225 }, "joystick recording");
+
+        const char* recording_button_label = joystick_recording_enabled ? "stop + save" : "start recording";
+        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 210, 26 }, recording_button_label))
+        {
+            if (!joystick_recording_enabled)
+            {
+                joystick_playback_enabled = false;
+                joystick_recording_enabled = true;
+                joystick_recording_samples.clear();
+                joystick_recording_frame = 0;
+                joystick_recording_time = 0.0f;
+                std::string output_path = joystick_recording_make_output_path(joystick_recording_folder);
+                snprintf(joystick_recording_output_file, sizeof(joystick_recording_output_file), "%s", output_path.c_str());
+                reset_motion_to_recording_start();
+            }
+            else
+            {
+                joystick_recording_enabled = false;
+                joystick_recording_last_saved_count = (int)joystick_recording_samples.size();
+                joystick_recording_last_save_ok = save_joystick_recording_csv(
+                    joystick_recording_output_file,
+                    joystick_recording_samples);
+
+                if (joystick_recording_last_save_ok)
+                {
+                    snprintf(joystick_recording_last_saved_file, sizeof(joystick_recording_last_saved_file), "%s", joystick_recording_output_file);
+                    joystick_recording_refresh_csv_files(joystick_recording_folder, joystick_recording_csv_files);
+                    joystick_recording_build_dropdown_text(
+                        joystick_recording_csv_files,
+                        joystick_recording_csv_dropdown_text,
+                        sizeof(joystick_recording_csv_dropdown_text));
+                }
+            }
+        }
+
+        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 47, 100, 24 }, "refresh"))
+        {
+            joystick_recording_refresh_csv_files(joystick_recording_folder, joystick_recording_csv_files);
+            if (joystick_recording_csv_selected_index >= (int)joystick_recording_csv_files.size())
+            {
+                joystick_recording_csv_selected_index = (int)joystick_recording_csv_files.size() - 1;
+            }
+            if (joystick_recording_csv_selected_index < 0)
+            {
+                joystick_recording_csv_selected_index = 0;
+            }
+            joystick_recording_build_dropdown_text(
+                joystick_recording_csv_files,
+                joystick_recording_csv_dropdown_text,
+                sizeof(joystick_recording_csv_dropdown_text));
+        }
+
+        const char* playback_button_label = joystick_playback_enabled ? "stop playback" : "load + play selected";
+        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 103, 210, 24 }, playback_button_label))
+        {
+            if (joystick_playback_enabled)
+            {
+                joystick_playback_enabled = false;
+            }
+            else if (!joystick_recording_csv_files.empty())
+            {
+                std::string selected_path = std::string(joystick_recording_folder) + "/" + joystick_recording_csv_files[joystick_recording_csv_selected_index];
+                joystick_playback_last_load_ok = load_joystick_recording_csv(
+                    selected_path.c_str(),
+                    joystick_playback_samples);
+                joystick_playback_last_loaded_count = (int)joystick_playback_samples.size();
+
+                if (joystick_playback_last_load_ok)
+                {
+                    snprintf(joystick_recording_loaded_file, sizeof(joystick_recording_loaded_file), "%s", selected_path.c_str());
+                    joystick_recording_enabled = false;
+                    joystick_playback_enabled = true;
+                    joystick_playback_index = 0;
+                    reset_motion_to_recording_start();
+                }
+                else
+                {
+                    joystick_playback_enabled = false;
+                    joystick_playback_index = 0;
+                }
+            }
+            else
+            {
+                joystick_playback_last_load_ok = false;
+                joystick_playback_last_loaded_count = 0;
+                joystick_playback_enabled = false;
+                joystick_playback_index = 0;
+            }
+        }
+
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 129, 210, 16 },
+            joystick_recording_enabled ? "Status: recording" : (joystick_playback_enabled ? "Status: playing" : "Status: idle"));
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 143, 210, 16 },
+            TextFormat("Samples: %d", (int)joystick_recording_samples.size()));
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 157, 210, 16 },
+            TextFormat("Last save: %s (%d)", joystick_recording_last_save_ok ? "ok" : "failed", joystick_recording_last_saved_count));
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 171, 210, 16 },
+            TextFormat("Load: %s (%d)", joystick_playback_last_load_ok ? "ok" : "failed", joystick_playback_last_loaded_count));
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 185, 210, 16 }, TextFormat("Loaded: %s", GetFileName(joystick_recording_loaded_file)));
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 199, 210, 16 }, "Input locked while playing");
+
+        //---------
         
-        float ui_input_hei = 580;
-        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_input_hei, 250, 180 }, "Gamepad Test");
+        float ui_input_x = 20;
+        float ui_input_hei = 700;
+        GuiGroupBox((Rectangle){ ui_input_x, ui_input_hei, 250, 115 }, "Gamepad Test");
         
-        int center_x = (int)ui_right_panel_sm_x + 125;
+        int center_x = (int)ui_input_x + 125;
         int start_y = ui_input_hei + 30;
 
         // Shoulder Buttons
@@ -3284,6 +3698,16 @@ int main(void)
             "unlock radius", 
             TextFormat("%5.3f", ik_unlock_radius), 
             &ik_unlock_radius, 0.0f, 0.5f);
+
+        // Draw this last so expanded dropdown options stay above other GUI panels.
+        if (GuiDropdownBox(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 75, 210, 24 },
+            joystick_recording_csv_dropdown_text,
+            &joystick_recording_csv_selected_index,
+            joystick_recording_csv_dropdown_edit))
+        {
+            joystick_recording_csv_dropdown_edit = !joystick_recording_csv_dropdown_edit;
+        }
         
         //---------
 
@@ -3300,6 +3724,19 @@ int main(void)
         update_func();
     }
 #endif
+
+    if (joystick_recording_enabled && !joystick_recording_samples.empty())
+    {
+        joystick_recording_last_saved_count = (int)joystick_recording_samples.size();
+        joystick_recording_last_save_ok = save_joystick_recording_csv(
+            joystick_recording_output_file,
+            joystick_recording_samples);
+
+        if (joystick_recording_last_save_ok)
+        {
+            snprintf(joystick_recording_last_saved_file, sizeof(joystick_recording_last_saved_file), "%s", joystick_recording_output_file);
+        }
+    }
 
     // Unload stuff and finish
     UnloadModel(character_model);
