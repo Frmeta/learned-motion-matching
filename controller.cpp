@@ -142,6 +142,11 @@ static inline Vector3 to_Vector3(vec3 v)
     return (Vector3){ v.x, v.y, v.z };
 }
 
+static inline vec3 from_Vector3(Vector3 v)
+{
+    return vec3(v.x, v.y, v.z);
+}
+
 //--------------------------------------
 
 // Perform linear blend skinning and copy 
@@ -803,14 +808,136 @@ static void clamp_position_min_terrain_y(
 
 //--------------------------------------
 
-// Collide against the obscales which are
-// essentially bounding boxes of a given size
+// Closest-point-on-triangle from Real-Time Collision Detection (Christer Ericson).
+static vec3 closest_point_on_triangle(const vec3 p, const vec3 a, const vec3 b, const vec3 c)
+{
+    vec3 ab = b - a;
+    vec3 ac = c - a;
+    vec3 ap = p - a;
+
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) return a;
+
+    vec3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return b;
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / (d1 - d3);
+        return a + v * ab;
+    }
+
+    vec3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return c;
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / (d2 - d6);
+        return a + w * ac;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        vec3 bc = c - b;
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return b + w * bc;
+    }
+
+    float denom = 1.0f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    return a + v * ab + w * ac;
+}
+
+static bool nearest_point_on_model(
+    const Model& obstacle_model,
+    const vec3 point,
+    vec3& out_nearest,
+    vec3& out_normal)
+{
+    bool found = false;
+    float best_dist_sq = FLT_MAX;
+
+    for (int mesh_idx = 0; mesh_idx < obstacle_model.meshCount; mesh_idx++)
+    {
+        const Mesh& mesh = obstacle_model.meshes[mesh_idx];
+        const float* vertices = mesh.vertices;
+        const unsigned short* indices = mesh.indices;
+
+        if (vertices == nullptr)
+        {
+            continue;
+        }
+
+        int tri_count = mesh.triangleCount;
+        for (int tri = 0; tri < tri_count; tri++)
+        {
+            int i0 = 0;
+            int i1 = 0;
+            int i2 = 0;
+
+            if (indices)
+            {
+                i0 = indices[tri * 3 + 0];
+                i1 = indices[tri * 3 + 1];
+                i2 = indices[tri * 3 + 2];
+            }
+            else
+            {
+                i0 = tri * 3 + 0;
+                i1 = tri * 3 + 1;
+                i2 = tri * 3 + 2;
+            }
+
+            Vector3 a_v = { vertices[i0 * 3 + 0], vertices[i0 * 3 + 1], vertices[i0 * 3 + 2] };
+            Vector3 b_v = { vertices[i1 * 3 + 0], vertices[i1 * 3 + 1], vertices[i1 * 3 + 2] };
+            Vector3 c_v = { vertices[i2 * 3 + 0], vertices[i2 * 3 + 1], vertices[i2 * 3 + 2] };
+
+            vec3 a = from_Vector3(Vector3Transform(a_v, obstacle_model.transform));
+            vec3 b = from_Vector3(Vector3Transform(b_v, obstacle_model.transform));
+            vec3 c = from_Vector3(Vector3Transform(c_v, obstacle_model.transform));
+
+            vec3 nearest = closest_point_on_triangle(point, a, b, c);
+            vec3 delta = point - nearest;
+            float dist_sq = dot(delta, delta);
+
+            if (dist_sq < best_dist_sq)
+            {
+                best_dist_sq = dist_sq;
+                out_nearest = nearest;
+
+                vec3 tri_normal = cross(b - a, c - a);
+                if (dot(tri_normal, tri_normal) > 1e-10f)
+                {
+                    out_normal = normalize(tri_normal);
+                }
+                else
+                {
+                    out_normal = vec3(0.0f, 1.0f, 0.0f);
+                }
+
+                found = true;
+            }
+        }
+    }
+
+    return found;
+}
+
+// Collide against the obstacle model by finding nearest point on mesh surface and pushing out.
 vec3 simulation_collide_obstacles(
     const vec3 prev_pos,
     const vec3 next_pos,
-    const slice1d<vec3> obstacles_positions,
-    const slice1d<vec3> obstacles_scales,
-    const float radius = 0.6f)
+    const Model& obstacle_model,
+    const float radius = 0.8f)
 {
     vec3 dx = next_pos - prev_pos;
     vec3 proj_pos = prev_pos;
@@ -821,17 +948,23 @@ vec3 simulation_collide_obstacles(
     for (int j = 0; j < substeps; j++)
     {
         proj_pos = proj_pos + dx / substeps;
-        
-        for (int i = 0; i < obstacles_positions.size; i++)
-        {
-            // Find nearest point inside obscale and push out
-            vec3 nearest = clamp(proj_pos, 
-              obstacles_positions(i) - 0.5f * obstacles_scales(i),
-              obstacles_positions(i) + 0.5f * obstacles_scales(i));
 
-            if (length(nearest - proj_pos) < radius)
+        vec3 nearest;
+        vec3 nearest_normal;
+        if (nearest_point_on_model(obstacle_model, proj_pos, nearest, nearest_normal))
+        {
+            vec3 delta = proj_pos - nearest;
+            float dist_sq = dot(delta, delta);
+            if (dist_sq < radius * radius)
             {
-                proj_pos = radius * normalize(proj_pos - nearest) + nearest;
+                if (dist_sq > 1e-10f)
+                {
+                    proj_pos = nearest + radius * normalize(delta);
+                }
+                else
+                {
+                    proj_pos = nearest + radius * nearest_normal;
+                }
             }
         }
     } 
@@ -847,8 +980,7 @@ void simulation_positions_update(
     const vec3 desired_velocity, 
     const float halflife, 
     const float dt,
-    const slice1d<vec3> obstacles_positions,
-    const slice1d<vec3> obstacles_scales)
+    const Model& obstacle_model)
 {
     float y = halflife_to_damping(halflife) / 2.0f; 
     vec3 j0 = velocity - desired_velocity;
@@ -865,8 +997,7 @@ void simulation_positions_update(
     position = simulation_collide_obstacles(
         position_prev, 
         position,
-        obstacles_positions,
-        obstacles_scales);
+        obstacle_model);
 }
 
 void simulation_rotations_update(
@@ -926,8 +1057,7 @@ void trajectory_positions_predict(
     const slice1d<vec3> desired_velocities, 
     const float halflife,
     const float dt,
-    const slice1d<vec3> obstacles_positions,
-    const slice1d<vec3> obstacles_scales)
+    const Model& obstacle_model)
 {
     positions(0) = position;
     velocities(0) = velocity;
@@ -946,8 +1076,7 @@ void trajectory_positions_predict(
             desired_velocities(i), 
             halflife, 
             dt, 
-            obstacles_positions, 
-            obstacles_scales);
+            obstacle_model);
     }
 }
 
@@ -1311,33 +1440,6 @@ void draw_trajectory(
     }
 }
 
-void draw_obstacles(
-    const slice1d<vec3> obstacles_positions,
-    const slice1d<vec3> obstacles_scales)
-{
-    for (int i = 0; i < obstacles_positions.size; i++)
-    {
-        vec3 position = vec3(
-            obstacles_positions(i).x, 
-            obstacles_positions(i).y + 0.5f * obstacles_scales(i).y + 0.01f, 
-            obstacles_positions(i).z);
-      
-        DrawCube(
-            to_Vector3(position),
-            obstacles_scales(i).x, 
-            obstacles_scales(i).y, 
-            obstacles_scales(i).z,
-            LIGHTGRAY);
-            
-        DrawCubeWires(
-            to_Vector3(position),
-            obstacles_scales(i).x, 
-            obstacles_scales(i).y, 
-            obstacles_scales(i).z,
-            GRAY);
-    }
-}
-
 //--------------------------------------
 
 vec3 adjust_character_position(
@@ -1525,19 +1627,6 @@ int main(void)
     float camera_azimuth = 0.0f;
     float camera_altitude = 0.4f;
     float camera_distance = 4.0f;
-    
-    // Scene Obstacles
-    
-    array1d<vec3> obstacles_positions(3);
-    array1d<vec3> obstacles_scales(3);
-    
-    obstacles_positions(0) = vec3(5.0f, 0.0f, 6.0f);
-    obstacles_positions(1) = vec3(-3.0f, 0.0f, -5.0f);
-    obstacles_positions(2) = vec3(-8.0f, 0.0f, 3.0f);
-    
-    obstacles_scales(0) = vec3(2.0f, 1.0f, 5.0f);
-    obstacles_scales(1) = vec3(4.0f, 1.0f, 4.0f);
-    obstacles_scales(2) = vec3(2.0f, 1.0f, 2.0f);
     
     // Ground Plane
     
@@ -2014,8 +2103,7 @@ int main(void)
             trajectory_desired_velocities,
             simulation_velocity_halflife,
             20.0f * dt,
-            obstacles_positions,
-            obstacles_scales);
+            ground_plane_model);
 
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
@@ -2413,8 +2501,7 @@ int main(void)
             desired_velocity,
             simulation_velocity_halflife,
             dt,
-            obstacles_positions,
-            obstacles_scales);
+            ground_plane_model);
             
         simulation_rotations_update(
             simulation_rotation, 
@@ -2440,8 +2527,7 @@ int main(void)
             synchronized_position = simulation_collide_obstacles(
                 simulation_position_prev,
                 synchronized_position,
-                obstacles_positions,
-                obstacles_scales);
+                ground_plane_model);
             
             simulation_position = synchronized_position;
             simulation_rotation = synchronized_rotation;
@@ -2783,10 +2869,6 @@ int main(void)
             trajectory_positions,
             trajectory_rotations,
             ORANGE);
-        
-        draw_obstacles(
-            obstacles_positions,
-            obstacles_scales);
         
         deform_character_mesh(
             character_mesh, 
