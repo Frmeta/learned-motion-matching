@@ -2032,6 +2032,11 @@ int main(void)
     float simulation_rope_fwrd_speed = 1.2f;
     float simulation_rope_side_speed = 0.45f;
     float simulation_rope_back_speed = 0.3f;
+
+    float climbing_min_speed_factor = 0.1f;
+    float climbing_probe_distance = 0.6f;
+    float climbing_height_threshold = 0.1f;
+    float climbing_max_height_delta = 0.8f;
     
     array1d<vec3> trajectory_desired_velocities(4);
     array1d<quat> trajectory_desired_rotations(4);
@@ -2311,6 +2316,37 @@ int main(void)
             simulation_side_speed = simulation_rope_side_speed;
             simulation_back_speed = simulation_rope_back_speed;
         }
+
+        float climbing_speed_scale = 1.0f;
+        vec3 move_input_world = quat_mul_vec3(
+            quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)),
+            gamepadstick_left);
+        move_input_world.y = 0.0f;
+
+        if (length(move_input_world) > 0.01f)
+        {
+            vec3 move_dir = normalize(move_input_world);
+            float terrain_height_curr = 0.0f;
+            float terrain_height_ahead = 0.0f;
+            vec3 probe_ahead = simulation_position + move_dir * climbing_probe_distance;
+
+            if (sample_terrain_height(ground_plane_model, simulation_position, terrain_height_curr) &&
+                sample_terrain_height(ground_plane_model, probe_ahead, terrain_height_ahead))
+            {
+                float uphill_height_delta = terrain_height_ahead - terrain_height_curr;
+                if (uphill_height_delta > climbing_height_threshold)
+                {
+                    float steepness_t = (uphill_height_delta - climbing_height_threshold) /
+                        maxf(climbing_max_height_delta - climbing_height_threshold, 0.0001f);
+                    steepness_t = clampf(steepness_t, 0.0f, 1.0f);
+                    climbing_speed_scale = lerpf(1.0f, climbing_min_speed_factor, steepness_t);
+                }
+            }
+        }
+
+        simulation_fwrd_speed *= climbing_speed_scale;
+        simulation_side_speed *= climbing_speed_scale;
+        simulation_back_speed *= climbing_speed_scale;
         
         // Get the desired velocity
         vec3 desired_velocity_curr = desired_velocity_update(
