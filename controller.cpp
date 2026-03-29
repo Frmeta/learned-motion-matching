@@ -2537,11 +2537,14 @@ int main(void)
                     }
                 }
                 
-                // Store relative to hip height
-                
+                // Store relative to hip height, but clamp to avoid extreme negatives while falling.
+                const float min_terrain_feature_height = -2.0f;
+                float left_relative_terrain_height = left_terrain_height - hip_height;
+                float right_relative_terrain_height = right_terrain_height - hip_height;
+
                 future_terrain_heights(time_idx) = vec2(
-                    left_terrain_height - hip_height,
-                    right_terrain_height - hip_height);
+                    maxf(left_relative_terrain_height, min_terrain_feature_height),
+                    maxf(right_relative_terrain_height, min_terrain_feature_height));
 
                 // std::cout << "LeftToe Terrain World Terrain height: " << left_terrain_height << std::endl;
                 // std::cout << "Hip's world position: " << hip_height << std::endl;
@@ -3197,6 +3200,10 @@ int main(void)
             bone_positions(0) + 0.6f * quat_mul_vec3(bone_rotations(0), vec3(0.0f, 0.0f, 1.0f))), MAROON);
         
         // Draw Ground Plane
+
+        // Visual reference cube for scene scale (1.0f tall).
+        DrawCube((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, GRAY);
+        DrawCubeWires((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, DARKGRAY);
         
         DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
         DrawGrid(20, 1.0f);
