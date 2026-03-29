@@ -1201,6 +1201,16 @@ void simulation_positions_update(
         position_prev, 
         position,
         obstacle_model);
+    
+    // Ground collision: if player is phasing through ground, set velocity.y to positive
+    float terrain_height = 0.0f;
+    if (sample_terrain_height(obstacle_model, position, terrain_height))
+    {
+        if (position.y < terrain_height)
+        {
+            velocity.y = maxf(velocity.y, 0.2f);  // Set to positive value (upward)
+        }
+    }
 }
 
 void simulation_rotations_update(
@@ -2196,7 +2206,8 @@ int main(void)
     int joystick_recording_csv_selected_index = 0;
     bool joystick_recording_csv_dropdown_edit = false;
     char joystick_recording_csv_dropdown_text[4096] = "<no csv files>";
-    vec3 joystick_recording_start_position = bone_positions(0);
+    const float spawn_height_offset = 5.0f;
+    vec3 joystick_recording_start_position = bone_positions(0) + vec3(0.0f, spawn_height_offset, 0.0f);
     quat joystick_recording_start_rotation = bone_rotations(0);
     Camera3D joystick_recording_start_camera = camera;
     float joystick_recording_start_camera_azimuth = camera_azimuth;
@@ -2970,10 +2981,10 @@ int main(void)
         }
 
         // Keep player simulation root above terrain floor each frame.
-        clamp_position_min_terrain_y(
-            simulation_position,
-            ground_plane_model,
-            terrain_y_clamp_offset);
+        // clamp_position_min_terrain_y(
+        //     simulation_position,
+        //     ground_plane_model,
+        //     terrain_y_clamp_offset);
         
         // Contact fixup with foot locking and IK
 
@@ -3757,6 +3768,9 @@ int main(void)
         EndDrawing();
 
     };
+
+    // Initialize simulation/trajectory state to the configured spawn pose.
+    reset_motion_to_recording_start();
 
 #if defined(PLATFORM_WEB)
     std::function<void()> u{update_func};
