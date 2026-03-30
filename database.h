@@ -559,16 +559,19 @@ void compute_trajectory_position_feature(database& db, int& offset, float weight
         vec3 trajectory_pos2 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t2, 0) - db.bone_positions(i, 0));
         
         db.features(i, offset + 0) = trajectory_pos0.x;
-        db.features(i, offset + 1) = trajectory_pos0.z;
-        db.features(i, offset + 2) = trajectory_pos1.x;
-        db.features(i, offset + 3) = trajectory_pos1.z;
-        db.features(i, offset + 4) = trajectory_pos2.x;
-        db.features(i, offset + 5) = trajectory_pos2.z;
+        db.features(i, offset + 1) = trajectory_pos0.y;
+        db.features(i, offset + 2) = trajectory_pos0.z;
+        db.features(i, offset + 3) = trajectory_pos1.x;
+        db.features(i, offset + 4) = trajectory_pos1.y;
+        db.features(i, offset + 5) = trajectory_pos1.z;
+        db.features(i, offset + 6) = trajectory_pos2.x;
+        db.features(i, offset + 7) = trajectory_pos2.y;
+        db.features(i, offset + 8) = trajectory_pos2.z;
     }
     
-    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 6, weight);
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 9, weight);
     
-    offset += 6;
+    offset += 9;
 }
 
 // Same for direction
@@ -583,18 +586,40 @@ void compute_trajectory_direction_feature(database& db, int& offset, float weigh
         vec3 trajectory_dir0 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), quat_mul_vec3(db.bone_rotations(t0, 0), vec3(0, 0, 1)));
         vec3 trajectory_dir1 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), quat_mul_vec3(db.bone_rotations(t1, 0), vec3(0, 0, 1)));
         vec3 trajectory_dir2 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), quat_mul_vec3(db.bone_rotations(t2, 0), vec3(0, 0, 1)));
+
+        // Inject signed vertical intent from trajectory slope so direction Y
+        // becomes positive uphill and negative downhill.
+        vec3 trajectory_pos0 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t0, 0) - db.bone_positions(i, 0));
+        vec3 trajectory_pos1 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t1, 0) - db.bone_positions(i, 0));
+        vec3 trajectory_pos2 = quat_mul_vec3(quat_inv(db.bone_rotations(i, 0)), db.bone_positions(t2, 0) - db.bone_positions(i, 0));
+
+        const float eps = 1e-4f;
+        float h0 = length(vec3(trajectory_pos0.x, 0.0f, trajectory_pos0.z));
+        float h1 = length(vec3(trajectory_pos1.x, 0.0f, trajectory_pos1.z));
+        float h2 = length(vec3(trajectory_pos2.x, 0.0f, trajectory_pos2.z));
+
+        trajectory_dir0.y = trajectory_pos0.y / maxf(h0, eps);
+        trajectory_dir1.y = trajectory_pos1.y / maxf(h1, eps);
+        trajectory_dir2.y = trajectory_pos2.y / maxf(h2, eps);
+
+        trajectory_dir0 = normalize(trajectory_dir0);
+        trajectory_dir1 = normalize(trajectory_dir1);
+        trajectory_dir2 = normalize(trajectory_dir2);
         
         db.features(i, offset + 0) = trajectory_dir0.x;
-        db.features(i, offset + 1) = trajectory_dir0.z;
-        db.features(i, offset + 2) = trajectory_dir1.x;
-        db.features(i, offset + 3) = trajectory_dir1.z;
-        db.features(i, offset + 4) = trajectory_dir2.x;
-        db.features(i, offset + 5) = trajectory_dir2.z;
+        db.features(i, offset + 1) = trajectory_dir0.y;
+        db.features(i, offset + 2) = trajectory_dir0.z;
+        db.features(i, offset + 3) = trajectory_dir1.x;
+        db.features(i, offset + 4) = trajectory_dir1.y;
+        db.features(i, offset + 5) = trajectory_dir1.z;
+        db.features(i, offset + 6) = trajectory_dir2.x;
+        db.features(i, offset + 7) = trajectory_dir2.y;
+        db.features(i, offset + 8) = trajectory_dir2.z;
     }
 
-    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 6, weight);
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 9, weight);
 
-    offset += 6;
+    offset += 9;
 }
 
 // Helper function to build terrain height map from foot contact points
@@ -848,8 +873,8 @@ void database_build_matching_features(
         3 + // Left Foot Velocity
         3 + // Right Foot Velocity
         3 + // Hip Velocity
-        6 + // Trajectory Positions 2D
-        6 + // Trajectory Directions 2D
+        9 + // Trajectory Positions 3D
+        9 + // Trajectory Directions 3D
         8 + // Terrain Heights
         1; // Walk On Rope Flag
         

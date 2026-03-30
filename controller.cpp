@@ -141,6 +141,20 @@ static bool should_rebuild_features(const char* database_path, const char* featu
     return db_info.st_mtime > features_info.st_mtime;
 }
 
+static int matching_feature_count_expected()
+{
+    return
+        3 + // Left Foot Position
+        3 + // Right Foot Position
+        3 + // Left Foot Velocity
+        3 + // Right Foot Velocity
+        3 + // Hip Velocity
+        9 + // Trajectory Positions
+        9 + // Trajectory Directions
+        8 + // Terrain Heights (left+right, 4 samples each)
+        1;  // Walk On Rope Flag
+}
+
 struct joystick_record_sample
 {
     int frame = 0;
@@ -916,34 +930,61 @@ void query_compute_trajectory_position_feature(
     vec3 traj2 = quat_inv_mul_vec3(root_rotation, trajectory_positions(3) - root_position);
     
     query(offset + 0) = traj0.x;
-    query(offset + 1) = traj0.z;
-    query(offset + 2) = traj1.x;
-    query(offset + 3) = traj1.z;
-    query(offset + 4) = traj2.x;
-    query(offset + 5) = traj2.z;
+    query(offset + 1) = traj0.y;
+    query(offset + 2) = traj0.z;
+    query(offset + 3) = traj1.x;
+    query(offset + 4) = traj1.y;
+    query(offset + 5) = traj1.z;
+    query(offset + 6) = traj2.x;
+    query(offset + 7) = traj2.y;
+    query(offset + 8) = traj2.z;
     
-    offset += 6;
+    offset += 9;
 }
 
 // Same but for the trajectory direction
 void query_compute_trajectory_direction_feature(
     slice1d<float> query, 
     int& offset, 
+    const vec3 root_position,
     const quat root_rotation, 
+    const slice1d<vec3> trajectory_positions,
     const slice1d<quat> trajectory_rotations)
 {
     vec3 traj0 = quat_inv_mul_vec3(root_rotation, quat_mul_vec3(trajectory_rotations(1), vec3(0, 0, 1)));
     vec3 traj1 = quat_inv_mul_vec3(root_rotation, quat_mul_vec3(trajectory_rotations(2), vec3(0, 0, 1)));
     vec3 traj2 = quat_inv_mul_vec3(root_rotation, quat_mul_vec3(trajectory_rotations(3), vec3(0, 0, 1)));
+
+    // Inject signed vertical intent from trajectory slope.
+    // Positive Y means moving up, negative Y means moving down.
+    const vec3 d0 = trajectory_positions(1) - root_position;
+    const vec3 d1 = trajectory_positions(2) - root_position;
+    const vec3 d2 = trajectory_positions(3) - root_position;
+
+    const float h0 = length(vec3(d0.x, 0.0f, d0.z));
+    const float h1 = length(vec3(d1.x, 0.0f, d1.z));
+    const float h2 = length(vec3(d2.x, 0.0f, d2.z));
+
+    const float eps = 1e-4f;
+    traj0.y = d0.y / maxf(h0, eps);
+    traj1.y = d1.y / maxf(h1, eps);
+    traj2.y = d2.y / maxf(h2, eps);
+
+    traj0 = normalize(traj0);
+    traj1 = normalize(traj1);
+    traj2 = normalize(traj2);
     
     query(offset + 0) = traj0.x;
-    query(offset + 1) = traj0.z;
-    query(offset + 2) = traj1.x;
-    query(offset + 3) = traj1.z;
-    query(offset + 4) = traj2.x;
-    query(offset + 5) = traj2.z;
+    query(offset + 1) = traj0.y;
+    query(offset + 2) = traj0.z;
+    query(offset + 3) = traj1.x;
+    query(offset + 4) = traj1.y;
+    query(offset + 5) = traj1.z;
+    query(offset + 6) = traj2.x;
+    query(offset + 7) = traj2.y;
+    query(offset + 8) = traj2.z;
     
-    offset += 6;
+    offset += 9;
 }
 
 // Add terrain height features to query
@@ -1236,6 +1277,8 @@ void trajectory_desired_velocities_predict(
   slice1d<vec3> desired_velocities,
   const slice1d<quat> trajectory_rotations,
   const vec3 desired_velocity,
+    const vec3 simulation_position,
+    const Model& ground_plane_model,
   const float camera_azimuth,
   const vec3 gamepadstick_left,
   const vec3 gamepadstick_right,
@@ -1246,6 +1289,17 @@ void trajectory_desired_velocities_predict(
   const float dt)
 {
     desired_velocities(0) = desired_velocity;
+
+    // Inject vertical trajectory intent from terrain slope so future
+    // trajectory Y becomes positive uphill and negative downhill.
+    float current_terrain_height = 0.0f;
+    const bool has_current_terrain = sample_terrain_height(
+        ground_plane_model,
+        simulation_position,
+        current_terrain_height);
+
+    const float max_vertical_speed = 2.0f;
+    const float min_vertical_speed = -8.0f;
     
     for (int i = 1; i < desired_velocities.size; i++)
     {
@@ -1257,6 +1311,20 @@ void trajectory_desired_velocities_predict(
             fwrd_speed,
             side_speed,
             back_speed);
+
+        if (has_current_terrain)
+        {
+            float future_terrain_height = 0.0f;
+            vec3 probe_position = simulation_position +
+                vec3(desired_velocities(i).x, 0.0f, desired_velocities(i).z) * (i * dt);
+
+            if (sample_terrain_height(ground_plane_model, probe_position, future_terrain_height))
+            {
+                float prediction_time = maxf(i * dt, 1e-4f);
+                float target_vertical_speed = (future_terrain_height - current_terrain_height) / prediction_time;
+                desired_velocities(i).y = clampf(target_vertical_speed, min_vertical_speed, max_vertical_speed);
+            }
+        }
     }
 }
 
@@ -1559,12 +1627,12 @@ void draw_features(
     vec3 lfoot_vel = quat_mul_vec3(rot, vec3(features( 6), features( 7), features( 8)));
     vec3 rfoot_vel = quat_mul_vec3(rot, vec3(features( 9), features(10), features(11)));
     //vec3 hip_vel   = quat_mul_vec3(rot, vec3(features(12), features(13), features(14)));
-    vec3 traj0_pos = quat_mul_vec3(rot, vec3(features(15),         0.0f, features(16))) + pos;
-    vec3 traj1_pos = quat_mul_vec3(rot, vec3(features(17),         0.0f, features(18))) + pos;
-    vec3 traj2_pos = quat_mul_vec3(rot, vec3(features(19),         0.0f, features(20))) + pos;
-    vec3 traj0_dir = quat_mul_vec3(rot, vec3(features(21),         0.0f, features(22)));
-    vec3 traj1_dir = quat_mul_vec3(rot, vec3(features(23),         0.0f, features(24)));
-    vec3 traj2_dir = quat_mul_vec3(rot, vec3(features(25),         0.0f, features(26)));
+    vec3 traj0_pos = quat_mul_vec3(rot, vec3(features(15), features(16), features(17))) + pos;
+    vec3 traj1_pos = quat_mul_vec3(rot, vec3(features(18), features(19), features(20))) + pos;
+    vec3 traj2_pos = quat_mul_vec3(rot, vec3(features(21), features(22), features(23))) + pos;
+    vec3 traj0_dir = quat_mul_vec3(rot, vec3(features(24), features(25), features(26)));
+    vec3 traj1_dir = quat_mul_vec3(rot, vec3(features(27), features(28), features(29)));
+    vec3 traj2_dir = quat_mul_vec3(rot, vec3(features(30), features(31), features(32)));
     
     DrawSphereWires(to_Vector3(lfoot_pos), 0.05f, 4, 10, color);
     DrawSphereWires(to_Vector3(rfoot_pos), 0.05f, 4, 10, color);
@@ -1580,8 +1648,8 @@ void draw_features(
     DrawLine3D(to_Vector3(traj2_pos), to_Vector3(traj2_pos + 0.25f * traj2_dir), color);
     
     // Draw terrain height features (8 values: 4 time samples x 2 toes)
-    // Features 27-30: left toe terrain heights at t0, t1, t2, t3
-    // Features 31-34: right toe terrain heights at t0, t1, t2, t3
+    // Features 33-36: left toe terrain heights at t0, t1, t2, t3
+    // Features 37-40: right toe terrain heights at t0, t1, t2, t3
     Color terrain_colors[4] = {
         ColorAlpha(color, 1.0f),    // Current frame - full opacity
         ColorAlpha(color, 0.8f),   // +15 frames
@@ -1894,6 +1962,7 @@ int main(void)
     const char* features_path = "./resources/bin/features.bin";
 
     bool rebuild_features = should_rebuild_features(database_path, features_path);
+    const int expected_feature_count = matching_feature_count_expected();
     if (rebuild_features)
     {
         std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
@@ -1928,8 +1997,31 @@ int main(void)
     else
     {
         database_load_matching_features(db, features_path);
-        database_build_bounds(db);
-        std::cout << "Using existing features.bin. Initializing pose data..." << std::endl;
+
+        if (db.nfeatures() != expected_feature_count)
+        {
+            std::cout
+                << "features.bin feature layout mismatch (got " << db.nfeatures()
+                << ", expected " << expected_feature_count
+                << "). Rebuilding features..." << std::endl;
+
+            database_build_matching_features(
+                db,
+                feature_weight_foot_position,
+                feature_weight_foot_velocity,
+                feature_weight_hip_velocity,
+                feature_weight_trajectory_positions,
+                feature_weight_trajectory_directions,
+                feature_weight_terrain_heights);
+
+            database_save_matching_features(db, features_path, false);
+            std::cout << "Features rebuilt. Initializing pose data..." << std::endl;
+        }
+        else
+        {
+            database_build_bounds(db);
+            std::cout << "Using existing features.bin. Initializing pose data..." << std::endl;
+        }
     }
     
     int frame_index = db.range_starts(0);
@@ -2149,6 +2241,19 @@ int main(void)
     nnet_load(stepper, "./resources/bin/stepper.bin");
     std::cout << "Loading projector..." << std::endl;
     nnet_load(projector, "./resources/bin/projector.bin");
+
+    const int lmm_latent_size = 32;
+    bool lmm_networks_compatible =
+        decompressor.input_mean.size == db.nfeatures() + lmm_latent_size &&
+        stepper.input_mean.size == db.nfeatures() + lmm_latent_size &&
+        stepper.output_mean.size == db.nfeatures() + lmm_latent_size &&
+        projector.input_mean.size == db.nfeatures() &&
+        projector.output_mean.size == db.nfeatures() + lmm_latent_size;
+
+    if (!lmm_networks_compatible)
+    {
+        printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d). Retrain decompressor/projector/stepper for this feature layout.\n", db.nfeatures());
+    }
     
     std::cout << "Setting up evaluations..." << std::endl;
 
@@ -2160,8 +2265,8 @@ int main(void)
     std::cout << "Initializing features..." << std::endl;
     array1d<float> features_proj = db.features(frame_index);
     array1d<float> features_curr = db.features(frame_index);
-    array1d<float> latent_proj(32); latent_proj.zero();
-    array1d<float> latent_curr(32); latent_curr.zero();
+    array1d<float> latent_proj(lmm_latent_size); latent_proj.zero();
+    array1d<float> latent_curr(lmm_latent_size); latent_curr.zero();
     
     // Future toe positions at 3 future time samples (15, 30, 45 frames)
     // Contains 3 frames x 2 toes = 6 entries: [left0, right0, left1, right1, left2, right2]
@@ -2435,6 +2540,8 @@ int main(void)
           trajectory_desired_velocities,
           trajectory_rotations,
           desired_velocity,
+                    simulation_position,
+                    ground_plane_model,
           camera_azimuth,
           gamepadstick_left,
           gamepadstick_right,
@@ -2612,7 +2719,8 @@ int main(void)
         std::cout << "frame_index=" << frame_index << std::endl;
 
         
-        slice1d<float> query_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
+        bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
+        slice1d<float> query_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
         std::cout << "Got query features, size=" << query_features.size << std::endl;
         
         int offset = 0;
@@ -2630,10 +2738,16 @@ int main(void)
         std::cout << "  Computing trajectory position feature..." << std::endl;
         query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
         std::cout << "  Computing trajectory direction feature..." << std::endl;
-        query_compute_trajectory_direction_feature(query, offset, bone_rotations(0), trajectory_rotations);
+        query_compute_trajectory_direction_feature(
+            query,
+            offset,
+            bone_positions(0),
+            bone_rotations(0),
+            trajectory_positions,
+            trajectory_rotations);
         std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
-        if (db.nfeatures() >= 36)
+        if (offset < db.nfeatures())
         {
             const float walk_on_rope_feature_strength = 6.0f;
             std::cout << "  Setting walk-on-rope flag..." << std::endl;
@@ -2650,7 +2764,7 @@ int main(void)
         std::cout << "Do we?" << std::endl;
         if (force_search || search_timer <= 0.0f || end_of_anim)
         {
-            if (lmm_enabled)
+            if (lmm_runtime_enabled)
             {
                 // Project query onto nearest feature vector
                 
@@ -2772,7 +2886,7 @@ int main(void)
         search_timer -= dt;
         std::cout << "test4" << std::endl;
 
-        if (lmm_enabled)
+        if (lmm_runtime_enabled)
         {
             // Update features and latents
             stepper_evaluate(
@@ -3235,7 +3349,7 @@ int main(void)
         
         // Draw matched features
         
-        array1d<float> current_features = lmm_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
+        array1d<float> current_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
         denormalize_features(current_features, db.features_offset, db.features_scale);        
         draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON,
             future_toe_position, future_terrain_heights, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones);

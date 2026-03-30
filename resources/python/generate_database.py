@@ -42,7 +42,7 @@ files = [
     ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False),
     ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False),
     # Jump
-    # ('resources/bvh/jump1_subject1.bvh',       1490, 1600, False),
+    ('resources/bvh/jump1_subject1.bvh',       1490, 1600, False),
     # Walk on rope
     ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
 ]
