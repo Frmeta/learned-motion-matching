@@ -364,6 +364,9 @@ static inline vec3 from_Vector3(Vector3 v)
     return vec3(v.x, v.y, v.z);
 }
 
+static constexpr float kTerrainFollowMaxVerticalSpeed = 8.0f;
+static constexpr float kTerrainFollowMinVerticalSpeed = -10.0f;
+
 //--------------------------------------
 
 // Perform linear blend skinning and copy 
@@ -1279,6 +1282,9 @@ void trajectory_desired_velocities_predict(
   const vec3 desired_velocity,
     const vec3 simulation_position,
     const Model& ground_plane_model,
+    const bool jump_active,
+    const float jump_vertical_velocity,
+    const float jump_gravity,
   const float camera_azimuth,
   const vec3 gamepadstick_left,
   const vec3 gamepadstick_right,
@@ -1289,6 +1295,10 @@ void trajectory_desired_velocities_predict(
   const float dt)
 {
     desired_velocities(0) = desired_velocity;
+        if (jump_active)
+        {
+                desired_velocities(0).y = jump_vertical_velocity;
+        }
 
     // Inject vertical trajectory intent from terrain slope so future
     // trajectory Y becomes positive uphill and negative downhill.
@@ -1297,9 +1307,6 @@ void trajectory_desired_velocities_predict(
         ground_plane_model,
         simulation_position,
         current_terrain_height);
-
-    const float max_vertical_speed = 2.0f;
-    const float min_vertical_speed = -8.0f;
     
     for (int i = 1; i < desired_velocities.size; i++)
     {
@@ -1312,7 +1319,12 @@ void trajectory_desired_velocities_predict(
             side_speed,
             back_speed);
 
-        if (has_current_terrain)
+        if (jump_active)
+        {
+            float predicted_vy = jump_vertical_velocity - jump_gravity * (i * dt);
+            desired_velocities(i).y = clampf(predicted_vy, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+        }
+        else if (has_current_terrain)
         {
             float future_terrain_height = 0.0f;
             vec3 probe_position = simulation_position +
@@ -1322,7 +1334,7 @@ void trajectory_desired_velocities_predict(
             {
                 float prediction_time = maxf(i * dt, 1e-4f);
                 float target_vertical_speed = (future_terrain_height - current_terrain_height) / prediction_time;
-                desired_velocities(i).y = clampf(target_vertical_speed, min_vertical_speed, max_vertical_speed);
+                desired_velocities(i).y = clampf(target_vertical_speed, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
             }
         }
     }
@@ -2131,7 +2143,7 @@ int main(void)
     float simulation_walk_side_speed = 1.5f;
     float simulation_walk_back_speed = 1.25f;
 
-    float simulation_rope_fwrd_speed = 1.2f;
+    float simulation_rope_fwrd_speed = 0.6f;
     float simulation_rope_side_speed = 0.45f;
     float simulation_rope_back_speed = 0.3f;
 
@@ -2139,6 +2151,18 @@ int main(void)
     float climbing_probe_distance = 0.6f;
     float climbing_height_threshold = 0.1f;
     float climbing_max_height_delta = 0.8f;
+
+    const float jump_root_height_offset = 1.2f;
+    const float jump_initial_vertical_speed = 20.0f;
+    const float jump_gravity = 50.0f;
+    const float jump_ground_snap_epsilon = 0.08f;
+    const float jump_ground_velocity_epsilon = 0.35f;
+    const float jump_buffer_time = 0.12f;
+    const float jump_coyote_time = 0.08f;
+    bool jump_active = false;
+    float jump_vertical_velocity = 0.0f;
+    float jump_buffer_timer = 0.0f;
+    float jump_coyote_timer = 0.0f;
     
     array1d<vec3> trajectory_desired_velocities(4);
     array1d<quat> trajectory_desired_rotations(4);
@@ -2342,6 +2366,11 @@ int main(void)
         trajectory_desired_velocities.set(vec3());
         trajectory_desired_rotations.set(simulation_rotation);
 
+        jump_active = false;
+        jump_vertical_velocity = 0.0f;
+        jump_buffer_timer = 0.0f;
+        jump_coyote_timer = 0.0f;
+
         camera = joystick_recording_start_camera;
         camera_azimuth = joystick_recording_start_camera_azimuth;
         camera_altitude = joystick_recording_start_camera_altitude;
@@ -2406,12 +2435,26 @@ int main(void)
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
             IsKeyDown(KEY_LEFT_ALT) ||
             IsKeyDown(KEY_RIGHT_ALT);
+        bool jump_pressed =
+            IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
+            IsKeyPressed(KEY_SPACE);
 
         if (joystick_playback_enabled)
         {
             desired_strafe = false;
             desired_walk = false;
             desired_walk_on_rope = false;
+            jump_pressed = false;
+            jump_buffer_timer = 0.0f;
+        }
+
+        if (jump_pressed)
+        {
+            jump_buffer_timer = jump_buffer_time;
+        }
+        else
+        {
+            jump_buffer_timer = maxf(0.0f, jump_buffer_timer - dt);
         }
         
         // Get the desired gait (walk / run)
@@ -2472,6 +2515,39 @@ int main(void)
             simulation_fwrd_speed,
             simulation_side_speed,
             simulation_back_speed);
+
+        float jump_ground_height = 0.0f;
+        bool has_jump_ground = sample_terrain_height(
+            ground_plane_model,
+            simulation_position,
+            jump_ground_height);
+        float jump_grounded_target_height = jump_ground_height + jump_root_height_offset;
+        bool jump_grounded = has_jump_ground &&
+            fabsf(simulation_position.y - jump_grounded_target_height) <= jump_ground_snap_epsilon &&
+            fabsf(simulation_velocity.y) <= jump_ground_velocity_epsilon;
+
+        if (jump_grounded)
+        {
+            jump_coyote_timer = jump_coyote_time;
+        }
+        else
+        {
+            jump_coyote_timer = maxf(0.0f, jump_coyote_timer - dt);
+        }
+
+        if (jump_buffer_timer > 0.0f && jump_coyote_timer > 0.0f && !jump_active)
+        {
+            jump_active = true;
+            jump_vertical_velocity = jump_initial_vertical_speed;
+            jump_buffer_timer = 0.0f;
+            jump_coyote_timer = 0.0f;
+        }
+
+        if (jump_active)
+        {
+            jump_vertical_velocity -= jump_gravity * dt;
+            desired_velocity_curr.y = jump_vertical_velocity;
+        }
 
         std::cout << "test6" << std::endl;
         // Get the desired rotation/direction
@@ -2542,6 +2618,9 @@ int main(void)
           desired_velocity,
                     simulation_position,
                     ground_plane_model,
+                    jump_active,
+                    jump_vertical_velocity,
+                    jump_gravity,
           camera_azimuth,
           gamepadstick_left,
           gamepadstick_right,
@@ -2580,17 +2659,18 @@ int main(void)
             }
         }
 
-        float target_root_height = traj_ground_height + 1.2f;
-        float height_error = target_root_height - simulation_position.y;
-        const float max_vertical_speed = 2.0f;
-        const float min_vertical_speed = -8.0f; // because gravity
-        const float vertical_gain = 4.0f;
-        desired_velocity_curr.y = clampf(height_error * vertical_gain, min_vertical_speed, max_vertical_speed);
+        if (!jump_active)
+        {
+            float target_root_height = traj_ground_height + jump_root_height_offset;
+            float height_error = target_root_height - simulation_position.y;
+            const float vertical_gain = 4.0f;
+            desired_velocity_curr.y = clampf(height_error * vertical_gain, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+        }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
         const float desired_velocity_root_blend = 0.1f;
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
-        // desired_velocity_blended.y = desired_velocity_curr.y;
+        desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
         desired_velocity.y = desired_velocity_curr.y;
         
@@ -2970,6 +3050,27 @@ int main(void)
             simulation_velocity_halflife,
             dt,
             ground_plane_model);
+
+        if (jump_active)
+        {
+            float landing_terrain_height = 0.0f;
+            if (sample_terrain_height(ground_plane_model, simulation_position, landing_terrain_height))
+            {
+                float landing_target_height = landing_terrain_height + jump_root_height_offset;
+                bool landed =
+                    simulation_position.y <= landing_target_height + jump_ground_snap_epsilon &&
+                    simulation_velocity.y <= 0.0f;
+
+                if (landed)
+                {
+                    jump_active = false;
+                    jump_vertical_velocity = 0.0f;
+                    simulation_position.y = maxf(simulation_position.y, landing_target_height);
+                    simulation_velocity.y = 0.0f;
+                    simulation_acceleration.y = 0.0f;
+                }
+            }
+        }
             
         simulation_rotations_update(
             simulation_rotation, 
