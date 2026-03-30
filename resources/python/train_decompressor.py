@@ -14,7 +14,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from train_common import load_database, load_features, save_network
+from train_common import (
+    load_database,
+    load_features,
+    save_network,
+    bin_path,
+    validate_runtime_compatibility,
+)
 
 # Networks
 
@@ -60,7 +66,7 @@ if __name__ == '__main__':
     
     # Load data
     
-    database = load_database('resources/bin/database.bin')
+    database = load_database(bin_path('database.bin'))
     
     parents = database['bone_parents']
     contacts = database['contact_states']
@@ -68,7 +74,7 @@ if __name__ == '__main__':
     range_stops = database['range_stops']
     future_toe_positions = database['future_toe_positions']
     
-    X = load_features('resources/bin/features.bin')['features'].astype(np.float32)
+    X = load_features(bin_path('features.bin'))['features'].astype(np.float32)
     Ypos = database['bone_positions'].astype(np.float32)
     Yrot = database['bone_rotations'].astype(np.float32)
     Yvel = database['bone_velocities'].astype(np.float32)
@@ -79,6 +85,8 @@ if __name__ == '__main__':
     nextra = contacts.shape[1]
     nfeatures = X.shape[1]
     nlatent = 32
+
+    validate_runtime_compatibility(X, future_toe_positions)
     
     # Parameters
     
@@ -251,7 +259,7 @@ if __name__ == '__main__':
             
             # Write latent variables
             
-            with open('resources/bin/latent.bin', 'wb') as f:
+            with open(bin_path('latent.bin'), 'wb') as f:
                 f.write(struct.pack('II', nframes, nlatent) + Z.cpu().numpy().astype(np.float32).ravel().tobytes())
 
     # Function to generate test animation for comparison
@@ -600,7 +608,7 @@ if __name__ == '__main__':
         if i % 1000 == 0:
             generate_animation()
             save_compressed_database()
-            save_network('resources/bin/decompressor.bin', [
+            save_network(bin_path('decompressor.bin'), [
                 network_decompressor.linear0, 
                 network_decompressor.linear1],
                 decompressor_mean_in,

@@ -14,7 +14,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from train_common import load_database, load_features, load_latent, save_network
+from train_common import (
+    load_database,
+    load_features,
+    load_latent,
+    save_network,
+    bin_path,
+    validate_runtime_compatibility,
+)
 
 # Networks
 
@@ -38,13 +45,16 @@ if __name__ == '__main__':
     
     # Load data
     
-    database = load_database('resources/bin/database.bin')
+    database = load_database(bin_path('database.bin'))
     range_starts = database['range_starts']
     range_stops = database['range_stops']
+    future_toe_positions = database['future_toe_positions']
     del database
     
-    X = load_features('resources/bin/features.bin')['features'].copy().astype(np.float32)
-    Z = load_latent('resources/bin/latent.bin')['latent'].copy().astype(np.float32)
+    X = load_features(bin_path('features.bin'))['features'].copy().astype(np.float32)
+    Z = load_latent(bin_path('latent.bin'))['latent'].copy().astype(np.float32)
+
+    validate_runtime_compatibility(X, future_toe_positions)
     
     nframes = X.shape[0]
     nfeatures = X.shape[1]
@@ -262,7 +272,7 @@ if __name__ == '__main__':
         
         if i % 1000 == 0:
             generate_predictions()
-            save_network('resources/bin/stepper.bin', [
+            save_network(bin_path('stepper.bin'), [
                 network_stepper.linear0, 
                 network_stepper.linear1, 
                 network_stepper.linear2],

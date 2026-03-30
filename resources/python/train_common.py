@@ -1,6 +1,57 @@
 import struct
+import os
+from pathlib import Path
 import numpy as np
 import torch
+
+
+def project_root():
+    env_root = os.environ.get('MOTION_MATCHING_ROOT', '').strip()
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+    # resources/python/train_common.py -> project root is two parents up
+    return Path(__file__).resolve().parents[2]
+
+
+def repo_path(*parts):
+    return str(project_root().joinpath(*parts))
+
+
+def bin_path(filename):
+    env_bin_dir = os.environ.get('MOTION_MATCHING_BIN_DIR', '').strip()
+    if env_bin_dir:
+        return str(Path(env_bin_dir).expanduser().resolve().joinpath(filename))
+    return repo_path('resources', 'bin', filename)
+
+
+def expected_feature_count_current_runtime():
+    # Must mirror matching_feature_count_expected() in controller.cpp.
+    return (
+        3 +   # Left Foot Position
+        3 +   # Right Foot Position
+        3 +   # Left Foot Velocity
+        3 +   # Right Foot Velocity
+        3 +   # Hip Velocity
+        9 +   # Trajectory Positions
+        9 +   # Trajectory Directions
+        8 +   # Terrain Heights
+        1     # Walk On Rope Flag
+    )
+
+
+def validate_runtime_compatibility(features, future_toe_positions):
+    expected_features = expected_feature_count_current_runtime()
+    if features.shape[1] != expected_features:
+        raise RuntimeError(
+            f'Feature layout mismatch: got {features.shape[1]} features, '
+            f'expected {expected_features}. Rebuild features.bin using current controller.cpp layout.'
+        )
+
+    if future_toe_positions.shape[1] != 12:
+        raise RuntimeError(
+            f'Future-toe layout mismatch: got {future_toe_positions.shape[1]} floats per frame, '
+            f'expected 12 (3 samples x 2 toes x 2 coords). Rebuild database.bin with current schema.'
+        )
 
 def load_database(filename):
 
