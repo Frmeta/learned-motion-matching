@@ -36,12 +36,12 @@ class CsvStats:
 
 
 REPORT_LINE_RE = re.compile(
-    r"^(?P<file>.+?) \| MPJPE=(?P<mpjpe>[-0-9.]+) \| "
+    r"(?P<filename>[\w-]+\.csv) \| MPJPE=(?P<mpjpe>[-+0-9.eE]+) \| "
     r"frames=(?P<frames>\d+) \| joints=(?P<joints>\d+) \| "
-    r"time_ms MM=(?P<mm_time>[-0-9.]+) LMM=(?P<lmm_time>[-0-9.]+)"
-    r"(?: \| mem_delta_mb MM=(?P<mm_delta>[-0-9.]+) LMM=(?P<lmm_delta>[-0-9.]+) "
-    r"\| mem_peak_mb MM=(?P<mm_peak>[-0-9.]+) LMM=(?P<lmm_peak>[-0-9.]+)"
-    r"(?: \| mem_avg_mb MM=(?P<mm_avg>[-0-9.]+) LMM=(?P<lmm_avg>[-0-9.]+))?)?$")
+    r"time_ms MM=(?P<mm_time>[-+0-9.eE]+) LMM=(?P<lmm_time>[-+0-9.eE]+)"
+    r"(?: \| mem_delta_mb MM=(?P<mm_delta>[-+0-9.eE]+) LMM=(?P<lmm_delta>[-+0-9.eE]+) "
+    r"\| mem_peak_mb MM=(?P<mm_peak>[-+0-9.eE]+) LMM=(?P<lmm_peak>[-+0-9.eE]+)"
+    r"(?: \| mem_avg_mb MM=(?P<mm_avg>[-+0-9.eE]+) LMM=(?P<lmm_avg>[-+0-9.eE]+))?)?$")
 
 
 def run_command(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -151,6 +151,7 @@ def write_combined_report(results: list[CsvStats], output_path: Path, input_fold
     bpje_values: list[float] = []
     mm_time_values: list[float] = []
     lmm_time_values: list[float] = []
+    frame_counts: list[int] = []
     mm_mem_delta_values: list[float] = []
     lmm_mem_delta_values: list[float] = []
     mm_mem_peak_values: list[float] = []
@@ -170,7 +171,7 @@ def write_combined_report(results: list[CsvStats], output_path: Path, input_fold
             continue
 
         both = entry.both
-        line = f"{entry.file_name} | BPJE={both.bpje:.6f} | frames={both.frames} | joints={both.joints}"
+        line = f"{entry.file_name} | BPJE={both.bpje:.6e} | frames={both.frames} | joints={both.joints}"
         line += f" | time_ms MM={both.mm_time_ms:.3f} LMM={both.lmm_time_ms:.3f}"
         if all(v is not None for v in (both.mm_mem_delta_mb, both.lmm_mem_delta_mb, both.mm_mem_peak_mb, both.lmm_mem_peak_mb)):
             line += (
@@ -183,6 +184,7 @@ def write_combined_report(results: list[CsvStats], output_path: Path, input_fold
         bpje_values.append(both.bpje)
         mm_time_values.append(both.mm_time_ms)
         lmm_time_values.append(both.lmm_time_ms)
+        frame_counts.append(both.frames)
         if both.mm_mem_delta_mb is not None and both.lmm_mem_delta_mb is not None:
             mm_mem_delta_values.append(both.mm_mem_delta_mb)
             lmm_mem_delta_values.append(both.lmm_mem_delta_mb)
@@ -195,17 +197,22 @@ def write_combined_report(results: list[CsvStats], output_path: Path, input_fold
 
     lines.append("")
     if bpje_values:
-        lines.append(f"Average BPJE: {sum(bpje_values) / len(bpje_values):.6f} (across {len(bpje_values)} files)")
+        lines.append(f"Average BPJE: {sum(bpje_values) / len(bpje_values):.6e} (across {len(bpje_values)} files)")
     else:
         lines.append("Average BPJE: N/A")
 
-    if mm_time_values and lmm_time_values:
+    if mm_time_values and lmm_time_values and frame_counts:
         mm_time_total = sum(mm_time_values)
         lmm_time_total = sum(lmm_time_values)
-        lines.append(f"Average Time (ms): MM={mm_time_total / len(mm_time_values):.3f} LMM={lmm_time_total / len(lmm_time_values):.3f}")
+        total_frames = sum(frame_counts)
+        if total_frames > 0:
+            lines.append(f"Average Time (ms/frame): MM={mm_time_total / total_frames:.6f} LMM={lmm_time_total / total_frames:.6f}")
+        else:
+            lines.append("Average Time (ms/frame): N/A")
         lines.append(f"Total Time (ms): MM={mm_time_total:.3f} LMM={lmm_time_total:.3f}")
+        lines.append(f"Total Frames: {total_frames}")
     else:
-        lines.append("Average Time (ms): N/A")
+        lines.append("Average Time (ms/frame): N/A")
 
     if mm_mem_delta_values and lmm_mem_delta_values and mm_mem_peak_values and lmm_mem_peak_values:
         lines.append(

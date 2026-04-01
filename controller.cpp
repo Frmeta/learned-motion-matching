@@ -4783,7 +4783,7 @@ int main(int argc, char** argv)
                 {
                     if (mode == APP_MODE_ANALYZE_BOTH)
                     {
-                        fprintf(report, "%s | MPJPE=%.6f | frames=%d | joints=%d | time_ms MM=%.3f LMM=%.3f",
+                        fprintf(report, "%s | MPJPE=%.6e | frames=%d | joints=%d | time_ms MM=%.3f LMM=%.3f",
                             r.file.c_str(), r.mpjpe, r.frame_count, r.joint_count, r.mm_time_ms, r.lmm_time_ms);
 #if defined(_WIN32)
                         fprintf(report, " | mem_delta_mb MM=%.3f LMM=%.3f | mem_peak_mb MM=%.3f LMM=%.3f",
@@ -4796,7 +4796,7 @@ int main(int argc, char** argv)
                     }
                     else if (mode == APP_MODE_ANALYZE_MM)
                     {
-                        fprintf(report, "%s | MM_MPJPE=%.6f | frames=%d | joints=%d | time_ms=%.3f",
+                        fprintf(report, "%s | MM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
                             r.file.c_str(), r.mm_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
 #if defined(_WIN32)
                         fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
@@ -4808,7 +4808,7 @@ int main(int argc, char** argv)
                     }
                     else if (mode == APP_MODE_ANALYZE_LMM)
                     {
-                        fprintf(report, "%s | LMM_MPJPE=%.6f | frames=%d | joints=%d | time_ms=%.3f",
+                        fprintf(report, "%s | LMM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
                             r.file.c_str(), r.lmm_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
 #if defined(_WIN32)
                         fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
@@ -4887,15 +4887,15 @@ int main(int argc, char** argv)
             {
                 if (mode == APP_MODE_ANALYZE_BOTH)
                 {
-                    fprintf(report, "\nAverage MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "\nAverage MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
-                    fprintf(report, "\nAverage MM MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "\nAverage MM MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
-                    fprintf(report, "\nAverage LMM MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "\nAverage LMM MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
                 }
             }
             else
