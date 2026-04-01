@@ -43,6 +43,8 @@
 #include <psapi.h>
 #endif
 
+static constexpr bool debug = false;
+
 #if defined(_WIN32)
 struct runtime_metrics
 {
@@ -2299,37 +2301,71 @@ int main(int argc, char** argv)
     
     bool lmm_enabled = start_with_lmm_enabled;
     
-    std::cout << "Loading neural networks..." << std::endl;
+    if (debug) std::cout << "Loading neural networks..." << std::endl;
     
     nnet decompressor, stepper, projector;    
-    std::cout << "Loading decompressor..." << std::endl;
+    if (debug) std::cout << "Loading decompressor..." << std::endl;
     nnet_load(decompressor, "./resources/bin/decompressor.bin");
-    std::cout << "Loading stepper..." << std::endl;
+    if (debug) std::cout << "Loading stepper..." << std::endl;
     nnet_load(stepper, "./resources/bin/stepper.bin");
-    std::cout << "Loading projector..." << std::endl;
+    if (debug) std::cout << "Loading projector..." << std::endl;
     nnet_load(projector, "./resources/bin/projector.bin");
 
     const int lmm_latent_size = 32;
+    const int expected_features = db.nfeatures();
+    const int expected_features_plus_latent = db.nfeatures() + lmm_latent_size;
+
+    const bool decompressor_input_match =
+        decompressor.input_mean.size == expected_features_plus_latent;
+    const bool stepper_input_match =
+        stepper.input_mean.size == expected_features_plus_latent;
+    const bool stepper_output_match =
+        stepper.output_mean.size == expected_features_plus_latent;
+    const bool projector_input_match =
+        projector.input_mean.size == expected_features;
+    const bool projector_output_match =
+        projector.output_mean.size == expected_features_plus_latent;
+
     bool lmm_networks_compatible =
-        decompressor.input_mean.size == db.nfeatures() + lmm_latent_size &&
-        stepper.input_mean.size == db.nfeatures() + lmm_latent_size &&
-        stepper.output_mean.size == db.nfeatures() + lmm_latent_size &&
-        projector.input_mean.size == db.nfeatures() &&
-        projector.output_mean.size == db.nfeatures() + lmm_latent_size;
+        decompressor_input_match &&
+        stepper_input_match &&
+        stepper_output_match &&
+        projector_input_match &&
+        projector_output_match;
 
     if (!lmm_networks_compatible)
     {
         printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d). Retrain decompressor/projector/stepper for this feature layout.\n", db.nfeatures());
+        printf("  [%-8s] decompressor.input_mean.size : actual=%d expected=%d\n",
+            decompressor_input_match ? "MATCH" : "MISMATCH",
+            decompressor.input_mean.size,
+            expected_features_plus_latent);
+        printf("  [%-8s] stepper.input_mean.size      : actual=%d expected=%d\n",
+            stepper_input_match ? "MATCH" : "MISMATCH",
+            stepper.input_mean.size,
+            expected_features_plus_latent);
+        printf("  [%-8s] stepper.output_mean.size     : actual=%d expected=%d\n",
+            stepper_output_match ? "MATCH" : "MISMATCH",
+            stepper.output_mean.size,
+            expected_features_plus_latent);
+        printf("  [%-8s] projector.input_mean.size    : actual=%d expected=%d\n",
+            projector_input_match ? "MATCH" : "MISMATCH",
+            projector.input_mean.size,
+            expected_features);
+        printf("  [%-8s] projector.output_mean.size   : actual=%d expected=%d\n",
+            projector_output_match ? "MATCH" : "MISMATCH",
+            projector.output_mean.size,
+            expected_features_plus_latent);
     }
     
-    std::cout << "Setting up evaluations..." << std::endl;
+    if (debug) std::cout << "Setting up evaluations..." << std::endl;
 
     nnet_evaluation decompressor_evaluation, stepper_evaluation, projector_evaluation;
     decompressor_evaluation.resize(decompressor);
     stepper_evaluation.resize(stepper);
     projector_evaluation.resize(projector);
     
-    std::cout << "Initializing features..." << std::endl;
+    if (debug) std::cout << "Initializing features..." << std::endl;
     array1d<float> features_proj = db.features(frame_index);
     array1d<float> features_curr = db.features(frame_index);
     array1d<float> latent_proj(lmm_latent_size); latent_proj.zero();
@@ -2440,11 +2476,11 @@ int main(int argc, char** argv)
         joystick_recording_csv_dropdown_text,
         sizeof(joystick_recording_csv_dropdown_text));
 
-    std::cout << "hm" << std::endl;
+    if (debug) std::cout << "hm" << std::endl;
 
     auto update_func = [&]()
     {
-        std::cout << "update" << std::endl;
+        if (debug) std::cout << "update" << std::endl;
         // Get gamepad stick states
         vec3 gamepadstick_left = gamepad_get_stick(GAMEPAD_STICK_LEFT);
         vec3 gamepadstick_right = gamepad_get_stick(GAMEPAD_STICK_RIGHT);
@@ -2611,7 +2647,7 @@ int main(int argc, char** argv)
             desired_velocity_curr.y = jump_vertical_velocity;
         }
 
-        std::cout << "test6" << std::endl;
+        if (debug) std::cout << "test6" << std::endl;
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
             desired_rotation,
@@ -2848,7 +2884,7 @@ int main(int argc, char** argv)
                 // std::cout << std::endl;
             }
         }
-        std::cout << "test5" << std::endl;
+        if (debug) std::cout << "test5" << std::endl;
            
         // Make query vector for search.
         // In theory this only needs to be done when a search is 
@@ -2857,29 +2893,29 @@ int main(int argc, char** argv)
         array1d<float> query(db.nfeatures());
                 
         // Compute the features of the query vector
-        std::cout << "Getting query features..." << std::endl;
-        std::cout << "frame_index=" << frame_index << std::endl;
+        if (debug) std::cout << "Getting query features..." << std::endl;
+        if (debug) std::cout << "frame_index=" << frame_index << std::endl;
 
         
         bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
         slice1d<float> query_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
-        std::cout << "Got query features, size=" << query_features.size << std::endl;
+        if (debug) std::cout << "Got query features, size=" << query_features.size << std::endl;
         
         int offset = 0;
-        std::cout << "Query" << std::endl;
-        std::cout << "  Copying left foot position..." << std::endl;
+        if (debug) std::cout << "Query" << std::endl;
+        if (debug) std::cout << "  Copying left foot position..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Position
-        std::cout << "  Copying right foot position..." << std::endl;
+        if (debug) std::cout << "  Copying right foot position..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Position
-        std::cout << "  Copying left foot velocity..." << std::endl;
+        if (debug) std::cout << "  Copying left foot velocity..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Left Foot Velocity
-        std::cout << "  Copying right foot velocity..." << std::endl;
+        if (debug) std::cout << "  Copying right foot velocity..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Velocity
-        std::cout << "  Copying hip velocity..." << std::endl;
+        if (debug) std::cout << "  Copying hip velocity..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
-        std::cout << "  Computing trajectory position feature..." << std::endl;
+        if (debug) std::cout << "  Computing trajectory position feature..." << std::endl;
         query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
-        std::cout << "  Computing trajectory direction feature..." << std::endl;
+        if (debug) std::cout << "  Computing trajectory direction feature..." << std::endl;
         query_compute_trajectory_direction_feature(
             query,
             offset,
@@ -2887,23 +2923,23 @@ int main(int argc, char** argv)
             bone_rotations(0),
             trajectory_positions,
             trajectory_rotations);
-        std::cout << "  Computing terrain height feature..." << std::endl;
+        if (debug) std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
         if (offset < db.nfeatures())
         {
             const float walk_on_rope_feature_strength = 6.0f;
-            std::cout << "  Setting walk-on-rope flag..." << std::endl;
+            if (debug) std::cout << "  Setting walk-on-rope flag..." << std::endl;
             query(offset) = desired_walk_on_rope ? walk_on_rope_feature_strength : 0.0f;
             offset += 1;
         }
-        std::cout << "Done Query" << std::endl;
+        if (debug) std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
-        std::cout << "Done assert" << std::endl;
+        if (debug) std::cout << "Done assert" << std::endl;
         // Check if we reached the end of the current anim
         bool end_of_anim = database_index_clamp(db, frame_index, 1) == frame_index;
         
         // Do we need to search?
-        std::cout << "Do we?" << std::endl;
+        if (debug) std::cout << "Do we?" << std::endl;
         if (force_search || search_timer <= 0.0f || end_of_anim)
         {
             if (lmm_runtime_enabled)
@@ -2986,7 +3022,7 @@ int main(int argc, char** argv)
                     query);
                 
                 // Transition if better frame found
-                std::cout << "Do2" << std::endl;
+                if (debug) std::cout << "Do2" << std::endl;
                 if (best_index != frame_index)
                 {
                     trns_bone_positions = db.bone_positions(best_index);
@@ -3026,7 +3062,7 @@ int main(int argc, char** argv)
         
         // Tick down search timer
         search_timer -= dt;
-        std::cout << "test4" << std::endl;
+        if (debug) std::cout << "test4" << std::endl;
 
         if (lmm_runtime_enabled)
         {
@@ -3100,7 +3136,7 @@ int main(int argc, char** argv)
             dt);
         
         // Update Simulation
-        std::cout << "test3" << std::endl;
+        if (debug) std::cout << "test3" << std::endl;
         
         vec3 simulation_position_prev = simulation_position;
         
@@ -3176,7 +3212,7 @@ int main(int argc, char** argv)
         }
         
         // Adjustment 
-        std::cout << "test2" << std::endl;
+        if (debug) std::cout << "test2" << std::endl;
         
         if (!synchronization_enabled && adjustment_enabled)
         {   
@@ -3267,7 +3303,7 @@ int main(int argc, char** argv)
 
         adjusted_bone_positions = bone_positions;
         adjusted_bone_rotations = bone_rotations;
-        std::cout << "test1" << std::endl;
+        if (debug) std::cout << "test1" << std::endl;
         if (ik_enabled)
         {
             for (int i = 0; i < contact_bones.size; i++)
@@ -3465,11 +3501,11 @@ int main(int argc, char** argv)
         // Render
         
         // Calculate metrics
-        std::cout << "Collecting metrics" << std::endl;
+        if (debug) std::cout << "Collecting metrics" << std::endl;
         frame_time_ms = GetFrameTime() * 1000.0f;  // Convert to milliseconds
         fps_display = GetFPS();
         
-        std::cout << "Done collecting frame & fps" << std::endl;
+        if (debug) std::cout << "Done collecting frame & fps" << std::endl;
     #if defined(_WIN32)
         perf_sample_timer += dt;
         if (perf_sample_timer >= perf_sample_interval)
@@ -3779,7 +3815,7 @@ int main(int argc, char** argv)
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 225 }, "joystick recording");
 
         const char* recording_button_label = joystick_recording_enabled ? "stop + save" : "start recording";
-        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 100, does it, 26 }, recording_button_label))
+        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 100, 26 }, recording_button_label))
         {
             if (!joystick_recording_enabled)
             {
