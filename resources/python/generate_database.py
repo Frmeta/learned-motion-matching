@@ -277,6 +277,25 @@ print("Future Toe Positions Computed: %d frames × 12 values" % nframes)
 """ Visualize Stats """
 
 if True:
+
+    """ Print Database Summary Stats """
+
+    total_frames = bone_positions.shape[0]
+    frame_rate = 60.0  # After supersampling to 60 fps
+    total_duration_seconds = total_frames / frame_rate
+    total_duration_minutes = total_duration_seconds / 60.0
+
+    print("\n=== Database Summary ===")
+    print("Total Frames: %d" % total_frames)
+    print("Total Duration: %.2f seconds (%.2f minutes)" % (total_duration_seconds, total_duration_minutes))
+    print("Frame Rate: %.1f Hz" % frame_rate)
+    print("Total Bones: %d" % bone_positions.shape[1])
+    print("Total Clips/Ranges: %d" % len(range_starts))
+    print("=======================\n")
+
+""" Visualize Stats """
+
+if True:
     
     print("Visualizing Stats...")
     
