@@ -2374,7 +2374,15 @@ int main(int argc, char** argv)
     bool joystick_playback_last_load_ok = false;
     int joystick_playback_last_loaded_count = 0;
     
+    // Playback visualization: store both MM and LMM for rendering during playback
+    std::vector<array1d<vec3>> playback_mm_bone_positions;
+    std::vector<array1d<quat>> playback_mm_bone_rotations;
+    std::vector<array1d<vec3>> playback_lmm_bone_positions;
+    std::vector<array1d<quat>> playback_lmm_bone_rotations;
+    
     bool show_stickman = false;
+    bool show_mm = true;
+    bool show_lmm = false;
     int joystick_playback_index = 0;
     std::vector<std::string> joystick_recording_csv_files;
     int joystick_recording_csv_selected_index = 0;
@@ -2454,6 +2462,15 @@ int main(int argc, char** argv)
             {
                 joystick_playback_enabled = false;
             }
+        }
+        
+        // Clear playback data at the start of each frame when not in playback
+        if (!joystick_playback_enabled)
+        {
+            playback_mm_bone_positions.clear();
+            playback_mm_bone_rotations.clear();
+            playback_lmm_bone_positions.clear();
+            playback_lmm_bone_rotations.clear();
         }
 
         if (joystick_recording_enabled)
@@ -3416,6 +3433,34 @@ int main(int argc, char** argv)
             gamepadstick_right,
             desired_strafe,
             dt);
+        
+        // Store playback visualization from the already inertialized runtime
+        // pose. This keeps transitions smooth instead of jumping on search hits.
+        if (joystick_playback_enabled)
+        {
+            bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
+
+            if (lmm_runtime_enabled)
+            {
+                playback_lmm_bone_positions.push_back(global_bone_positions);
+                playback_lmm_bone_rotations.push_back(global_bone_rotations);
+
+                // Keep MM history length aligned so indexing remains valid.
+                // Use the current runtime pose instead of freezing at the first frame.
+                playback_mm_bone_positions.push_back(global_bone_positions);
+                playback_mm_bone_rotations.push_back(global_bone_rotations);
+            }
+            else
+            {
+                playback_mm_bone_positions.push_back(global_bone_positions);
+                playback_mm_bone_rotations.push_back(global_bone_rotations);
+
+                // Keep LMM history length aligned so indexing remains valid.
+                // Use the current runtime pose instead of freezing at the first frame.
+                playback_lmm_bone_positions.push_back(global_bone_positions);
+                playback_lmm_bone_rotations.push_back(global_bone_rotations);
+            }
+        }
 
         // Render
         
@@ -3490,14 +3535,67 @@ int main(int argc, char** argv)
             global_bone_positions, 
             global_bone_rotations,
             db.bone_parents);
-        
-        if (show_stickman)
+
+        // During playback, render only MM/LMM selections to avoid a third
+        // duplicate character from the default draw path.
+        bool render_playback_characters = joystick_playback_enabled;
+
+        if (!render_playback_characters)
         {
-            draw_stickman(global_bone_positions, db.bone_parents, SKYBLUE);
+            if (show_stickman)
+            {
+                draw_stickman(global_bone_positions, db.bone_parents, SKYBLUE);
+            }
+            else
+            {
+                DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
+            }
         }
-        else
+        
+        // Draw playback MM and LMM during recording playback
+        if (joystick_playback_enabled && !playback_mm_bone_positions.empty())
         {
-            DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
+            int current_frame = std::min((int)playback_mm_bone_positions.size() - 1, joystick_playback_index - 1);
+            
+            // Draw MM (Motion Matching) from database
+            if (show_mm && current_frame >= 0 && current_frame < (int)playback_mm_bone_positions.size())
+            {
+                if (show_stickman)
+                {
+                    draw_stickman(playback_mm_bone_positions[current_frame], db.bone_parents, GREEN);
+                }
+                else
+                {
+                    // Draw MM model with green tint
+                    deform_character_mesh(
+                        character_mesh,
+                        character_data,
+                        playback_mm_bone_positions[current_frame],
+                        playback_mm_bone_rotations[current_frame],
+                        db.bone_parents);
+                    DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, GREEN);
+                }
+            }
+            
+            // Draw LMM (Learned Motion Matching) from neural networks
+            if (show_lmm && current_frame >= 0 && current_frame < (int)playback_lmm_bone_positions.size())
+            {
+                if (show_stickman)
+                {
+                    draw_stickman(playback_lmm_bone_positions[current_frame], db.bone_parents, RED);
+                }
+                else
+                {
+                    // Draw LMM model with red tint
+                    deform_character_mesh(
+                        character_mesh,
+                        character_data,
+                        playback_lmm_bone_positions[current_frame],
+                        playback_lmm_bone_rotations[current_frame],
+                        db.bone_parents);
+                    DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RED);
+                }
+            }
         }
         
         // Draw matched features
@@ -3639,8 +3737,9 @@ int main(int argc, char** argv)
         //---------
         
         float ui_visual_hei = 330;
+        float ui_visual_height = joystick_playback_enabled ? 100.0f : 40.0f;
         
-        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_visual_hei, 290, 40 }, "visualization");
+        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_visual_hei, 290, ui_visual_height }, "visualization");
         
         GuiCheckBox(
             (Rectangle){ ui_right_panel_x + 30, ui_visual_hei + 10, 20, 20 }, 
@@ -3649,7 +3748,7 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_lmm_hei = 380;
+        float ui_lmm_hei = 430;
         
         GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
         
@@ -3660,7 +3759,7 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_ctrl_hei = 430;
+        float ui_ctrl_hei = 480;
         
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_ctrl_hei, 250, 190 }, "controls");
         
@@ -3680,7 +3779,7 @@ int main(int argc, char** argv)
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 225 }, "joystick recording");
 
         const char* recording_button_label = joystick_recording_enabled ? "stop + save" : "start recording";
-        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 210, 26 }, recording_button_label))
+        if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 100, does it, 26 }, recording_button_label))
         {
             if (!joystick_recording_enabled)
             {
@@ -3766,6 +3865,22 @@ int main(int argc, char** argv)
                 joystick_playback_enabled = false;
                 joystick_playback_index = 0;
             }
+        }
+
+        // Playback visualization toggles belong to playback UI and only show while playing.
+        if (joystick_playback_enabled)
+        {
+            GuiLabel(
+                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 28, 100, 16 },
+                "display");
+            GuiCheckBox(
+                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 14, 20, 20 },
+                "show MM",
+                &show_mm);
+            GuiCheckBox(
+                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 39, 20, 20 },
+                "show LMM",
+                &show_lmm);
         }
 
         GuiLabel(
