@@ -1,0 +1,16 @@
+MM vs LMM analysis (BPJE)
+input folder: C:/Users/fredo/Downloads/Skripsi/Source code/Motion-Matching/resources/input-recording
+generated: 20260402_005856
+
+joystick_recording_20260329_035051.csv | BPJE=0.244397 | frames=353 | joints=23 | time_ms MM=1781.585 LMM=1778.486 | mem_delta_mb MM=0.695 LMM=0.012 | mem_peak_mb MM=245.930 LMM=245.941 | mem_avg_mb MM=245.634 LMM=245.941
+joystick_recording_20260329_035814.csv | BPJE=0.261901 | frames=976 | joints=23 | time_ms MM=4876.788 LMM=4915.852 | mem_delta_mb MM=2.113 LMM=0.328 | mem_peak_mb MM=247.191 LMM=247.520 | mem_avg_mb MM=246.209 LMM=247.263
+joystick_recording_20260329_040648.csv | BPJE=0.201046 | frames=205 | joints=23 | time_ms MM=1105.561 LMM=1089.349 | mem_delta_mb MM=0.441 LMM=0.043 | mem_peak_mb MM=245.652 LMM=245.699 | mem_avg_mb MM=245.471 LMM=245.672
+joystick_recording_20260329_041059.csv | BPJE=0.193854 | frames=275 | joints=23 | time_ms MM=1353.832 LMM=1436.875 | mem_delta_mb MM=0.742 LMM=0.016 | mem_peak_mb MM=246.164 LMM=246.180 | mem_avg_mb MM=245.793 LMM=246.177
+joystick_recording_20260329_041127.csv | BPJE=0.280655 | frames=267 | joints=23 | time_ms MM=1478.506 LMM=1491.192 | mem_delta_mb MM=0.719 LMM=0.012 | mem_peak_mb MM=245.875 LMM=245.887 | mem_avg_mb MM=245.511 LMM=245.887
+
+Average BPJE: 0.236371 (across 5 files)
+Average Time (ms): MM=2119.254 LMM=2142.351
+Total Time (ms): MM=10596.272 LMM=10711.754
+Average Memory Delta (MB): MM=0.942 LMM=0.082
+Average Memory Peak (MB): MM=246.162 LMM=246.245
+Average Memory Usage (MB): MM=245.724 LMM=246.188

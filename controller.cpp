@@ -23,7 +23,9 @@
 #include <ctime>
 #include <string>
 #include <algorithm>
+#include <cmath>
 #include <vector>
+#include <chrono>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -121,6 +123,16 @@ static void runtime_metrics_update(runtime_metrics& m)
     {
         m.system_memory_percent = (float)mem_status.dwMemoryLoad;
     }
+}
+
+static float get_process_memory_mb()
+{
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+    {
+        return (float)pmc.WorkingSetSize / (1024.0f * 1024.0f);
+    }
+    return -1.0f;
 }
 #endif
 
@@ -1926,15 +1938,81 @@ int main(int argc, char** argv)
     try
     {
         bool start_with_lmm_enabled = false;
+        enum app_mode
+        {
+            APP_MODE_WINDOW,
+            APP_MODE_ANALYZE_BOTH,
+            APP_MODE_ANALYZE_MM,
+            APP_MODE_ANALYZE_LMM
+        };
+        app_mode mode = APP_MODE_WINDOW;
+        char analyze_input_path[512] = "./resources/input-recording";
+        bool analyze_input_is_file = false;
         for (int argi = 1; argi < argc; argi++)
         {
             if (strcmp(argv[argi], "--learned") == 0)
             {
                 start_with_lmm_enabled = true;
             }
+            else if (strcmp(argv[argi], "--window") == 0)
+            {
+                mode = APP_MODE_WINDOW;
+            }
+            else if (strcmp(argv[argi], "--analyze") == 0 || strcmp(argv[argi], "--analyze-both") == 0)
+            {
+                mode = APP_MODE_ANALYZE_BOTH;
+            }
+            else if (strcmp(argv[argi], "--analyze-mm") == 0)
+            {
+                mode = APP_MODE_ANALYZE_MM;
+            }
+            else if (strcmp(argv[argi], "--analyze-lmm") == 0)
+            {
+                mode = APP_MODE_ANALYZE_LMM;
+            }
+            else if (strncmp(argv[argi], "--mode=", 7) == 0)
+            {
+                const char* mode_name = argv[argi] + 7;
+                if (strcmp(mode_name, "window") == 0)
+                {
+                    mode = APP_MODE_WINDOW;
+                }
+                else if (strcmp(mode_name, "analyze-both") == 0)
+                {
+                    mode = APP_MODE_ANALYZE_BOTH;
+                }
+                else if (strcmp(mode_name, "analyze-mm") == 0)
+                {
+                    mode = APP_MODE_ANALYZE_MM;
+                }
+                else if (strcmp(mode_name, "analyze-lmm") == 0)
+                {
+                    mode = APP_MODE_ANALYZE_LMM;
+                }
+                else
+                {
+                    printf("Warning: Unknown mode '%s'\n", mode_name);
+                }
+            }
+            else if (strncmp(argv[argi], "--input=", 8) == 0)
+            {
+                snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi] + 8);
+                analyze_input_is_file = true;
+            }
+            else if (strncmp(argv[argi], "--csv=", 6) == 0)
+            {
+                snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi] + 6);
+                analyze_input_is_file = true;
+            }
+            else if (argv[argi][0] != '-')
+            {
+                snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi]);
+                analyze_input_is_file = true;
+            }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned]\n", argv[0]);
+                printf("Usage: %s [--learned] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> --input=<csv>\n", argv[0]);
                 return 0;
             }
             else
@@ -1948,8 +2026,12 @@ int main(int argc, char** argv)
         const int screen_width = 1720;
         const int screen_height = 920;
         
-        SetConfigFlags(FLAG_VSYNC_HINT);
-        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        unsigned int window_flags = FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT;
+        if (mode != APP_MODE_WINDOW)
+        {
+            window_flags |= FLAG_WINDOW_HIDDEN;
+        }
+        SetConfigFlags(window_flags);
         InitWindow(screen_width, screen_height, "raylib [data vs code driven displacement]");
         SetTargetFPS(60);
     
@@ -2417,8 +2499,6 @@ int main(int argc, char** argv)
     std::vector<array1d<quat>> playback_lmm_bone_rotations;
     
     bool show_stickman = false;
-    bool show_mm = true;
-    bool show_lmm = false;
     int joystick_playback_index = 0;
     std::vector<std::string> joystick_recording_csv_files;
     int joystick_recording_csv_selected_index = 0;
@@ -2465,6 +2545,157 @@ int main(int argc, char** argv)
         camera_altitude = joystick_recording_start_camera_altitude;
         camera_distance = joystick_recording_start_camera_distance;
     };
+
+    // Snapshot baseline state so --analyze can replay the same clip in MM and LMM.
+    const int base_frame_index = frame_index;
+    const array1d<vec3> base_curr_bone_positions = curr_bone_positions;
+    const array1d<vec3> base_curr_bone_velocities = curr_bone_velocities;
+    const array1d<quat> base_curr_bone_rotations = curr_bone_rotations;
+    const array1d<vec3> base_curr_bone_angular_velocities = curr_bone_angular_velocities;
+    const array1d<bool> base_curr_bone_contacts = curr_bone_contacts;
+    const array1d<vec3> base_trns_bone_positions = trns_bone_positions;
+    const array1d<vec3> base_trns_bone_velocities = trns_bone_velocities;
+    const array1d<quat> base_trns_bone_rotations = trns_bone_rotations;
+    const array1d<vec3> base_trns_bone_angular_velocities = trns_bone_angular_velocities;
+    const array1d<bool> base_trns_bone_contacts = trns_bone_contacts;
+    const array1d<vec3> base_bone_positions = bone_positions;
+    const array1d<vec3> base_bone_velocities = bone_velocities;
+    const array1d<quat> base_bone_rotations = bone_rotations;
+    const array1d<vec3> base_bone_angular_velocities = bone_angular_velocities;
+    const array1d<vec3> base_bone_offset_positions = bone_offset_positions;
+    const array1d<vec3> base_bone_offset_velocities = bone_offset_velocities;
+    const array1d<quat> base_bone_offset_rotations = bone_offset_rotations;
+    const array1d<vec3> base_bone_offset_angular_velocities = bone_offset_angular_velocities;
+    const vec3 base_transition_src_position = transition_src_position;
+    const quat base_transition_src_rotation = transition_src_rotation;
+    const vec3 base_transition_dst_position = transition_dst_position;
+    const quat base_transition_dst_rotation = transition_dst_rotation;
+    const float base_search_timer = search_timer;
+    const float base_force_search_timer = force_search_timer;
+    const vec3 base_desired_velocity = desired_velocity;
+    const vec3 base_desired_velocity_change_curr = desired_velocity_change_curr;
+    const vec3 base_desired_velocity_change_prev = desired_velocity_change_prev;
+    const quat base_desired_rotation = desired_rotation;
+    const vec3 base_desired_rotation_change_curr = desired_rotation_change_curr;
+    const vec3 base_desired_rotation_change_prev = desired_rotation_change_prev;
+    const float base_desired_gait = desired_gait;
+    const float base_desired_gait_velocity = desired_gait_velocity;
+    const bool base_desired_walk_on_rope_prev = desired_walk_on_rope_prev;
+    const vec3 base_simulation_position = simulation_position;
+    const vec3 base_simulation_velocity = simulation_velocity;
+    const vec3 base_simulation_acceleration = simulation_acceleration;
+    const quat base_simulation_rotation = simulation_rotation;
+    const vec3 base_simulation_angular_velocity = simulation_angular_velocity;
+    const bool base_jump_active = jump_active;
+    const float base_jump_vertical_velocity = jump_vertical_velocity;
+    const float base_jump_buffer_timer = jump_buffer_timer;
+    const float base_jump_coyote_timer = jump_coyote_timer;
+    const array1d<vec3> base_trajectory_desired_velocities = trajectory_desired_velocities;
+    const array1d<quat> base_trajectory_desired_rotations = trajectory_desired_rotations;
+    const array1d<vec3> base_trajectory_positions = trajectory_positions;
+    const array1d<vec3> base_trajectory_velocities = trajectory_velocities;
+    const array1d<vec3> base_trajectory_accelerations = trajectory_accelerations;
+    const array1d<quat> base_trajectory_rotations = trajectory_rotations;
+    const array1d<vec3> base_trajectory_angular_velocities = trajectory_angular_velocities;
+    const array1d<bool> base_contact_states = contact_states;
+    const array1d<bool> base_contact_locks = contact_locks;
+    const array1d<vec3> base_contact_positions = contact_positions;
+    const array1d<vec3> base_contact_velocities = contact_velocities;
+    const array1d<vec3> base_contact_points = contact_points;
+    const array1d<vec3> base_contact_targets = contact_targets;
+    const array1d<vec3> base_contact_offset_positions = contact_offset_positions;
+    const array1d<vec3> base_contact_offset_velocities = contact_offset_velocities;
+    const array1d<vec3> base_adjusted_bone_positions = adjusted_bone_positions;
+    const array1d<quat> base_adjusted_bone_rotations = adjusted_bone_rotations;
+    const array1d<float> base_features_proj = features_proj;
+    const array1d<float> base_features_curr = features_curr;
+    const array1d<float> base_latent_proj = latent_proj;
+    const array1d<float> base_latent_curr = latent_curr;
+    const array1d<vec2> base_future_toe_position = future_toe_position;
+    const array1d<vec2> base_future_terrain_heights = future_terrain_heights;
+
+    auto reset_runtime_for_analysis = [&]()
+    {
+        frame_index = base_frame_index;
+        curr_bone_positions = base_curr_bone_positions;
+        curr_bone_velocities = base_curr_bone_velocities;
+        curr_bone_rotations = base_curr_bone_rotations;
+        curr_bone_angular_velocities = base_curr_bone_angular_velocities;
+        curr_bone_contacts = base_curr_bone_contacts;
+        trns_bone_positions = base_trns_bone_positions;
+        trns_bone_velocities = base_trns_bone_velocities;
+        trns_bone_rotations = base_trns_bone_rotations;
+        trns_bone_angular_velocities = base_trns_bone_angular_velocities;
+        trns_bone_contacts = base_trns_bone_contacts;
+        bone_positions = base_bone_positions;
+        bone_velocities = base_bone_velocities;
+        bone_rotations = base_bone_rotations;
+        bone_angular_velocities = base_bone_angular_velocities;
+        bone_offset_positions = base_bone_offset_positions;
+        bone_offset_velocities = base_bone_offset_velocities;
+        bone_offset_rotations = base_bone_offset_rotations;
+        bone_offset_angular_velocities = base_bone_offset_angular_velocities;
+        transition_src_position = base_transition_src_position;
+        transition_src_rotation = base_transition_src_rotation;
+        transition_dst_position = base_transition_dst_position;
+        transition_dst_rotation = base_transition_dst_rotation;
+        search_timer = base_search_timer;
+        force_search_timer = base_force_search_timer;
+        desired_velocity = base_desired_velocity;
+        desired_velocity_change_curr = base_desired_velocity_change_curr;
+        desired_velocity_change_prev = base_desired_velocity_change_prev;
+        desired_rotation = base_desired_rotation;
+        desired_rotation_change_curr = base_desired_rotation_change_curr;
+        desired_rotation_change_prev = base_desired_rotation_change_prev;
+        desired_gait = base_desired_gait;
+        desired_gait_velocity = base_desired_gait_velocity;
+        desired_walk_on_rope_prev = base_desired_walk_on_rope_prev;
+        simulation_position = base_simulation_position;
+        simulation_velocity = base_simulation_velocity;
+        simulation_acceleration = base_simulation_acceleration;
+        simulation_rotation = base_simulation_rotation;
+        simulation_angular_velocity = base_simulation_angular_velocity;
+        jump_active = base_jump_active;
+        jump_vertical_velocity = base_jump_vertical_velocity;
+        jump_buffer_timer = base_jump_buffer_timer;
+        jump_coyote_timer = base_jump_coyote_timer;
+        trajectory_desired_velocities = base_trajectory_desired_velocities;
+        trajectory_desired_rotations = base_trajectory_desired_rotations;
+        trajectory_positions = base_trajectory_positions;
+        trajectory_velocities = base_trajectory_velocities;
+        trajectory_accelerations = base_trajectory_accelerations;
+        trajectory_rotations = base_trajectory_rotations;
+        trajectory_angular_velocities = base_trajectory_angular_velocities;
+        contact_states = base_contact_states;
+        contact_locks = base_contact_locks;
+        contact_positions = base_contact_positions;
+        contact_velocities = base_contact_velocities;
+        contact_points = base_contact_points;
+        contact_targets = base_contact_targets;
+        contact_offset_positions = base_contact_offset_positions;
+        contact_offset_velocities = base_contact_offset_velocities;
+        adjusted_bone_positions = base_adjusted_bone_positions;
+        adjusted_bone_rotations = base_adjusted_bone_rotations;
+        features_proj = base_features_proj;
+        features_curr = base_features_curr;
+        latent_proj = base_latent_proj;
+        latent_curr = base_latent_curr;
+        future_toe_position = base_future_toe_position;
+        future_terrain_heights = base_future_terrain_heights;
+
+        joystick_playback_enabled = false;
+        joystick_playback_index = 0;
+        joystick_playback_samples.clear();
+        playback_mm_bone_positions.clear();
+        playback_mm_bone_rotations.clear();
+        playback_lmm_bone_positions.clear();
+        playback_lmm_bone_rotations.clear();
+
+        reset_motion_to_recording_start();
+    };
+
+    bool analysis_capture_enabled = false;
+    std::vector<array1d<vec3>> analysis_capture_bone_positions;
 
 #if defined(_WIN32)
     _mkdir(joystick_recording_folder);
@@ -3456,6 +3687,11 @@ int main(int argc, char** argv)
             adjusted_bone_positions,
             adjusted_bone_rotations,
             db.bone_parents);
+
+        if (analysis_capture_enabled)
+        {
+            analysis_capture_bone_positions.push_back(global_bone_positions);
+        }
         
         // Update camera
         
@@ -3498,27 +3734,29 @@ int main(int argc, char** argv)
             }
         }
 
-        // Render
-        
-        // Calculate metrics
-        if (debug) std::cout << "Collecting metrics" << std::endl;
-        frame_time_ms = GetFrameTime() * 1000.0f;  // Convert to milliseconds
-        fps_display = GetFPS();
-        
-        if (debug) std::cout << "Done collecting frame & fps" << std::endl;
-    #if defined(_WIN32)
-        perf_sample_timer += dt;
-        if (perf_sample_timer >= perf_sample_interval)
+        if (mode == APP_MODE_WINDOW)
         {
-            runtime_metrics_update(perf_metrics);
-            perf_sample_timer = 0.0f;
-        }
-    #endif
-        
-        BeginDrawing();
-        ClearBackground(RAYWHITE);
-        
-        BeginMode3D(camera);
+            // Render
+            
+            // Calculate metrics
+            if (debug) std::cout << "Collecting metrics" << std::endl;
+            frame_time_ms = GetFrameTime() * 1000.0f;  // Convert to milliseconds
+            fps_display = GetFPS();
+            
+            if (debug) std::cout << "Done collecting frame & fps" << std::endl;
+        #if defined(_WIN32)
+            perf_sample_timer += dt;
+            if (perf_sample_timer >= perf_sample_interval)
+            {
+                runtime_metrics_update(perf_metrics);
+                perf_sample_timer = 0.0f;
+            }
+        #endif
+            
+            BeginDrawing();
+            ClearBackground(RAYWHITE);
+            
+            BeginMode3D(camera);
         
         // Draw Simulation Object
         
@@ -3588,13 +3826,15 @@ int main(int argc, char** argv)
             }
         }
         
-        // Draw playback MM and LMM during recording playback
+        // Draw playback pose during recording playback using the
+        // learned-motion-matching toggle as mode selector.
         if (joystick_playback_enabled && !playback_mm_bone_positions.empty())
         {
             int current_frame = std::min((int)playback_mm_bone_positions.size() - 1, joystick_playback_index - 1);
+            bool playback_use_lmm = lmm_enabled;
             
-            // Draw MM (Motion Matching) from database
-            if (show_mm && current_frame >= 0 && current_frame < (int)playback_mm_bone_positions.size())
+            // Draw MM (Motion Matching) from database when LMM mode is off.
+            if (!playback_use_lmm && current_frame >= 0 && current_frame < (int)playback_mm_bone_positions.size())
             {
                 if (show_stickman)
                 {
@@ -3613,8 +3853,8 @@ int main(int argc, char** argv)
                 }
             }
             
-            // Draw LMM (Learned Motion Matching) from neural networks
-            if (show_lmm && current_frame >= 0 && current_frame < (int)playback_lmm_bone_positions.size())
+            // Draw LMM (Learned Motion Matching) when LMM mode is on.
+            if (playback_use_lmm && current_frame >= 0 && current_frame < (int)playback_lmm_bone_positions.size())
             {
                 if (show_stickman)
                 {
@@ -3903,22 +4143,6 @@ int main(int argc, char** argv)
             }
         }
 
-        // Playback visualization toggles belong to playback UI and only show while playing.
-        if (joystick_playback_enabled)
-        {
-            GuiLabel(
-                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 28, 100, 16 },
-                "display");
-            GuiCheckBox(
-                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 14, 20, 20 },
-                "show MM",
-                &show_mm);
-            GuiCheckBox(
-                (Rectangle){ ui_right_panel_sm_x + 130, ui_record_hei + 39, 20, 20 },
-                "show LMM",
-                &show_lmm);
-        }
-
         GuiLabel(
             (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 129, 210, 16 },
             joystick_recording_enabled ? "Status: recording" : (joystick_playback_enabled ? "Status: playing" : "Status: idle"));
@@ -4194,7 +4418,8 @@ int main(int argc, char** argv)
         
         //---------
 
-        EndDrawing();
+            EndDrawing();
+        }
 
     };
 
@@ -4205,7 +4430,574 @@ int main(int argc, char** argv)
     std::function<void()> u{update_func};
     emscripten_set_main_loop_arg(update_callback, &u, 0, 1);
 #else
-    while (!WindowShouldClose())
+    if (mode != APP_MODE_WINDOW)
+    {
+        std::vector<std::string> analysis_files;
+        if (analyze_input_is_file)
+        {
+            if (FileExists(analyze_input_path))
+            {
+                analysis_files.push_back(GetFileName(analyze_input_path));
+            }
+        }
+        else
+        {
+            joystick_recording_refresh_csv_files(analyze_input_path, analysis_files);
+        }
+
+        if (analysis_files.empty())
+        {
+            if (analyze_input_is_file)
+            {
+                std::cout << "Analyze: csv file not found at " << analyze_input_path << std::endl;
+            }
+            else
+            {
+                std::cout << "Analyze: no csv files found in " << analyze_input_path << std::endl;
+            }
+        }
+
+        struct analyze_result
+        {
+            std::string file;
+            int frame_count = 0;
+            int joint_count = 0;
+            double mpjpe = -1.0;
+            double mm_mpjpe = -1.0;
+            double lmm_mpjpe = -1.0;
+            double mm_time_ms = -1.0;
+            double lmm_time_ms = -1.0;
+            float mm_mem_delta_mb = -1.0f;
+            float lmm_mem_delta_mb = -1.0f;
+            float mm_mem_peak_mb = -1.0f;
+            float lmm_mem_peak_mb = -1.0f;
+            float mm_mem_avg_mb = -1.0f;
+            float lmm_mem_avg_mb = -1.0f;
+            bool ok = false;
+            std::string note;
+        };
+
+        struct capture_stats
+        {
+            double elapsed_ms = -1.0;
+            float mem_delta_mb = -1.0f;
+            float mem_peak_mb = -1.0f;
+            float mem_avg_mb = -1.0f;
+        };
+
+        auto run_capture_for_mode = [&](const std::vector<joystick_record_sample>& samples,
+                                        bool use_lmm,
+                                        std::vector<array1d<vec3>>& output,
+                                        capture_stats& stats) -> bool
+        {
+            reset_runtime_for_analysis();
+            lmm_enabled = use_lmm;
+            joystick_playback_samples = samples;
+            joystick_playback_enabled = true;
+            joystick_playback_index = 0;
+            analysis_capture_bone_positions.clear();
+            analysis_capture_enabled = true;
+
+            auto start = std::chrono::high_resolution_clock::now();
+#if defined(_WIN32)
+            float mem_start = get_process_memory_mb();
+            float mem_peak = mem_start;
+            double mem_sum = 0.0;
+            int mem_samples = 0;
+            if (mem_start >= 0.0f)
+            {
+                mem_sum += mem_start;
+                mem_samples++;
+            }
+#endif
+
+            const int max_steps = (int)samples.size() + 8;
+            for (int i = 0; i < max_steps && joystick_playback_enabled; i++)
+            {
+                update_func();
+#if defined(_WIN32)
+                float mem_now = get_process_memory_mb();
+                if (mem_now >= 0.0f)
+                {
+                    if (mem_now > mem_peak)
+                    {
+                        mem_peak = mem_now;
+                    }
+                    mem_sum += mem_now;
+                    mem_samples++;
+                }
+#endif
+            }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            stats.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+#if defined(_WIN32)
+            float mem_end = get_process_memory_mb();
+            stats.mem_delta_mb = (mem_start >= 0.0f && mem_end >= 0.0f) ? (mem_end - mem_start) : -1.0f;
+            stats.mem_peak_mb = mem_peak;
+            stats.mem_avg_mb = (mem_samples > 0) ? (float)(mem_sum / (double)mem_samples) : -1.0f;
+#endif
+
+            analysis_capture_enabled = false;
+            output = analysis_capture_bone_positions;
+            return !output.empty();
+        };
+
+        auto compute_mpjpe = [](const std::vector<array1d<vec3>>& mm,
+                    const std::vector<array1d<vec3>>& lmm,
+                                int& used_frames,
+                                int& used_joints) -> double
+        {
+            used_frames = std::min((int)mm.size(), (int)lmm.size());
+            used_joints = 0;
+            if (used_frames <= 0)
+            {
+                return -1.0;
+            }
+
+            double error_sum = 0.0;
+            long long sample_count = 0;
+
+            for (int f = 0; f < used_frames; f++)
+            {
+                int joint_count = std::min(mm[f].size, lmm[f].size);
+                if (joint_count <= 0)
+                {
+                    continue;
+                }
+                used_joints = joint_count;
+
+                for (int j = 0; j < joint_count; j++)
+                {
+                    vec3 d = mm[f](j) - lmm[f](j);
+                    error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
+                    sample_count++;
+                }
+            }
+
+            if (sample_count == 0)
+            {
+                return -1.0;
+            }
+
+            return error_sum / (double)sample_count;
+        };
+
+        auto compute_reference_mpjpe = [](const array1d<vec3>& reference,
+                                          const std::vector<array1d<vec3>>& capture,
+                                          int& used_frames,
+                                          int& used_joints) -> double
+        {
+            used_frames = (int)capture.size();
+            used_joints = reference.size;
+            if (used_frames <= 0 || used_joints <= 0)
+            {
+                return -1.0;
+            }
+
+            double error_sum = 0.0;
+            long long sample_count = 0;
+
+            for (int f = 0; f < used_frames; f++)
+            {
+                int joint_count = std::min(reference.size, capture[f].size);
+                if (joint_count <= 0)
+                {
+                    continue;
+                }
+
+                used_joints = joint_count;
+
+                for (int j = 0; j < joint_count; j++)
+                {
+                    vec3 d = reference(j) - capture[f](j);
+                    error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
+                    sample_count++;
+                }
+            }
+
+            if (sample_count == 0)
+            {
+                return -1.0;
+            }
+
+            return error_sum / (double)sample_count;
+        };
+
+        std::vector<analyze_result> results;
+        for (const std::string& name : analysis_files)
+        {
+            analyze_result res;
+            res.file = name;
+
+            std::vector<joystick_record_sample> samples;
+            std::string input_path = analyze_input_is_file ? std::string(analyze_input_path) : (std::string(analyze_input_path) + "/" + name);
+            if (!load_joystick_recording_csv(input_path.c_str(), samples) || samples.empty())
+            {
+                res.ok = false;
+                res.note = "failed to load or empty";
+                results.push_back(res);
+                continue;
+            }
+
+            std::vector<array1d<vec3>> mm_capture;
+            std::vector<array1d<vec3>> lmm_capture;
+            capture_stats mm_stats;
+            capture_stats lmm_stats;
+
+            const bool need_mm = mode == APP_MODE_ANALYZE_BOTH || mode == APP_MODE_ANALYZE_MM;
+            const bool need_lmm = mode == APP_MODE_ANALYZE_BOTH || mode == APP_MODE_ANALYZE_LMM;
+
+            bool mm_ok = true;
+            bool lmm_ok = true;
+            if (need_mm)
+            {
+                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_stats);
+                res.mm_time_ms = mm_stats.elapsed_ms;
+                res.mm_mem_delta_mb = mm_stats.mem_delta_mb;
+                res.mm_mem_peak_mb = mm_stats.mem_peak_mb;
+                res.mm_mem_avg_mb = mm_stats.mem_avg_mb;
+            }
+            if (need_lmm)
+            {
+                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_stats);
+                res.lmm_time_ms = lmm_stats.elapsed_ms;
+                res.lmm_mem_delta_mb = lmm_stats.mem_delta_mb;
+                res.lmm_mem_peak_mb = lmm_stats.mem_peak_mb;
+                res.lmm_mem_avg_mb = lmm_stats.mem_avg_mb;
+            }
+
+            if ((need_mm && !mm_ok) || (need_lmm && !lmm_ok))
+            {
+                res.ok = false;
+                res.note = "failed capture";
+                results.push_back(res);
+                continue;
+            }
+
+            int used_frames = 0;
+            int used_joints = 0;
+            if (mode == APP_MODE_ANALYZE_BOTH)
+            {
+                res.mpjpe = compute_mpjpe(mm_capture, lmm_capture, used_frames, used_joints);
+                res.frame_count = used_frames;
+                res.joint_count = used_joints;
+                res.ok = res.mpjpe >= 0.0;
+                if (!res.ok)
+                {
+                    res.note = "invalid score";
+                }
+                std::cout << "Analyze " << name << " -> MPJPE=" << res.mpjpe
+                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
+            }
+            else if (mode == APP_MODE_ANALYZE_MM)
+            {
+                res.mm_mpjpe = compute_reference_mpjpe(base_bone_positions, mm_capture, used_frames, used_joints);
+                res.frame_count = used_frames;
+                res.joint_count = used_joints;
+                res.ok = res.mm_mpjpe >= 0.0;
+                if (!res.ok)
+                {
+                    res.note = "invalid score";
+                }
+                std::cout << "Analyze " << name << " -> MM MPJPE=" << res.mm_mpjpe
+                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
+            }
+            else if (mode == APP_MODE_ANALYZE_LMM)
+            {
+                res.lmm_mpjpe = compute_reference_mpjpe(base_bone_positions, lmm_capture, used_frames, used_joints);
+                res.frame_count = used_frames;
+                res.joint_count = used_joints;
+                res.ok = res.lmm_mpjpe >= 0.0;
+                if (!res.ok)
+                {
+                    res.note = "invalid score";
+                }
+                std::cout << "Analyze " << name << " -> LMM MPJPE=" << res.lmm_mpjpe
+                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
+            }
+
+            if (need_mm)
+            {
+                std::cout << " | time(ms) MM=" << res.mm_time_ms;
+#if defined(_WIN32)
+                std::cout << " | mem_delta(MB) MM=" << res.mm_mem_delta_mb
+                          << " | mem_peak(MB) MM=" << res.mm_mem_peak_mb
+                          << " | mem_avg(MB) MM=" << res.mm_mem_avg_mb;
+#endif
+            }
+            if (need_lmm)
+            {
+                std::cout << " | time(ms) LMM=" << res.lmm_time_ms;
+#if defined(_WIN32)
+                std::cout << " | mem_delta(MB) LMM=" << res.lmm_mem_delta_mb
+                          << " | mem_peak(MB) LMM=" << res.lmm_mem_peak_mb
+                          << " | mem_avg(MB) LMM=" << res.lmm_mem_avg_mb;
+#endif
+            }
+            std::cout << std::endl;
+            results.push_back(res);
+        }
+
+    #if defined(_WIN32)
+        _mkdir("./score");
+    #else
+        mkdir("./score", 0777);
+    #endif
+        std::string ts = joystick_recording_timestamp_string();
+        const char* report_prefix =
+            (mode == APP_MODE_ANALYZE_MM) ? "./score/mm_" :
+            (mode == APP_MODE_ANALYZE_LMM) ? "./score/lmm_" :
+            "./score/both_";
+        std::string report_path = std::string(report_prefix) + ts + ".txt";
+        FILE* report = fopen(report_path.c_str(), "w");
+        if (report != nullptr)
+        {
+            const char* report_title =
+                (mode == APP_MODE_ANALYZE_MM) ? "MM analysis" :
+                (mode == APP_MODE_ANALYZE_LMM) ? "LMM analysis" :
+                "MM vs LMM analysis (MPJPE)";
+
+            fprintf(report, "%s\n", report_title);
+            fprintf(report, "%s: %s\n", analyze_input_is_file ? "input file" : "input folder", analyze_input_path);
+            fprintf(report, "generated: %s\n\n", ts.c_str());
+
+            double avg_sum = 0.0;
+            int avg_count = 0;
+            double mm_time_sum_ms = 0.0;
+            double lmm_time_sum_ms = 0.0;
+            int time_count = 0;
+#if defined(_WIN32)
+            double mm_mem_delta_sum_mb = 0.0;
+            double lmm_mem_delta_sum_mb = 0.0;
+            double mm_mem_peak_sum_mb = 0.0;
+            double lmm_mem_peak_sum_mb = 0.0;
+            double mm_mem_avg_sum_mb = 0.0;
+            double lmm_mem_avg_sum_mb = 0.0;
+            int mem_count = 0;
+#endif
+            for (const analyze_result& r : results)
+            {
+                if (r.ok)
+                {
+                    if (mode == APP_MODE_ANALYZE_BOTH)
+                    {
+                        fprintf(report, "%s | MPJPE=%.6f | frames=%d | joints=%d | time_ms MM=%.3f LMM=%.3f",
+                            r.file.c_str(), r.mpjpe, r.frame_count, r.joint_count, r.mm_time_ms, r.lmm_time_ms);
+#if defined(_WIN32)
+                        fprintf(report, " | mem_delta_mb MM=%.3f LMM=%.3f | mem_peak_mb MM=%.3f LMM=%.3f",
+                            r.mm_mem_delta_mb, r.lmm_mem_delta_mb, r.mm_mem_peak_mb, r.lmm_mem_peak_mb);
+                        fprintf(report, " | mem_avg_mb MM=%.3f LMM=%.3f",
+                            r.mm_mem_avg_mb, r.lmm_mem_avg_mb);
+#endif
+                        fprintf(report, "\n");
+                        avg_sum += r.mpjpe;
+                    }
+                    else if (mode == APP_MODE_ANALYZE_MM)
+                    {
+                        fprintf(report, "%s | MM_MPJPE=%.6f | frames=%d | joints=%d | time_ms=%.3f",
+                            r.file.c_str(), r.mm_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
+#if defined(_WIN32)
+                        fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
+                            r.mm_mem_delta_mb, r.mm_mem_peak_mb);
+                        fprintf(report, " | mem_avg_mb=%.3f", r.mm_mem_avg_mb);
+#endif
+                        fprintf(report, "\n");
+                        avg_sum += r.mm_mpjpe;
+                    }
+                    else if (mode == APP_MODE_ANALYZE_LMM)
+                    {
+                        fprintf(report, "%s | LMM_MPJPE=%.6f | frames=%d | joints=%d | time_ms=%.3f",
+                            r.file.c_str(), r.lmm_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
+#if defined(_WIN32)
+                        fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
+                            r.lmm_mem_delta_mb, r.lmm_mem_peak_mb);
+                        fprintf(report, " | mem_avg_mb=%.3f", r.lmm_mem_avg_mb);
+#endif
+                        fprintf(report, "\n");
+                        avg_sum += r.lmm_mpjpe;
+                    }
+                    avg_count++;
+
+                    if (mode == APP_MODE_ANALYZE_BOTH)
+                    {
+                        if (r.mm_time_ms >= 0.0 && r.lmm_time_ms >= 0.0)
+                        {
+                            mm_time_sum_ms += r.mm_time_ms;
+                            lmm_time_sum_ms += r.lmm_time_ms;
+                            time_count++;
+                        }
+                    }
+                    else if (mode == APP_MODE_ANALYZE_MM && r.mm_time_ms >= 0.0)
+                    {
+                        mm_time_sum_ms += r.mm_time_ms;
+                        time_count++;
+                    }
+                    else if (mode == APP_MODE_ANALYZE_LMM && r.lmm_time_ms >= 0.0)
+                    {
+                        lmm_time_sum_ms += r.lmm_time_ms;
+                        time_count++;
+                    }
+#if defined(_WIN32)
+                    if (mode == APP_MODE_ANALYZE_BOTH)
+                    {
+                        if (r.mm_mem_delta_mb >= 0.0f && r.lmm_mem_delta_mb >= 0.0f &&
+                            r.mm_mem_peak_mb >= 0.0f && r.lmm_mem_peak_mb >= 0.0f &&
+                            r.mm_mem_avg_mb >= 0.0f && r.lmm_mem_avg_mb >= 0.0f)
+                        {
+                            mm_mem_delta_sum_mb += r.mm_mem_delta_mb;
+                            lmm_mem_delta_sum_mb += r.lmm_mem_delta_mb;
+                            mm_mem_peak_sum_mb += r.mm_mem_peak_mb;
+                            lmm_mem_peak_sum_mb += r.lmm_mem_peak_mb;
+                            mm_mem_avg_sum_mb += r.mm_mem_avg_mb;
+                            lmm_mem_avg_sum_mb += r.lmm_mem_avg_mb;
+                            mem_count++;
+                        }
+                    }
+                    else if (mode == APP_MODE_ANALYZE_MM)
+                    {
+                        if (r.mm_mem_delta_mb >= 0.0f && r.mm_mem_peak_mb >= 0.0f && r.mm_mem_avg_mb >= 0.0f)
+                        {
+                            mm_mem_delta_sum_mb += r.mm_mem_delta_mb;
+                            mm_mem_peak_sum_mb += r.mm_mem_peak_mb;
+                            mm_mem_avg_sum_mb += r.mm_mem_avg_mb;
+                            mem_count++;
+                        }
+                    }
+                    else if (mode == APP_MODE_ANALYZE_LMM)
+                    {
+                        if (r.lmm_mem_delta_mb >= 0.0f && r.lmm_mem_peak_mb >= 0.0f && r.lmm_mem_avg_mb >= 0.0f)
+                        {
+                            lmm_mem_delta_sum_mb += r.lmm_mem_delta_mb;
+                            lmm_mem_peak_sum_mb += r.lmm_mem_peak_mb;
+                            lmm_mem_avg_sum_mb += r.lmm_mem_avg_mb;
+                            mem_count++;
+                        }
+                    }
+#endif
+                }
+                else
+                {
+                    fprintf(report, "%s | FAILED | %s\n", r.file.c_str(), r.note.c_str());
+                }
+            }
+
+            if (avg_count > 0)
+            {
+                if (mode == APP_MODE_ANALYZE_BOTH)
+                {
+                    fprintf(report, "\nAverage MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                }
+                else if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    fprintf(report, "\nAverage MM MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    fprintf(report, "\nAverage LMM MPJPE: %.6f (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                }
+            }
+            else
+            {
+                if (mode == APP_MODE_ANALYZE_BOTH)
+                {
+                    fprintf(report, "\nAverage MPJPE: N/A\n");
+                }
+                else if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    fprintf(report, "\nAverage MM MPJPE: N/A\n");
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    fprintf(report, "\nAverage LMM MPJPE: N/A\n");
+                }
+            }
+
+            if (time_count > 0)
+            {
+                if (mode == APP_MODE_ANALYZE_BOTH)
+                {
+                    fprintf(report, "Average Time (ms): MM=%.3f LMM=%.3f\n",
+                        mm_time_sum_ms / (double)time_count,
+                        lmm_time_sum_ms / (double)time_count);
+                    fprintf(report, "Total Time (ms): MM=%.3f LMM=%.3f\n",
+                        mm_time_sum_ms,
+                        lmm_time_sum_ms);
+                }
+                else if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    fprintf(report, "Average Time (ms): MM=%.3f\n",
+                        mm_time_sum_ms / (double)time_count);
+                    fprintf(report, "Total Time (ms): MM=%.3f\n",
+                        mm_time_sum_ms);
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    fprintf(report, "Average Time (ms): LMM=%.3f\n",
+                        lmm_time_sum_ms / (double)time_count);
+                    fprintf(report, "Total Time (ms): LMM=%.3f\n",
+                        lmm_time_sum_ms);
+                }
+            }
+            else
+            {
+                fprintf(report, "Average Time (ms): N/A\n");
+            }
+
+#if defined(_WIN32)
+            if (mem_count > 0)
+            {
+                if (mode == APP_MODE_ANALYZE_BOTH)
+                {
+                    fprintf(report, "Average Memory Delta (MB): MM=%.3f LMM=%.3f\n",
+                        mm_mem_delta_sum_mb / (double)mem_count,
+                        lmm_mem_delta_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Peak (MB): MM=%.3f LMM=%.3f\n",
+                        mm_mem_peak_sum_mb / (double)mem_count,
+                        lmm_mem_peak_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Usage (MB): MM=%.3f LMM=%.3f\n",
+                        mm_mem_avg_sum_mb / (double)mem_count,
+                        lmm_mem_avg_sum_mb / (double)mem_count);
+                }
+                else if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    fprintf(report, "Average Memory Delta (MB): MM=%.3f\n",
+                        mm_mem_delta_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Peak (MB): MM=%.3f\n",
+                        mm_mem_peak_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Usage (MB): MM=%.3f\n",
+                        mm_mem_avg_sum_mb / (double)mem_count);
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    fprintf(report, "Average Memory Delta (MB): LMM=%.3f\n",
+                        lmm_mem_delta_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Peak (MB): LMM=%.3f\n",
+                        lmm_mem_peak_sum_mb / (double)mem_count);
+                    fprintf(report, "Average Memory Usage (MB): LMM=%.3f\n",
+                        lmm_mem_avg_sum_mb / (double)mem_count);
+                }
+            }
+            else
+            {
+                fprintf(report, "Average Memory Delta (MB): N/A\n");
+                fprintf(report, "Average Memory Peak (MB): N/A\n");
+                fprintf(report, "Average Memory Usage (MB): N/A\n");
+            }
+#else
+            fprintf(report, "Memory comparison: only available on Windows\n");
+#endif
+
+            fclose(report);
+            std::cout << "Analysis report exported to: " << report_path << std::endl;
+        }
+        else
+        {
+            std::cout << "Failed to write analysis report at: " << report_path << std::endl;
+        }
+    }
+    else while (!WindowShouldClose())
     {
         update_func();
     }

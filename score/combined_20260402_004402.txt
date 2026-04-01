@@ -1,0 +1,11 @@
+MM vs LMM analysis (BPJE)
+input folder: C:/Users/fredo/Downloads/Skripsi/Source code/Motion-Matching/resources/input-recording
+generated: 20260402_004402
+
+joystick_recording_20260329_035051.csv | BPJE=0.244397 | frames=353 | joints=23
+joystick_recording_20260329_035814.csv | BPJE=0.261901 | frames=976 | joints=23
+joystick_recording_20260329_040648.csv | BPJE=0.201046 | frames=205 | joints=23
+joystick_recording_20260329_041059.csv | BPJE=0.193854 | frames=275 | joints=23
+joystick_recording_20260329_041127.csv | BPJE=0.280655 | frames=267 | joints=23
+
+Average BPJE: 0.236371 (across 5 files)
