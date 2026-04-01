@@ -1733,6 +1733,31 @@ void draw_trajectory(
     }
 }
 
+void draw_stickman(
+    const slice1d<vec3> global_bone_positions,
+    const slice1d<int> bone_parents,
+    const Color color)
+{
+    // Draw spheres at each joint
+    for (int i = 0; i < global_bone_positions.size; i++)
+    {
+        DrawSphere(to_Vector3(global_bone_positions(i)), 0.02f, color);
+    }
+    
+    // Draw lines connecting bones to their parents
+    for (int i = 1; i < bone_parents.size; i++)
+    {
+        int parent = bone_parents(i);
+        if (parent != -1)
+        {
+            DrawLine3D(
+                to_Vector3(global_bone_positions(i)),
+                to_Vector3(global_bone_positions(parent)),
+                color);
+        }
+    }
+}
+
 //--------------------------------------
 
 vec3 adjust_character_position(
@@ -2348,6 +2373,8 @@ int main(int argc, char** argv)
     bool joystick_playback_enabled = false;
     bool joystick_playback_last_load_ok = false;
     int joystick_playback_last_loaded_count = 0;
+    
+    bool show_stickman = false;
     int joystick_playback_index = 0;
     std::vector<std::string> joystick_recording_csv_files;
     int joystick_recording_csv_selected_index = 0;
@@ -3464,7 +3491,14 @@ int main(int argc, char** argv)
             global_bone_rotations,
             db.bone_parents);
         
-        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
+        if (show_stickman)
+        {
+            draw_stickman(global_bone_positions, db.bone_parents, SKYBLUE);
+        }
+        else
+        {
+            DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RAYWHITE);
+        }
         
         // Draw matched features
         
@@ -3604,7 +3638,18 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_lmm_hei = 330;
+        float ui_visual_hei = 330;
+        
+        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_visual_hei, 290, 40 }, "visualization");
+        
+        GuiCheckBox(
+            (Rectangle){ ui_right_panel_x + 30, ui_visual_hei + 10, 20, 20 }, 
+            "stickman",
+            &show_stickman);
+        
+        //---------
+        
+        float ui_lmm_hei = 380;
         
         GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
         
@@ -3615,7 +3660,7 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_ctrl_hei = 380;
+        float ui_ctrl_hei = 430;
         
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_ctrl_hei, 250, 190 }, "controls");
         
@@ -3631,7 +3676,7 @@ int main(int argc, char** argv)
 
         //---------
 
-        float ui_record_hei = 560;
+        float ui_record_hei = 640;
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 225 }, "joystick recording");
 
         const char* recording_button_label = joystick_recording_enabled ? "stop + save" : "start recording";
