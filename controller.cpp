@@ -1894,10 +1894,28 @@ void update_callback(void* args)
     ((std::function<void()>*)args)->operator()();
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
     try
     {
+        bool start_with_lmm_enabled = false;
+        for (int argi = 1; argi < argc; argi++)
+        {
+            if (strcmp(argv[argi], "--learned") == 0)
+            {
+                start_with_lmm_enabled = true;
+            }
+            else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
+            {
+                printf("Usage: %s [--learned]\n", argv[0]);
+                return 0;
+            }
+            else
+            {
+                printf("Warning: Unknown argument '%s'\n", argv[argi]);
+            }
+        }
+
         // Init Window
         
         const int screen_width = 1720;
@@ -2254,7 +2272,7 @@ int main(void)
     
     // Learned Motion Matching
     
-    bool lmm_enabled = false;
+    bool lmm_enabled = start_with_lmm_enabled;
     
     std::cout << "Loading neural networks..." << std::endl;
     
