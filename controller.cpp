@@ -2,6 +2,7 @@
 #include "raygui.h"
 #if defined(PLATFORM_WEB)
 #include <emscripten/emscripten.h>
+#include <emscripten/heap.h>
 #endif
 
 #include "raylib.h"
@@ -136,18 +137,69 @@ static float get_process_memory_mb()
 }
 #endif
 
+#if defined(PLATFORM_WEB)
+EM_JS(double, web_get_js_heap_used_mb, (), {
+    if (typeof performance !== 'undefined' && performance.memory) {
+        return performance.memory.usedJSHeapSize / (1024.0 * 1024.0);
+    }
+    return -1.0;
+});
+
+EM_JS(double, web_get_js_heap_total_mb, (), {
+    if (typeof performance !== 'undefined' && performance.memory) {
+        return performance.memory.jsHeapSizeLimit / (1024.0 * 1024.0);
+    }
+    return -1.0;
+});
+
+struct runtime_metrics
+{
+    float cpu_percent = 0.0f;
+    float gpu_percent = -1.0f; // Not exposed reliably in browser without specialized extensions.
+    float process_memory_mb = 0.0f;
+    float system_memory_percent = -1.0f;
+};
+
+static void runtime_metrics_init(runtime_metrics& m)
+{
+    m.cpu_percent = 0.0f;
+    m.gpu_percent = -1.0f;
+    m.process_memory_mb = 0.0f;
+    m.system_memory_percent = -1.0f;
+}
+
+static void runtime_metrics_update(runtime_metrics& m, const float frame_time_ms)
+{
+    const float target_frame_ms = 1000.0f / 60.0f;
+    m.cpu_percent = clampf((frame_time_ms / target_frame_ms) * 100.0f, 0.0f, 100.0f);
+    m.gpu_percent = -1.0f;
+    m.process_memory_mb = (float)emscripten_get_heap_size() / (1024.0f * 1024.0f);
+
+    const double js_used_mb = web_get_js_heap_used_mb();
+    const double js_total_mb = web_get_js_heap_total_mb();
+    if (js_used_mb >= 0.0 && js_total_mb > 0.0)
+    {
+        m.system_memory_percent = (float)((js_used_mb / js_total_mb) * 100.0);
+    }
+    else
+    {
+        m.system_memory_percent = -1.0f;
+    }
+}
+#endif
+
 // Rebuild features when they do not exist yet, or when database.bin is newer.
 static bool should_rebuild_features(const char* database_path, const char* features_path)
 {
-    struct _stat db_info;
-    if (_stat(database_path, &db_info) != 0)
+    struct stat db_info;
+    if (stat(database_path, &db_info) != 0)
     {
         // If database is missing/unreadable, keep previous behavior and attempt build.
         return true;
     }
 
-    struct _stat features_info;
-    if (_stat(features_path, &features_info) != 0)
+    struct stat features_info;
+    if (stat(features_path, &features_info) != 0)
     {
         return true;
     }
@@ -2470,7 +2522,7 @@ int main(int argc, char** argv)
     // Metrics tracking
     float frame_time_ms = 0.0f;
     float fps_display = 0.0f;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(PLATFORM_WEB)
     runtime_metrics perf_metrics;
     runtime_metrics_init(perf_metrics);
     float perf_sample_timer = 0.0f;
@@ -3744,11 +3796,15 @@ int main(int argc, char** argv)
             fps_display = GetFPS();
             
             if (debug) std::cout << "Done collecting frame & fps" << std::endl;
-        #if defined(_WIN32)
+        #if defined(_WIN32) || defined(PLATFORM_WEB)
             perf_sample_timer += dt;
             if (perf_sample_timer >= perf_sample_interval)
             {
+        #if defined(_WIN32)
                 runtime_metrics_update(perf_metrics);
+        #elif defined(PLATFORM_WEB)
+                runtime_metrics_update(perf_metrics, frame_time_ms);
+        #endif
                 perf_sample_timer = 0.0f;
             }
         #endif
@@ -3939,6 +3995,23 @@ int main(int argc, char** argv)
 
         GuiLabel((Rectangle){ 510, ui_metrics_hei + 95, 260, 20 },
             TextFormat("Memory:      %6.1f MB  (%5.1f%% sys)", perf_metrics.process_memory_mb, perf_metrics.system_memory_percent));
+#elif defined(PLATFORM_WEB)
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 55, 260, 20 },
+            TextFormat("CPU(est):    %6.2f %%", perf_metrics.cpu_percent));
+
+        GuiLabel((Rectangle){ 510, ui_metrics_hei + 75, 260, 20 },
+            "GPU:         N/A");
+
+        if (perf_metrics.system_memory_percent >= 0.0f)
+        {
+            GuiLabel((Rectangle){ 510, ui_metrics_hei + 95, 260, 20 },
+                TextFormat("WASM Mem:    %6.1f MB  (JS %5.1f%%)", perf_metrics.process_memory_mb, perf_metrics.system_memory_percent));
+        }
+        else
+        {
+            GuiLabel((Rectangle){ 510, ui_metrics_hei + 95, 260, 20 },
+                TextFormat("WASM Mem:    %6.1f MB", perf_metrics.process_memory_mb));
+        }
 #else
         GuiLabel((Rectangle){ 510, ui_metrics_hei + 55, 260, 20 },
             "CPU/GPU/Memory metrics are only implemented on Windows");

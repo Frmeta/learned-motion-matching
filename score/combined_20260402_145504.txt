@@ -1,0 +1,14 @@
+MM vs LMM analysis (BPJE)
+input folder: C:/Users/fredo/Downloads/Skripsi/Source code/Motion-Matching/resources/input-recording
+generated: 20260402_145504
+
+joystick_recording_20260402_015716.csv | BPJE=1.549136e-01 | frames=2314 | joints=23 | time_ms MM=14475.705 LMM=11873.758 | mem_delta_mb MM=2.059 LMM=-3.109 | mem_peak_mb MM=251.043 LMM=247.699 | mem_avg_mb MM=248.010 LMM=243.768
+joystick_recording_20260402_015757.csv | BPJE=1.411196e-01 | frames=2984 | joints=23 | time_ms MM=14646.493 LMM=14554.217 | mem_delta_mb MM=2.809 LMM=-1.895 | mem_peak_mb MM=251.270 LMM=247.609 | mem_avg_mb MM=248.651 LMM=244.029
+
+Average BPJE: 1.480166e-01 (across 2 files)
+Average Time (ms/frame): MM=5.496829 LMM=4.988293
+Total Time (ms): MM=29122.198 LMM=26427.975
+Total Frames: 5298
+Average Memory Delta (MB): MM=2.434 LMM=-2.502
+Average Memory Peak (MB): MM=251.156 LMM=247.654
+Average Memory Usage (MB): MM=248.331 LMM=243.899

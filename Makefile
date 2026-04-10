@@ -1,6 +1,7 @@
 PLATFORM ?= PLATFORM_DESKTOP
 BUILD_MODE ?= RELEASE
 RAYLIB_DIR = C:/raylib
+EMSDK_DIR ?= C:/raylib/emsdk
 INCLUDE_DIR = -I ./ -I $(RAYLIB_DIR)/raylib/src -I $(RAYLIB_DIR)/raygui/src
 LIBRARY_DIR = -L $(RAYLIB_DIR)/raylib/src
 DEFINES = -D _DEFAULT_SOURCE -D RAYLIB_BUILD_MODE=$(BUILD_MODE) -D $(PLATFORM)
@@ -17,9 +18,9 @@ ifeq ($(PLATFORM),PLATFORM_DESKTOP)
 endif
 
 ifeq ($(PLATFORM),PLATFORM_WEB)
-    CC = emcc
+    CC = $(EMSDK_DIR)/upstream/emscripten/emcc.bat
     EXT = .html
-    CFLAGS ?= $(DEFINES) $(RAYLIB_DIR)/raylib/src/libraylib.bc -ffast-math -D NDEBUG -O3 -s USE_GLFW=3 -s FORCE_FILESYSTEM=1 -s MAX_WEBGL_VERSION=2 -s ALLOW_MEMORY_GROWTH=1 --preload-file $(dir $<)resources@resources --shell-file ./shell.html $(INCLUDE_DIR) $(LIBRARY_DIR)
+    CFLAGS ?= $(DEFINES) $(RAYLIB_DIR)/raylib/src/libraylib.web.a -ffast-math -D NDEBUG -O3 -s USE_GLFW=3 -s FORCE_FILESYSTEM=1 -s MAX_WEBGL_VERSION=2 -s ALLOW_MEMORY_GROWTH=1 --preload-file $(dir $<)resources@resources --shell-file ./shell.html $(INCLUDE_DIR) $(LIBRARY_DIR)
 endif
 
 SOURCE = $(wildcard *.cpp)
