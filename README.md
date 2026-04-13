@@ -25,3 +25,53 @@ If you want to re-train the networks you need to look in the `resources` folder.
 The data required if you want to regenerate the animation database is from [this dataset](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) which is licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International Public License (unlike the code, which is licensed under MIT).
 
 If you re-generate the database you will also need to re-generate the matching database `features.bin`, which is done every time you re-run the demo. Similarly if you change the weights or any other properties that affect the matching the database will need to be re-generated and the networks re-trained.
+
+# Fredo's Modification
+
+`controller.exe` supports both interactive playback and offline analysis modes.
+
+Usage:
+
+```text
+controller.exe [--learned] [--window | --analyze | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]
+controller.exe --mode=<window|analyze-both|analyze-mm|analyze-lmm> --input=<csv>
+```
+
+Arguments:
+
+- `--learned` starts the demo with learned motion matching enabled.
+- `--window` forces the normal interactive window mode.
+- `--analyze` and `--analyze-both` run the combined MM vs LMM analysis mode.
+- `--analyze-mm` runs analysis for motion matching only.
+- `--analyze-lmm` runs analysis for learned motion matching only.
+- `--mode=...` is an alternate way to choose the mode. Valid values are `window`, `analyze-both`, `analyze-mm`, and `analyze-lmm`.
+- `--input=<csv>` sets the input recording path
+- `--csv=<csv>` is accepted as an alias for `--input=<csv>`.
+- A bare positional argument is also treated as the input path.
+- `-h` or `--help` prints the built-in usage text.
+
+Defaults:
+
+- If no mode is provided, `controller.exe` starts in `window` mode.
+- If no input path is provided, analysis uses `./resources/input-recording`.
+
+`analyze.py` is a convenience wrapper that scans a folder of CSV recordings, runs the analysis, and writes a combined report.
+
+Usage:
+
+```text
+python resources/python/analyze.py [input-folder]
+```
+
+Arguments:
+
+- `input-folder` is optional.
+- If omitted, the script uses `resources/input-recording`.
+- If provided, the path is expanded and resolved before analysis.
+
+What it does:
+
+- Runs `make` first so the latest `controller.exe` is available.
+- Finds every `.csv` file in the input folder.
+- Calls `controller.exe --analyze-both --input=<csv>` for each file.
+- Collects the reports and writes a combined summary to `score/combined_<timestamp>.txt`.
