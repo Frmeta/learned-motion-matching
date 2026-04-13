@@ -11,7 +11,8 @@ resources/runs*
 resources/input-recording
 
 local/
-database.bin
+build/
 
+database.bin
 features.csv
 database.csv

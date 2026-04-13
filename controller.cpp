@@ -2314,13 +2314,21 @@ int main(int argc, char** argv)
     float terrain_y_clamp_offset = 0.8f;
     
     // All speeds in m/s
-    float simulation_run_fwrd_speed = 4.0f;
-    float simulation_run_side_speed = 3.0f;
-    float simulation_run_back_speed = 2.5f;
+    // float simulation_run_fwrd_speed = 4.0f;
+    // float simulation_run_side_speed = 3.0f;
+    // float simulation_run_back_speed = 2.5f;
+
+    float simulation_run_fwrd_speed = 8.0f;
+    float simulation_run_side_speed = 6.0f;
+    float simulation_run_back_speed = 5.5f;
     
-    float simulation_walk_fwrd_speed = 1.75f;
-    float simulation_walk_side_speed = 1.5f;
-    float simulation_walk_back_speed = 1.25f;
+    // float simulation_walk_fwrd_speed = 1.75f;
+    // float simulation_walk_side_speed = 1.5f;
+    // float simulation_walk_back_speed = 1.25f;
+    
+    float simulation_walk_fwrd_speed = 4.0f;
+    float simulation_walk_side_speed = 3.0f;
+    float simulation_walk_back_speed = 2.5f;
 
     float simulation_rope_fwrd_speed = 0.6f;
     float simulation_rope_side_speed = 0.45f;
@@ -2332,8 +2340,8 @@ int main(int argc, char** argv)
     float climbing_max_height_delta = 0.8f;
 
     const float jump_root_height_offset = 1.2f;
-    const float jump_initial_vertical_speed = 20.0f;
-    const float jump_gravity = 50.0f;
+    const float jump_initial_vertical_speed = 10.0f;
+    const float jump_gravity = 20.0f;
     const float jump_ground_snap_epsilon = 0.08f;
     const float jump_ground_velocity_epsilon = 0.35f;
     const float jump_buffer_time = 0.12f;
@@ -4097,7 +4105,7 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_lmm_hei = 430;
+        float ui_lmm_hei = 380;
         
         GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
         
@@ -4108,7 +4116,7 @@ int main(int argc, char** argv)
         
         //---------
         
-        float ui_ctrl_hei = 480;
+        float ui_ctrl_hei = 430;
         
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_ctrl_hei, 250, 190 }, "controls");
         
