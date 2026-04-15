@@ -218,6 +218,9 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
+        1 + // Idle Flag
+        1 + // Crouch Flag
+        1 + // Jump Flag
         3 + // History Left Foot Position (-20)
         3 + // History Right Foot Position (-20)
         3 + // History Left Foot Velocity (-20)
@@ -227,10 +230,7 @@ static int matching_feature_count_expected()
         3 + // History Trajectory Direction (-20)
         3 + // History Trajectory Position (-40)
         3 + // History Trajectory Direction (-40)
-        2 + // History Terrain Heights (-15)
-        1 + // Idle Flag
-        1 + // Crouch Flag
-        1;  // Jump Flag
+        2;  // History Terrain Heights (-15)
 }
 
 struct joystick_record_sample
@@ -2446,6 +2446,7 @@ int main(int argc, char** argv)
     float feature_weight_history_trajectory_positions = feature_weight_trajectory_positions * feature_weight_prev_frame_multiplier;
     float feature_weight_history_trajectory_directions = feature_weight_trajectory_directions * feature_weight_prev_frame_multiplier;
     float feature_weight_history_terrain_heights = feature_weight_terrain_heights * feature_weight_prev_frame_multiplier;
+    
     bool mm_include_previous_frame_features = true;
     
     
@@ -3414,12 +3415,12 @@ int main(int argc, char** argv)
             ground_plane_model);
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
-        const float uphill_horizontal_reduce_gain = 0.6f;
-        const float uphill_horizontal_reduce_max = 0.7f;
+        const float uphill_horizontal_reduce_gain = 2.0f;
+        const float uphill_horizontal_reduce_max = 0.8f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
             vec3 rel = trajectory_positions(i) - simulation_position;
-            if (rel.y > 0.0f)
+            if (true) // rel.y > 0.0f
             {
                 float reduce = clampf(rel.y * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
                 float scale_xz = 1.0f - reduce;
@@ -3616,6 +3617,28 @@ int main(int argc, char** argv)
         if (debug) std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
 
+        if (offset < db.nfeatures())
+        {
+            const float idle_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting idle flag..." << std::endl;
+            query(offset) = desired_idle ? idle_feature_strength : 0.0f;
+            offset += 1;
+        }
+        if (offset < db.nfeatures())
+        {
+            const float crouch_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting crouch flag..." << std::endl;
+            query(offset) = desired_crouch ? crouch_feature_strength : 0.0f;
+            offset += 1;
+        }
+        if (offset < db.nfeatures())
+        {
+            const float jump_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting jump flag..." << std::endl;
+            query(offset) = desired_jump ? jump_feature_strength : 0.0f;
+            offset += 1;
+        }
+
         // History block: copy foot/velocity/hip from DB history, but compute
         // history trajectory from runtime previous root positions/rotations.
         const int src_left_foot_pos_offset = 0;
@@ -3693,28 +3716,6 @@ int main(int argc, char** argv)
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 1, src_right_terrain_offset,
             query_features_history_15, db.features_offset, db.features_scale);
-
-        if (offset < db.nfeatures())
-        {
-            const float idle_feature_strength = 6.0f;
-            if (debug) std::cout << "  Setting idle flag..." << std::endl;
-            query(offset) = desired_idle ? idle_feature_strength : 0.0f;
-            offset += 1;
-        }
-        if (offset < db.nfeatures())
-        {
-            const float crouch_feature_strength = 6.0f;
-            if (debug) std::cout << "  Setting crouch flag..." << std::endl;
-            query(offset) = desired_crouch ? crouch_feature_strength : 0.0f;
-            offset += 1;
-        }
-        if (offset < db.nfeatures())
-        {
-            const float jump_feature_strength = 6.0f;
-            if (debug) std::cout << "  Setting jump flag..." << std::endl;
-            query(offset) = desired_jump ? jump_feature_strength : 0.0f;
-            offset += 1;
-        }
         if (debug) std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
         if (debug) std::cout << "Done assert" << std::endl;
@@ -4617,14 +4618,32 @@ int main(int argc, char** argv)
         
         GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_ctrl_hei, 250, 190 }, "controls");
         
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or H");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or J");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Crouch: Y Button, K, or L");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  10, 145, 20 }, "Move: Left Stick or WASD");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 145, 20 }, "Camera/Facing: Right Stick");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 145, 20 }, "Strafe: Left Trigger or H");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 145, 20 }, "Walk: A Button or J");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 145, 20 }, "Crouch: Y Button/K/L");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 145, 20 }, "Zoom In: Left Shoulder/E");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 145, 20 }, "Zoom Out: Right Shoulder/Q");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 145, 20 }, "Pad + keyboard can mix");
+
+        const int flag_x = ui_right_panel_sm_x + 168;
+        GuiLabel((Rectangle){ (float)flag_x, ui_ctrl_hei + 14, 70, 16 }, "Gait Flags");
+
+        auto draw_flag_chip = [&](int y, const char* label, bool on, Color on_color)
+        {
+            const Color fill = on ? on_color : Fade(LIGHTGRAY, 0.75f);
+            const Color border = on ? DARKGRAY : GRAY;
+            DrawRectangle(flag_x, y, 66, 20, fill);
+            DrawRectangleLines(flag_x, y, 66, 20, border);
+            DrawCircle(flag_x + 8, y + 10, 4.0f, on ? GREEN : GRAY);
+            GuiLabel((Rectangle){ (float)flag_x + 14, (float)y + 2, 34, 16 }, label);
+            GuiLabel((Rectangle){ (float)flag_x + 47, (float)y + 2, 18, 16 }, on ? "ON" : "OFF");
+        };
+
+        draw_flag_chip(ui_ctrl_hei + 40, "CR", desired_crouch, ORANGE);
+        draw_flag_chip(ui_ctrl_hei + 66, "ID", desired_idle, SKYBLUE);
+        draw_flag_chip(ui_ctrl_hei + 92, "JP", desired_jump, RED);
         
 
         //---------

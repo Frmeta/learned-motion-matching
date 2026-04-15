@@ -18,8 +18,8 @@ enum
     BOUND_SM_SIZE = 16,
     BOUND_LR_SIZE = 64,
     // Feature layout constants used by MM search masking.
-    MM_HISTORY_FEATURE_START = 41,
-    MM_HISTORY_FEATURE_COUNT = 32,
+    MM_HISTORY_FEATURE_START = 44,
+    MM_HISTORY_FEATURE_COUNT = 29,
     MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
 
@@ -1243,6 +1243,11 @@ void database_build_matching_features(
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
+
+        // Flag:
+        1 + // Idle Flag
+        1 + // Crouch Flag
+        1 + // Jump Flag
         
         // History:
         3 + // History Left Foot Position (-20)
@@ -1254,12 +1259,7 @@ void database_build_matching_features(
         3 + // History Trajectory Direction (-20)
         3 + // History Trajectory Position (-40)
         3 + // History Trajectory Direction (-40)
-        2 + // History Terrain Heights (-15)
-
-        // Flag:
-        1 + // Idle Flag
-        1 + // Crouch Flag
-        1; // Jump Flag
+        2; // History Terrain Heights (-15)
         
     db.features.resize(db.nframes(), nfeatures);
     db.features_offset.resize(nfeatures);
@@ -1275,6 +1275,9 @@ void database_build_matching_features(
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
     compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
+    compute_idle_feature(db, offset);
+    compute_crouch_feature(db, offset);
+    compute_jump_feature(db, offset);
     compute_history_20_feature_block(
         db,
         offset,
@@ -1301,9 +1304,6 @@ void database_build_matching_features(
         offset,
         -15,
         feature_weight_history_terrain_heights);
-    compute_idle_feature(db, offset);
-    compute_crouch_feature(db, offset);
-    compute_jump_feature(db, offset);
     
     assert(offset == nfeatures);
     
