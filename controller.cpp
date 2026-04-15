@@ -644,7 +644,7 @@ void orbit_camera_update(
 bool desired_strafe_update()
 {
     return IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_TRIGGER_2) > 0.5f ||
-           IsKeyDown(KEY_Z);
+           IsKeyDown(KEY_H);
 }
 
 void desired_gait_update(
@@ -2818,11 +2818,10 @@ int main(int argc, char** argv)
         bool desired_strafe = desired_strafe_update();
         bool desired_walk =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
-            IsKeyDown(KEY_LEFT_CONTROL) ||
-            IsKeyDown(KEY_RIGHT_CONTROL);
+            IsKeyDown(KEY_J);
         bool desired_walk_on_rope =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
-            IsKeyDown(KEY_X);
+            IsKeyDown(KEY_K);
         bool jump_pressed =
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
             IsKeyPressed(KEY_SPACE);
@@ -4121,9 +4120,9 @@ int main(int argc, char** argv)
         
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  10, 220, 20 }, "Move: Left Stick or WASD");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or Z");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or Ctrl");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or X");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or H");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or J");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or K");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");
