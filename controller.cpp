@@ -2318,17 +2318,17 @@ int main(int argc, char** argv)
     // float simulation_run_side_speed = 3.0f;
     // float simulation_run_back_speed = 2.5f;
 
-    float simulation_run_fwrd_speed = 8.0f;
-    float simulation_run_side_speed = 6.0f;
-    float simulation_run_back_speed = 5.5f;
+    float simulation_run_fwrd_speed = 6.0f;
+    float simulation_run_side_speed = 5.0f;
+    float simulation_run_back_speed = 4.0f;
     
     // float simulation_walk_fwrd_speed = 1.75f;
     // float simulation_walk_side_speed = 1.5f;
     // float simulation_walk_back_speed = 1.25f;
     
-    float simulation_walk_fwrd_speed = 4.0f;
-    float simulation_walk_side_speed = 3.0f;
-    float simulation_walk_back_speed = 2.5f;
+    float simulation_walk_fwrd_speed = 3.0f;
+    float simulation_walk_side_speed = 2.0f;
+    float simulation_walk_back_speed = 1.5f;
 
     float simulation_rope_fwrd_speed = 0.6f;
     float simulation_rope_side_speed = 0.45f;
@@ -2338,9 +2338,9 @@ int main(int argc, char** argv)
     float climbing_probe_distance = 0.6f;
     float climbing_height_threshold = 0.1f;
     float climbing_max_height_delta = 0.8f;
-
-    const float jump_root_height_offset = 1.2f;
-    const float jump_initial_vertical_speed = 10.0f;
+    
+    float jump_root_height_offset = 1.2f;
+    const float jump_initial_vertical_speed = 8.0f;
     const float jump_gravity = 20.0f;
     const float jump_ground_snap_epsilon = 0.08f;
     const float jump_ground_velocity_epsilon = 0.35f;
@@ -2822,6 +2822,7 @@ int main(int argc, char** argv)
         bool desired_walk_on_rope =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
             IsKeyDown(KEY_K);
+        bool crouch_pressed = IsKeyDown(KEY_L);
         bool jump_pressed =
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
             IsKeyPressed(KEY_SPACE);
@@ -2831,9 +2832,12 @@ int main(int argc, char** argv)
             desired_strafe = false;
             desired_walk = false;
             desired_walk_on_rope = false;
+            crouch_pressed = false;
             jump_pressed = false;
             jump_buffer_timer = 0.0f;
         }
+
+        jump_root_height_offset = crouch_pressed ? 0.1f : 1.22f;
 
         if (jump_pressed)
         {

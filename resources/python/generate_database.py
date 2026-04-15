@@ -41,10 +41,28 @@ files = [
     # Terrain
     ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False),
     ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False),
+    # Climb
+    ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       1910, 1990, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       2270, 2720, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       3766, 4027, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       4210, 4448, False),
     # Jump
     ('resources/bvh/jumps1_subject1.bvh',       1490, 1600, False),
+    ('resources/bvh/fight1_subject2.bvh',       4290, 4390, False),
+    ('resources/bvh/fight1_subject2.bvh',       4408, 4600, False),
+    ('resources/bvh/fight1_subject3.bvh',       4600, 4700, False),
+    ('resources/bvh/fight1_subject3.bvh',       4780, 4850, False),
+    ('resources/bvh/fight1_subject3.bvh',       5800, 5910, False),
     # Walk on rope
-    ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
+    # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
+    # Monkey crouch
+    ('resources/bvh/ground2_subject2.bvh',       160, 299, True),
+    ('resources/bvh/ground2_subject2.bvh',       300, 2280, True),
+    ('resources/bvh/ground2_subject2.bvh',       2800, 3000, True),
+    ('resources/bvh/ground2_subject3.bvh',       1035, 1600, True),
+    ('resources/bvh/ground1_subject4.bvh',       3700, 4500, True),
+
 ]
 
 """ We will accumulate data in these lists """
