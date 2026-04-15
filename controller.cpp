@@ -218,6 +218,14 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
+        3 + // History Left Foot Position (-20)
+        3 + // History Right Foot Position (-20)
+        3 + // History Left Foot Velocity (-20)
+        3 + // History Right Foot Velocity (-20)
+        3 + // History Hip Velocity (-20)
+        3 + // History Trajectory Position (-20)
+        3 + // History Trajectory Direction (-20)
+        2 + // History Terrain Heights (-15)
         1 + // Idle Flag
         1 + // Crouch Flag
         1;  // Jump Flag
@@ -1052,6 +1060,24 @@ void query_copy_denormalized_feature(
     }
     
     offset += size;
+}
+
+// Copy from a specific source offset in a feature vector into the current query offset.
+void query_copy_denormalized_feature_from_source_offset(
+    slice1d<float> query,
+    int& dst_offset,
+    const int size,
+    const int src_offset,
+    const slice1d<float> features,
+    const slice1d<float> features_offset,
+    const slice1d<float> features_scale)
+{
+    for (int i = 0; i < size; i++)
+    {
+        query(dst_offset + i) = features(src_offset + i) * features_scale(src_offset + i) + features_offset(src_offset + i);
+    }
+
+    dst_offset += size;
 }
 
 // Compute the query feature vector for the current 
@@ -2244,6 +2270,12 @@ int main(int argc, char** argv)
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 0.5f;
+    float feature_weight_history_foot_position = feature_weight_foot_position * 0.5f;
+    float feature_weight_history_foot_velocity = feature_weight_foot_velocity * 0.5f;
+    float feature_weight_history_hip_velocity = feature_weight_hip_velocity * 0.5f;
+    float feature_weight_history_trajectory_positions = feature_weight_trajectory_positions * 0.5f;
+    float feature_weight_history_trajectory_directions = feature_weight_trajectory_directions * 0.5f;
+    float feature_weight_history_terrain_heights = feature_weight_terrain_heights * 0.5f;
     
     
     if (rebuild_features)
@@ -2255,7 +2287,13 @@ int main(int argc, char** argv)
             feature_weight_hip_velocity,
             feature_weight_trajectory_positions,
             feature_weight_trajectory_directions,
-            feature_weight_terrain_heights);
+            feature_weight_terrain_heights,
+            feature_weight_history_foot_position,
+            feature_weight_history_foot_velocity,
+            feature_weight_history_hip_velocity,
+            feature_weight_history_trajectory_positions,
+            feature_weight_history_trajectory_directions,
+            feature_weight_history_terrain_heights);
         
         database_save_matching_features(db, features_path, false);
         std::cout << "Features saved. Initializing pose data..." << std::endl;
@@ -2278,7 +2316,13 @@ int main(int argc, char** argv)
                 feature_weight_hip_velocity,
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
-                feature_weight_terrain_heights);
+                feature_weight_terrain_heights,
+                feature_weight_history_foot_position,
+                feature_weight_history_foot_velocity,
+                feature_weight_history_hip_velocity,
+                feature_weight_history_trajectory_positions,
+                feature_weight_history_trajectory_directions,
+                feature_weight_history_terrain_heights);
 
             database_save_matching_features(db, features_path, false);
             std::cout << "Features rebuilt. Initializing pose data..." << std::endl;
@@ -2391,21 +2435,21 @@ int main(int argc, char** argv)
     float terrain_y_clamp_offset = 0.8f;
     
     // All speeds in m/s
-    // float simulation_run_fwrd_speed = 4.0f;
-    // float simulation_run_side_speed = 3.0f;
-    // float simulation_run_back_speed = 2.5f;
+    float simulation_run_fwrd_speed = 4.0f;
+    float simulation_run_side_speed = 3.0f;
+    float simulation_run_back_speed = 2.5f;
 
-    float simulation_run_fwrd_speed = 5.0f;
-    float simulation_run_side_speed = 4.0f;
-    float simulation_run_back_speed = 3.0f;
+    // float simulation_run_fwrd_speed = 5.0f;
+    // float simulation_run_side_speed = 4.0f;
+    // float simulation_run_back_speed = 3.0f;
     
-    // float simulation_walk_fwrd_speed = 1.75f;
-    // float simulation_walk_side_speed = 1.5f;
-    // float simulation_walk_back_speed = 1.25f;
+    float simulation_walk_fwrd_speed = 1.75f;
+    float simulation_walk_side_speed = 1.5f;
+    float simulation_walk_back_speed = 1.25f;
     
-    float simulation_walk_fwrd_speed = 3.0f;
-    float simulation_walk_side_speed = 2.0f;
-    float simulation_walk_back_speed = 1.5f;
+    // float simulation_walk_fwrd_speed = 3.0f;
+    // float simulation_walk_side_speed = 2.0f;
+    // float simulation_walk_back_speed = 1.5f;
 
     float simulation_crouch_fwrd_speed = 2.5f;
     float simulation_crouch_side_speed = 1.5f;
@@ -3345,6 +3389,10 @@ int main(int argc, char** argv)
         
         bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
         slice1d<float> query_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
+        int history_frame_20 = database_index_clamp(db, frame_index, -20);
+        int history_frame_15 = database_index_clamp(db, frame_index, -15);
+        slice1d<float> query_features_history_20 = db.features(history_frame_20);
+        slice1d<float> query_features_history_15 = db.features(history_frame_15);
         if (debug) std::cout << "Got query features, size=" << query_features.size << std::endl;
         
         int offset = 0;
@@ -3371,6 +3419,46 @@ int main(int argc, char** argv)
             trajectory_rotations);
         if (debug) std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
+
+        // History block: 20-frame-before features, and terrain at 15-frame-before.
+        const int src_left_foot_pos_offset = 0;
+        const int src_right_foot_pos_offset = 3;
+        const int src_left_foot_vel_offset = 6;
+        const int src_right_foot_vel_offset = 9;
+        const int src_hip_vel_offset = 12;
+        const int src_traj_pos_offset = 15;      // first trajectory sample
+        const int src_traj_dir_offset = 24;      // first trajectory direction sample
+        const int src_left_terrain_offset = 33;  // t=0 sample for left toe terrain feature
+        const int src_right_terrain_offset = 37; // t=0 sample for right toe terrain feature
+
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_left_foot_pos_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_right_foot_pos_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_left_foot_vel_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_right_foot_vel_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_hip_vel_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_traj_pos_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 3, src_traj_dir_offset,
+            query_features_history_20, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 1, src_left_terrain_offset,
+            query_features_history_15, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 1, src_right_terrain_offset,
+            query_features_history_15, db.features_offset, db.features_scale);
+
         if (offset < db.nfeatures())
         {
             const float idle_feature_strength = 6.0f;
@@ -4588,7 +4676,13 @@ int main(int argc, char** argv)
                 feature_weight_hip_velocity,
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
-                feature_weight_terrain_heights);
+                feature_weight_terrain_heights,
+                feature_weight_history_foot_position,
+                feature_weight_history_foot_velocity,
+                feature_weight_history_hip_velocity,
+                feature_weight_history_trajectory_positions,
+                feature_weight_history_trajectory_directions,
+                feature_weight_history_terrain_heights);
         }
         
         //---------

@@ -895,6 +895,247 @@ void compute_terrain_height_feature(database& db, int& offset, int bone, float w
     offset += 4;
 }
 
+// History feature at a fixed frame offset (e.g. -20):
+// Left/Right foot position, Left/Right foot velocity, Hip velocity,
+// one trajectory position sample, one trajectory direction sample.
+void compute_history_20_feature_block(
+    database& db,
+    int& offset,
+    const int history_offset,
+    const float feature_weight_foot_position,
+    const float feature_weight_foot_velocity,
+    const float feature_weight_hip_velocity,
+    const float feature_weight_trajectory_position,
+    const float feature_weight_trajectory_direction)
+{
+    // Left foot position (3)
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        vec3 bone_position;
+        quat bone_rotation;
+
+        forward_kinematics(
+            bone_position,
+            bone_rotation,
+            db.bone_positions(p),
+            db.bone_rotations(p),
+            db.bone_parents,
+            Bone_LeftFoot);
+
+        bone_position = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), bone_position - db.bone_positions(p, 0));
+
+        db.features(i, offset + 0) = bone_position.x;
+        db.features(i, offset + 1) = bone_position.y;
+        db.features(i, offset + 2) = bone_position.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_foot_position);
+    offset += 3;
+
+    // Right foot position (3)
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        vec3 bone_position;
+        quat bone_rotation;
+
+        forward_kinematics(
+            bone_position,
+            bone_rotation,
+            db.bone_positions(p),
+            db.bone_rotations(p),
+            db.bone_parents,
+            Bone_RightFoot);
+
+        bone_position = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), bone_position - db.bone_positions(p, 0));
+
+        db.features(i, offset + 0) = bone_position.x;
+        db.features(i, offset + 1) = bone_position.y;
+        db.features(i, offset + 2) = bone_position.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_foot_position);
+    offset += 3;
+
+    // Left foot velocity (3)
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        vec3 bone_position;
+        vec3 bone_velocity;
+        quat bone_rotation;
+        vec3 bone_angular_velocity;
+
+        forward_kinematics_velocity(
+            bone_position,
+            bone_velocity,
+            bone_rotation,
+            bone_angular_velocity,
+            db.bone_positions(p),
+            db.bone_velocities(p),
+            db.bone_rotations(p),
+            db.bone_angular_velocities(p),
+            db.bone_parents,
+            Bone_LeftFoot);
+
+        bone_velocity = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), bone_velocity);
+
+        db.features(i, offset + 0) = bone_velocity.x;
+        db.features(i, offset + 1) = bone_velocity.y;
+        db.features(i, offset + 2) = bone_velocity.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_foot_velocity);
+    offset += 3;
+
+    // Right foot velocity (3)
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        vec3 bone_position;
+        vec3 bone_velocity;
+        quat bone_rotation;
+        vec3 bone_angular_velocity;
+
+        forward_kinematics_velocity(
+            bone_position,
+            bone_velocity,
+            bone_rotation,
+            bone_angular_velocity,
+            db.bone_positions(p),
+            db.bone_velocities(p),
+            db.bone_rotations(p),
+            db.bone_angular_velocities(p),
+            db.bone_parents,
+            Bone_RightFoot);
+
+        bone_velocity = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), bone_velocity);
+
+        db.features(i, offset + 0) = bone_velocity.x;
+        db.features(i, offset + 1) = bone_velocity.y;
+        db.features(i, offset + 2) = bone_velocity.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_foot_velocity);
+    offset += 3;
+
+    // Hip velocity (3)
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        vec3 bone_position;
+        vec3 bone_velocity;
+        quat bone_rotation;
+        vec3 bone_angular_velocity;
+
+        forward_kinematics_velocity(
+            bone_position,
+            bone_velocity,
+            bone_rotation,
+            bone_angular_velocity,
+            db.bone_positions(p),
+            db.bone_velocities(p),
+            db.bone_rotations(p),
+            db.bone_angular_velocities(p),
+            db.bone_parents,
+            Bone_Hips);
+
+        bone_velocity = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), bone_velocity);
+
+        db.features(i, offset + 0) = bone_velocity.x;
+        db.features(i, offset + 1) = bone_velocity.y;
+        db.features(i, offset + 2) = bone_velocity.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_hip_velocity);
+    offset += 3;
+
+    // Trajectory position single sample (3): +20 from history frame
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        int t = database_index_clamp(db, p, 20);
+        vec3 trajectory_pos = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t, 0) - db.bone_positions(p, 0));
+
+        db.features(i, offset + 0) = trajectory_pos.x;
+        db.features(i, offset + 1) = trajectory_pos.y;
+        db.features(i, offset + 2) = trajectory_pos.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_trajectory_position);
+    offset += 3;
+
+    // Trajectory direction single sample (3): +20 from history frame
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        int t = database_index_clamp(db, p, 20);
+        vec3 trajectory_dir = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), quat_mul_vec3(db.bone_rotations(t, 0), vec3(0, 0, 1)));
+
+        vec3 trajectory_pos = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t, 0) - db.bone_positions(p, 0));
+        const float eps = 1e-4f;
+        float h = length(vec3(trajectory_pos.x, 0.0f, trajectory_pos.z));
+        trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+        trajectory_dir = normalize(trajectory_dir);
+
+        db.features(i, offset + 0) = trajectory_dir.x;
+        db.features(i, offset + 1) = trajectory_dir.y;
+        db.features(i, offset + 2) = trajectory_dir.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_trajectory_direction);
+    offset += 3;
+}
+
+// Terrain-at-history feature (2): left/right toe terrain height relative to hip at history frame.
+void compute_history_terrain_feature(
+    database& db,
+    int& offset,
+    const int history_offset,
+    const float feature_weight_terrain_heights)
+{
+    array1d<vec3> terrain_points;
+    array1d<int> contact_bone_indices;
+    array1d<int> contact_frame_indices;
+    build_terrain_height_map(db, terrain_points, contact_bone_indices, contact_frame_indices);
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+
+        int range_start = 0;
+        int range_stop = db.nframes();
+        for (int r = 0; r < db.nranges(); r++)
+        {
+            if (p >= db.range_starts(r) && p < db.range_stops(r))
+            {
+                range_start = db.range_starts(r);
+                range_stop = db.range_stops(r);
+                break;
+            }
+        }
+
+        vec3 hip_position;
+        quat hip_rotation;
+        forward_kinematics(
+            hip_position,
+            hip_rotation,
+            db.bone_positions(p),
+            db.bone_rotations(p),
+            db.bone_parents,
+            Bone_Hips);
+
+        vec3 left_toe_pos;
+        vec3 right_toe_pos;
+        quat temp_rot;
+        forward_kinematics(left_toe_pos, temp_rot, db.bone_positions(p), db.bone_rotations(p), db.bone_parents, Bone_LeftToe);
+        forward_kinematics(right_toe_pos, temp_rot, db.bone_positions(p), db.bone_rotations(p), db.bone_parents, Bone_RightToe);
+
+        float left_height = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, left_toe_pos.x, left_toe_pos.z);
+        float right_height = query_terrain_height(terrain_points, contact_frame_indices, range_start, range_stop, right_toe_pos.x, right_toe_pos.z);
+
+        db.features(i, offset + 0) = left_height - hip_position.y;
+        db.features(i, offset + 1) = right_height - hip_position.y;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 2, feature_weight_terrain_heights);
+    offset += 2;
+}
+
 
 // Build the Motion Matching search acceleration structure. Here we
 // just use axis aligned bounding boxes regularly spaced at BOUND_SM_SIZE
@@ -937,7 +1178,13 @@ void database_build_matching_features(
     const float feature_weight_hip_velocity,
     const float feature_weight_trajectory_positions,
     const float feature_weight_trajectory_directions,
-    const float feature_weight_terrain_heights)
+    const float feature_weight_terrain_heights,
+    const float feature_weight_history_foot_position,
+    const float feature_weight_history_foot_velocity,
+    const float feature_weight_history_hip_velocity,
+    const float feature_weight_history_trajectory_positions,
+    const float feature_weight_history_trajectory_directions,
+    const float feature_weight_history_terrain_heights)
 {
     int nfeatures = 
         3 + // Left Foot Position
@@ -948,6 +1195,14 @@ void database_build_matching_features(
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
+        3 + // History Left Foot Position (-20)
+        3 + // History Right Foot Position (-20)
+        3 + // History Left Foot Velocity (-20)
+        3 + // History Right Foot Velocity (-20)
+        3 + // History Hip Velocity (-20)
+        3 + // History Trajectory Position (-20)
+        3 + // History Trajectory Direction (-20)
+        2 + // History Terrain Heights (-15)
         1 + // Idle Flag
         1 + // Crouch Flag
         1; // Jump Flag
@@ -966,6 +1221,20 @@ void database_build_matching_features(
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
     compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
+    compute_history_20_feature_block(
+        db,
+        offset,
+        -20,
+        feature_weight_history_foot_position,
+        feature_weight_history_foot_velocity,
+        feature_weight_history_hip_velocity,
+        feature_weight_history_trajectory_positions,
+        feature_weight_history_trajectory_directions);
+    compute_history_terrain_feature(
+        db,
+        offset,
+        -15,
+        feature_weight_history_terrain_heights);
     compute_idle_feature(db, offset);
     compute_crouch_feature(db, offset);
     compute_jump_feature(db, offset);
