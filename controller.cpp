@@ -232,6 +232,17 @@ struct joystick_record_sample
     vec3 player_position;
 };
 
+struct range_metadata_entry
+{
+    int range_index = -1;
+    int db_start = 0;
+    int db_stop = 0;
+    char bvh_name[256] = "";
+    int source_start = 0;
+    int source_stop = 0;
+    bool is_mirrored = false;
+};
+
 static bool save_joystick_recording_csv(
     const char* filename,
     const std::vector<joystick_record_sample>& samples)
@@ -324,6 +335,62 @@ static bool load_joystick_recording_csv(
 
     fclose(f);
     return !samples.empty();
+}
+
+static bool load_range_metadata_csv(
+    const char* filename,
+    std::vector<range_metadata_entry>& entries)
+{
+    FILE* f = fopen(filename, "r");
+    if (f == NULL)
+    {
+        return false;
+    }
+
+    entries.clear();
+
+    char line[1024];
+    bool first_line = true;
+
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+        {
+            continue;
+        }
+
+        if (first_line)
+        {
+            first_line = false;
+            if (strstr(line, "range_index,db_start") != NULL)
+            {
+                continue;
+            }
+        }
+
+        range_metadata_entry entry;
+        int is_mirrored_int = 0;
+
+        int parsed = sscanf(
+            line,
+            "%d,%d,%d,%255[^,],%d,%d,%d",
+            &entry.range_index,
+            &entry.db_start,
+            &entry.db_stop,
+            entry.bvh_name,
+            &entry.source_start,
+            &entry.source_stop,
+            &is_mirrored_int);
+
+        if (parsed == 7)
+        {
+            entry.is_mirrored = is_mirrored_int != 0;
+            entries.push_back(entry);
+        }
+    }
+
+    fclose(f);
+    return !entries.empty();
 }
 
 static std::string joystick_recording_timestamp_string()
@@ -2150,6 +2217,12 @@ int main(int argc, char** argv)
     
     database db;
     database_load(db, "./resources/bin/database.bin");
+
+    std::vector<range_metadata_entry> range_metadata_entries;
+    if (!load_range_metadata_csv("./resources/bin/range_metadata.csv", range_metadata_entries))
+    {
+        if (debug) std::cout << "range_metadata.csv missing or empty; BVH labels disabled" << std::endl;
+    }
     
     const char* database_path = "./resources/bin/database.bin";
     const char* features_path = "./resources/bin/features.bin";
@@ -4229,7 +4302,7 @@ int main(int argc, char** argv)
         //---------
 
         float ui_record_hei = 640;
-        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 225 }, "joystick recording");
+        GuiGroupBox((Rectangle){ ui_right_panel_sm_x, ui_record_hei, 250, 255 }, "joystick recording");
 
         const char* recording_button_label = joystick_recording_enabled ? "stop + save" : "start recording";
         if (GuiButton((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 15, 100, 26 }, recording_button_label))
@@ -4332,8 +4405,73 @@ int main(int argc, char** argv)
         GuiLabel(
             (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 171, 210, 16 },
             TextFormat("Load: %s (%d)", joystick_playback_last_load_ok ? "ok" : "failed", joystick_playback_last_loaded_count));
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 185, 210, 16 }, TextFormat("Loaded: %s", GetFileName(joystick_recording_loaded_file)));
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 199, 210, 16 }, "Input locked while playing");
+        int active_range_index = -1;
+        int range_min = 0;
+        int range_max = db.nframes() > 0 ? db.nframes() - 1 : 0;
+        for (int ri = 0; ri < db.nranges(); ri++)
+        {
+            if (frame_index >= db.range_starts(ri) && frame_index < db.range_stops(ri))
+            {
+                active_range_index = ri;
+                range_min = db.range_starts(ri);
+                range_max = db.range_stops(ri) - 1;
+                break;
+            }
+        }
+
+        const char* bvh_name_display = "n/a";
+        int source_start_display = 0;
+        int source_stop_display = 0;
+        for (size_t mi = 0; mi < range_metadata_entries.size(); mi++)
+        {
+            if (range_metadata_entries[mi].range_index == active_range_index)
+            {
+                bvh_name_display = range_metadata_entries[mi].bvh_name;
+                source_start_display = range_metadata_entries[mi].source_start;
+                source_stop_display = range_metadata_entries[mi].source_stop;
+                break;
+            }
+        }
+
+        int per_file_frame_index = 0;
+        if (source_stop_display > source_start_display && range_max > range_min)
+        {
+            float frame_t = (float)(frame_index - range_min) / (float)(range_max - range_min);
+            frame_t = clampf(frame_t, 0.0f, 1.0f);
+            float source_span = (float)(source_stop_display - source_start_display - 1);
+            per_file_frame_index = source_start_display + (int)roundf(frame_t * source_span);
+        }
+        else
+        {
+            per_file_frame_index = source_start_display;
+        }
+
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 185, 210, 16 },
+            TextFormat("BVH: %s", bvh_name_display));
+        GuiLabel(
+            (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 199, 210, 16 },
+            TextFormat("Source Range: %d - %d", source_start_display, source_stop_display));
+        int playback_frame_curr = joystick_playback_index > 0 ? joystick_playback_index - 1 : 0;
+        int playback_frame_max = joystick_playback_last_loaded_count > 0 ? joystick_playback_last_loaded_count - 1 : 0;
+        if (joystick_playback_enabled)
+        {
+            GuiLabel(
+                (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 213, 210, 16 },
+                TextFormat("Frame G/P: %d / %d", playback_frame_curr, playback_frame_curr));
+            GuiLabel(
+                (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 227, 210, 16 },
+                TextFormat("Range: %d - %d", 0, playback_frame_max));
+        }
+        else
+        {
+            GuiLabel(
+                (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 213, 210, 16 },
+                TextFormat("Frame G/P: %d / %d", frame_index, per_file_frame_index));
+            GuiLabel(
+                (Rectangle){ ui_right_panel_sm_x + 20, ui_record_hei + 227, 210, 16 },
+                TextFormat("Range: %d - %d", range_min, range_max));
+        }
 
         //---------
         

@@ -41,7 +41,8 @@ files = [
     # Walking
     ('resources/bvh/walk1_subject5.bvh',            80, 7791, False, False, False), # decrease file size (original: 7791)
     # Terrain
-    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False, False, False),
+    ('resources/bvh/obstacles1_subject2.bvh',       231, 1240, False, False, False),
+    ('resources/bvh/obstacles1_subject2.bvh',       1780, 4972, False, False, False), # split this into 2, cut animation that's holding the stair
     ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False, False, False),
     # Climb
     ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False, False, False),
@@ -79,6 +80,7 @@ bone_names = []
     
 range_starts = []
 range_stops = []
+range_metadata = []
 
 contact_states = []
 crouch_states = []
@@ -217,6 +219,15 @@ for filename, start, stop, is_crouch, is_idle, is_jump in files:
 
         range_starts.append(offset)
         range_stops.append(offset + len(positions))
+        range_metadata.append({
+            'range_index': len(range_starts) - 1,
+            'db_start': offset,
+            'db_stop': offset + len(positions),
+            'bvh_name': filename.replace('\\', '/').split('/')[-1],
+            'source_start': int(start),
+            'source_stop': int(stop),
+            'is_mirrored': 1 if mirror else 0,
+        })
         
         contact_states.append(contacts)
         crouch_states.append(np.full((len(positions), 1), 1 if is_crouch else 0, dtype=np.uint8))
@@ -591,6 +602,26 @@ with open('resources/bin/database.csv', 'w') as csv_f:
     _write_csv_section(csv_f, "jump_states", jump_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
 
 print("database.csv written successfully!")
+
+
+""" Write Range Metadata CSV (for runtime GUI labels) """
+
+print("Writing range_metadata.csv...")
+
+with open('resources/bin/range_metadata.csv', 'w') as meta_f:
+    meta_f.write("range_index,db_start,db_stop,bvh_name,source_start,source_stop,is_mirrored\n")
+    for m in range_metadata:
+        meta_f.write(
+            "%d,%d,%d,%s,%d,%d,%d\n" % (
+                m['range_index'],
+                m['db_start'],
+                m['db_stop'],
+                m['bvh_name'],
+                m['source_start'],
+                m['source_stop'],
+                m['is_mirrored']))
+
+print("range_metadata.csv written successfully!")
 
     
     
