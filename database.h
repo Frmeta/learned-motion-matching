@@ -17,6 +17,10 @@ enum
 {
     BOUND_SM_SIZE = 16,
     BOUND_LR_SIZE = 64,
+    // Feature layout constants used by MM search masking.
+    MM_HISTORY_FEATURE_START = 41,
+    MM_HISTORY_FEATURE_COUNT = 39,
+    MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
 
 struct database
@@ -895,7 +899,7 @@ void compute_terrain_height_feature(database& db, int& offset, int bone, float w
     offset += 4;
 }
 
-// History feature at a fixed frame offset (e.g. -20):
+// History feature at a fixed frame offset:
 // Left/Right foot position, Left/Right foot velocity, Hip velocity,
 // one trajectory position sample, one trajectory direction sample.
 void compute_history_20_feature_block(
@@ -1081,6 +1085,50 @@ void compute_history_20_feature_block(
     offset += 3;
 }
 
+// History trajectory feature block at a fixed frame offset:
+// one trajectory position sample and one trajectory direction sample.
+void compute_history_trajectory_feature_block(
+    database& db,
+    int& offset,
+    const int history_offset,
+    const float feature_weight_trajectory_position,
+    const float feature_weight_trajectory_direction)
+{
+    // Trajectory position single sample (3): +20 from history frame
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        int t = database_index_clamp(db, p, 20);
+        vec3 trajectory_pos = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t, 0) - db.bone_positions(p, 0));
+
+        db.features(i, offset + 0) = trajectory_pos.x;
+        db.features(i, offset + 1) = trajectory_pos.y;
+        db.features(i, offset + 2) = trajectory_pos.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_trajectory_position);
+    offset += 3;
+
+    // Trajectory direction single sample (3): +20 from history frame
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        int p = database_index_clamp(db, i, history_offset);
+        int t = database_index_clamp(db, p, 20);
+        vec3 trajectory_dir = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), quat_mul_vec3(db.bone_rotations(t, 0), vec3(0, 0, 1)));
+
+        vec3 trajectory_pos = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t, 0) - db.bone_positions(p, 0));
+        const float eps = 1e-4f;
+        float h = length(vec3(trajectory_pos.x, 0.0f, trajectory_pos.z));
+        trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+        trajectory_dir = normalize(trajectory_dir);
+
+        db.features(i, offset + 0) = trajectory_dir.x;
+        db.features(i, offset + 1) = trajectory_dir.y;
+        db.features(i, offset + 2) = trajectory_dir.z;
+    }
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, feature_weight_trajectory_direction);
+    offset += 3;
+}
+
 // Terrain-at-history feature (2): left/right toe terrain height relative to hip at history frame.
 void compute_history_terrain_feature(
     database& db,
@@ -1195,14 +1243,24 @@ void database_build_matching_features(
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
-        3 + // History Left Foot Position (-20)
-        3 + // History Right Foot Position (-20)
-        3 + // History Left Foot Velocity (-20)
-        3 + // History Right Foot Velocity (-20)
-        3 + // History Hip Velocity (-20)
+        
+        // History:
+        3 + // History Left Foot Position (-40)
+        3 + // History Right Foot Position (-40)
+        3 + // History Left Foot Velocity (-40)
+        3 + // History Right Foot Velocity (-40)
+        3 + // History Hip Velocity (-40)
         3 + // History Trajectory Position (-20)
         3 + // History Trajectory Direction (-20)
+        3 + // History Trajectory Position (-40)
+        3 + // History Trajectory Direction (-40)
+        3 + // History Trajectory Position (-60)
+        3 + // History Trajectory Direction (-60)
         2 + // History Terrain Heights (-15)
+        2 + // History Terrain Heights (-30)
+        2 + // History Terrain Heights (-45)
+
+        // Flag:
         1 + // Idle Flag
         1 + // Crouch Flag
         1; // Jump Flag
@@ -1224,16 +1282,38 @@ void database_build_matching_features(
     compute_history_20_feature_block(
         db,
         offset,
-        -20,
+        -40,
         feature_weight_history_foot_position,
         feature_weight_history_foot_velocity,
         feature_weight_history_hip_velocity,
+        feature_weight_history_trajectory_positions,
+        feature_weight_history_trajectory_directions);
+    compute_history_trajectory_feature_block(
+        db,
+        offset,
+        -20,
+        feature_weight_history_trajectory_positions,
+        feature_weight_history_trajectory_directions);
+    compute_history_trajectory_feature_block(
+        db,
+        offset,
+        -60,
         feature_weight_history_trajectory_positions,
         feature_weight_history_trajectory_directions);
     compute_history_terrain_feature(
         db,
         offset,
         -15,
+        feature_weight_history_terrain_heights);
+    compute_history_terrain_feature(
+        db,
+        offset,
+        -30,
+        feature_weight_history_terrain_heights);
+    compute_history_terrain_feature(
+        db,
+        offset,
+        -45,
         feature_weight_history_terrain_heights);
     compute_idle_feature(db, offset);
     compute_crouch_feature(db, offset);
@@ -1264,10 +1344,13 @@ void motion_matching_search(
     const slice1d<float> query_normalized,
     const float transition_cost,
     const int ignore_range_end,
-    const int ignore_surrounding)
+    const int ignore_surrounding,
+    const bool include_history_features)
 {
     int nfeatures = query_normalized.size;
     int nranges = range_starts.size;
+    int history_feature_end = std::min(nfeatures, static_cast<int>(MM_HISTORY_FEATURE_END));
+    bool exclude_history_features = !include_history_features && nfeatures > MM_HISTORY_FEATURE_START;
     
     int curr_index = best_index;
     
@@ -1277,6 +1360,10 @@ void motion_matching_search(
         best_cost = 0.0;
         for (int i = 0; i < nfeatures; i++)
         {
+            if (exclude_history_features && i >= MM_HISTORY_FEATURE_START && i < history_feature_end)
+            {
+                continue;
+            }
             best_cost += squaref(query_normalized(i) - features(best_index, i));
         }
     }
@@ -1300,6 +1387,10 @@ void motion_matching_search(
             curr_cost = transition_cost;
             for (int j = 0; j < nfeatures; j++)
             {
+                if (exclude_history_features && j >= MM_HISTORY_FEATURE_START && j < history_feature_end)
+                {
+                    continue;
+                }
                 curr_cost += squaref(query_normalized(j) - clampf(query_normalized(j), 
                     bound_lr_min(i_lr, j), bound_lr_max(i_lr, j)));
                 
@@ -1327,6 +1418,10 @@ void motion_matching_search(
                 curr_cost = transition_cost;
                 for (int j = 0; j < nfeatures; j++)
                 {
+                    if (exclude_history_features && j >= MM_HISTORY_FEATURE_START && j < history_feature_end)
+                    {
+                        continue;
+                    }
                     curr_cost += squaref(query_normalized(j) - clampf(query_normalized(j), 
                         bound_sm_min(i_sm, j), bound_sm_max(i_sm, j)));
                     
@@ -1357,6 +1452,10 @@ void motion_matching_search(
                     curr_cost = transition_cost;
                     for (int j = 0; j < nfeatures; j++)
                     {
+                        if (exclude_history_features && j >= MM_HISTORY_FEATURE_START && j < history_feature_end)
+                        {
+                            continue;
+                        }
                         curr_cost += squaref(query_normalized(j) - features(i, j));
                         if (curr_cost >= best_cost)
                         {
@@ -1386,7 +1485,8 @@ void database_search(
     const slice1d<float> query,
     const float transition_cost = 0.0f,
     const int ignore_range_end = 20,
-    const int ignore_surrounding = 20)
+    const int ignore_surrounding = 20,
+    const bool include_history_features = true)
 {
     // Normalize Query
     array1d<float> query_normalized(db.nfeatures());
@@ -1411,5 +1511,6 @@ void database_search(
         query_normalized,
         transition_cost,
         ignore_range_end,
-        ignore_surrounding);
+        ignore_surrounding,
+        include_history_features);
 }
