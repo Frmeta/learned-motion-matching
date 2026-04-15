@@ -218,7 +218,7 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
-        1;  // Walk On Rope Flag
+        1;  // Crouch Flag
 }
 
 struct joystick_record_sample
@@ -2301,7 +2301,7 @@ int main(int argc, char** argv)
     
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
-    bool desired_walk_on_rope_prev = false;
+    bool desired_crouch_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2330,9 +2330,9 @@ int main(int argc, char** argv)
     float simulation_walk_side_speed = 2.0f;
     float simulation_walk_back_speed = 1.5f;
 
-    float simulation_rope_fwrd_speed = 0.6f;
-    float simulation_rope_side_speed = 0.45f;
-    float simulation_rope_back_speed = 0.3f;
+    float simulation_rope_fwrd_speed = 2.5f;
+    float simulation_rope_side_speed = 1.5f;
+    float simulation_rope_back_speed = 1.0f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
@@ -2640,7 +2640,7 @@ int main(int argc, char** argv)
     const vec3 base_desired_rotation_change_prev = desired_rotation_change_prev;
     const float base_desired_gait = desired_gait;
     const float base_desired_gait_velocity = desired_gait_velocity;
-    const bool base_desired_walk_on_rope_prev = desired_walk_on_rope_prev;
+    const bool base_desired_crouch_prev = desired_crouch_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -2709,7 +2709,7 @@ int main(int argc, char** argv)
         desired_rotation_change_prev = base_desired_rotation_change_prev;
         desired_gait = base_desired_gait;
         desired_gait_velocity = base_desired_gait_velocity;
-        desired_walk_on_rope_prev = base_desired_walk_on_rope_prev;
+        desired_crouch_prev = base_desired_crouch_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -2819,10 +2819,11 @@ int main(int argc, char** argv)
         bool desired_walk =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
             IsKeyDown(KEY_J);
-        bool desired_walk_on_rope =
+        bool desired_crouch =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
-            IsKeyDown(KEY_K);
-        bool crouch_pressed = IsKeyDown(KEY_L);
+            IsKeyDown(KEY_K) ||
+            IsKeyDown(KEY_L);
+        bool crouch_pressed = desired_crouch;
         bool jump_pressed =
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
             IsKeyPressed(KEY_SPACE);
@@ -2831,13 +2832,13 @@ int main(int argc, char** argv)
         {
             desired_strafe = false;
             desired_walk = false;
-            desired_walk_on_rope = false;
+            desired_crouch = false;
             crouch_pressed = false;
             jump_pressed = false;
             jump_buffer_timer = 0.0f;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.1f : 1.22f;
+        jump_root_height_offset = crouch_pressed ? 0.01f : 1.22f;
 
         if (jump_pressed)
         {
@@ -2860,7 +2861,7 @@ int main(int argc, char** argv)
         float simulation_side_speed = lerpf(simulation_run_side_speed, simulation_walk_side_speed, desired_gait);
         float simulation_back_speed = lerpf(simulation_run_back_speed, simulation_walk_back_speed, desired_gait);
 
-        if (desired_walk_on_rope)
+        if (desired_crouch)
         {
             simulation_fwrd_speed = simulation_rope_fwrd_speed;
             simulation_side_speed = simulation_rope_side_speed;
@@ -2961,11 +2962,11 @@ int main(int argc, char** argv)
         
         bool force_search = false;
 
-        if (desired_walk_on_rope != desired_walk_on_rope_prev)
+        if (desired_crouch != desired_crouch_prev)
         {
             force_search = true;
             force_search_timer = search_time;
-            desired_walk_on_rope_prev = desired_walk_on_rope;
+            desired_crouch_prev = desired_crouch;
         }
 
         if (force_search_timer <= 0.0f && (
@@ -3220,9 +3221,9 @@ int main(int argc, char** argv)
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
         if (offset < db.nfeatures())
         {
-            const float walk_on_rope_feature_strength = 6.0f;
-            if (debug) std::cout << "  Setting walk-on-rope flag..." << std::endl;
-            query(offset) = desired_walk_on_rope ? walk_on_rope_feature_strength : 0.0f;
+            const float crouch_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting crouch flag..." << std::endl;
+            query(offset) = desired_crouch ? crouch_feature_strength : 0.0f;
             offset += 1;
         }
         if (debug) std::cout << "Done Query" << std::endl;
@@ -4126,7 +4127,7 @@ int main(int argc, char** argv)
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 220, 20 }, "Camera/Facing: Right Stick or Arrows");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 220, 20 }, "Strafe: Left Trigger or H");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 220, 20 }, "Walk: A Button or J");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Walk on Rope: Y Button or K");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 220, 20 }, "Crouch: Y Button, K, or L");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 220, 20 }, "Zoom In: Left Shoulder or E");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 220, 20 }, "Zoom Out: Right Shoulder or Q");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 220, 20 }, "Both gamepad and keyboard can mix");

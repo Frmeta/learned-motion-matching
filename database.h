@@ -37,7 +37,7 @@ struct database
     array2d<bool> contact_states;
     
     array2d<float> future_toe_positions;  // 12 floats per frame (6 vec2: L15, R15, L30, R30, L45, R45)
-    array2d<bool> walk_on_rope_states;    // 1 column per frame: 1 for rope-walk clip, 0 otherwise
+    array2d<bool> crouch_states;          // 1 column per frame: 1 for crouch clip, 0 otherwise
     
     array2d<float> bound_sm_min;
     array2d<float> bound_sm_max;
@@ -70,35 +70,35 @@ void database_load(database& db, const char* filename)
     array2d_read(db.future_toe_positions, f);  // Load precomputed future toe positions
 
     // Optional field for newer database versions.
-    long walk_on_rope_pos = ftell(f);
+    long crouch_pos = ftell(f);
     fseek(f, 0, SEEK_END);
     long file_end = ftell(f);
-    fseek(f, walk_on_rope_pos, SEEK_SET);
+    fseek(f, crouch_pos, SEEK_SET);
 
-    if (file_end - walk_on_rope_pos >= (long)(2 * sizeof(int)))
+    if (file_end - crouch_pos >= (long)(2 * sizeof(int)))
     {
-        array2d_read(db.walk_on_rope_states, f);
+        array2d_read(db.crouch_states, f);
     }
     else
     {
-        db.walk_on_rope_states.resize(db.nframes(), 1);
-        db.walk_on_rope_states.zero();
+        db.crouch_states.resize(db.nframes(), 1);
+        db.crouch_states.zero();
     }
     
     fclose(f);
 }
 
-void compute_walk_on_rope_feature(database& db, int& offset)
+void compute_crouch_feature(database& db, int& offset)
 {
-    const float walk_on_rope_feature_strength = 6.0f;
+    const float crouch_feature_strength = 6.0f;
 
-    bool has_walk_on_rope =
-        db.walk_on_rope_states.rows == db.nframes() &&
-        db.walk_on_rope_states.cols >= 1;
+    bool has_crouch =
+        db.crouch_states.rows == db.nframes() &&
+        db.crouch_states.cols >= 1;
 
     for (int i = 0; i < db.nframes(); i++)
     {
-        db.features(i, offset) = has_walk_on_rope && db.walk_on_rope_states(i, 0) ? walk_on_rope_feature_strength : 0.0f;
+        db.features(i, offset) = has_crouch && db.crouch_states(i, 0) ? crouch_feature_strength : 0.0f;
     }
 
     // Keep this semantic flag in raw binary space.
@@ -876,7 +876,7 @@ void database_build_matching_features(
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
-        1; // Walk On Rope Flag
+        1; // Crouch Flag
         
     db.features.resize(db.nframes(), nfeatures);
     db.features_offset.resize(nfeatures);
@@ -892,7 +892,7 @@ void database_build_matching_features(
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
     compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
-    compute_walk_on_rope_feature(db, offset);
+    compute_crouch_feature(db, offset);
     
     assert(offset == nfeatures);
     

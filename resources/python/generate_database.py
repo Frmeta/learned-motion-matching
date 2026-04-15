@@ -54,7 +54,7 @@ files = [
     ('resources/bvh/fight1_subject3.bvh',       4600, 4700, False),
     ('resources/bvh/fight1_subject3.bvh',       4780, 4850, False),
     ('resources/bvh/fight1_subject3.bvh',       5800, 5910, False),
-    # Walk on rope
+    # Crouch
     # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
     # Monkey crouch
     ('resources/bvh/ground2_subject2.bvh',       160, 299, True),
@@ -78,11 +78,11 @@ range_starts = []
 range_stops = []
 
 contact_states = []
-walk_on_rope_states = []
+crouch_states = []
 
 """ Loop Over Files """
 
-for filename, start, stop, is_walk_on_rope in files:
+for filename, start, stop, is_crouch in files:
     
     # For each file we process it mirrored and not mirrored
     for mirror in [False, True]:
@@ -214,7 +214,7 @@ for filename, start, stop, is_walk_on_rope in files:
         range_stops.append(offset + len(positions))
         
         contact_states.append(contacts)
-        walk_on_rope_states.append(np.full((len(positions), 1), 1 if is_walk_on_rope else 0, dtype=np.uint8))
+        crouch_states.append(np.full((len(positions), 1), 1 if is_crouch else 0, dtype=np.uint8))
     
     
 """ Concatenate Data """
@@ -229,7 +229,7 @@ range_starts = np.array(range_starts).astype(np.int32)
 range_stops = np.array(range_stops).astype(np.int32)
 
 contact_states = np.concatenate(contact_states, axis=0).astype(np.uint8)
-walk_on_rope_states = np.concatenate(walk_on_rope_states, axis=0).astype(np.uint8)
+crouch_states = np.concatenate(crouch_states, axis=0).astype(np.uint8)
 
 """ Compute Future Toe Positions for Rough Terrain Navigation """
 
@@ -511,7 +511,7 @@ with open('resources/bin/database.bin', 'wb') as f:
     nbones = bone_positions.shape[1]
     nranges = range_starts.shape[0]
     ncontacts = contact_states.shape[1]
-    nrope = walk_on_rope_states.shape[1]
+    ncrouch = crouch_states.shape[1]
     nfuture_toe = future_toe_positions.shape[1]  # Should be 12
     
     f.write(struct.pack('II', nframes, nbones) + bone_positions.ravel().tobytes())
@@ -528,10 +528,10 @@ with open('resources/bin/database.bin', 'wb') as f:
     # Write future toe positions (task-specific output o*)
     f.write(struct.pack('II', nframes, nfuture_toe) + future_toe_positions.ravel().tobytes())
 
-    # Write walk-on-rope state (1 column: 1 for rope-walk clip frames, 0 otherwise)
-    f.write(struct.pack('II', nframes, nrope) + walk_on_rope_states.ravel().tobytes())
+    # Write crouch state (1 column: 1 for crouch clip frames, 0 otherwise)
+    f.write(struct.pack('II', nframes, ncrouch) + crouch_states.ravel().tobytes())
 
-print("Database written successfully with future toe positions and walk-on-rope labels!")
+print("Database written successfully with future toe positions and crouch labels!")
 
 
 """ Write Database CSV (debug/inspection format) """
@@ -556,7 +556,7 @@ with open('resources/bin/database.csv', 'w') as csv_f:
     csv_f.write("nranges,%d\n" % nranges)
     csv_f.write("ncontacts,%d\n" % ncontacts)
     csv_f.write("nfuture_toe,%d\n" % nfuture_toe)
-    csv_f.write("nrope,%d\n" % nrope)
+    csv_f.write("ncrouch,%d\n" % ncrouch)
 
     _write_csv_section(csv_f, "bone_positions", bone_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
     _write_csv_section(csv_f, "bone_velocities", bone_velocities[:csv_preview_frames].reshape(csv_preview_frames, -1))
@@ -567,7 +567,7 @@ with open('resources/bin/database.csv', 'w') as csv_f:
     _write_csv_section(csv_f, "range_stops", range_stops.reshape(1, -1))
     _write_csv_section(csv_f, "contact_states", contact_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
     _write_csv_section(csv_f, "future_toe_positions", future_toe_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
-    _write_csv_section(csv_f, "walk_on_rope_states", walk_on_rope_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "crouch_states", crouch_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
 
 print("database.csv written successfully!")
 
