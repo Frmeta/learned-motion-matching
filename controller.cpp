@@ -3088,17 +3088,15 @@ int main(int argc, char** argv)
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
         bool traj_hit = false;
-        for (int t = 1; t < trajectory_positions.size; t++)
+        int nearest_future_idx = trajectory_positions.size > 1 ? 1 : 0;
+        Ray traj_ray = { to_Vector3(trajectory_positions(nearest_future_idx) + vec3(0, 10, 0)), {0, -1, 0} };
+        for (int i = 0; i < ground_plane_model.meshCount; i++)
         {
-            Ray traj_ray = { to_Vector3(trajectory_positions(trajectory_positions.size-1-t) + vec3(0, 10, 0)), {0, -1, 0} };
-            for (int i = 0; i < ground_plane_model.meshCount; i++)
+            RayCollision traj_collision = GetRayCollisionMesh(traj_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
+            if (traj_collision.hit && (!traj_hit || traj_collision.point.y > traj_ground_height))
             {
-                RayCollision traj_collision = GetRayCollisionMesh(traj_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-                if (traj_collision.hit && (!traj_hit || traj_collision.point.y > traj_ground_height))
-                {
-                    traj_ground_height = traj_collision.point.y;
-                    traj_hit = true;
-                }
+                traj_ground_height = traj_collision.point.y;
+                traj_hit = true;
             }
         }
 
