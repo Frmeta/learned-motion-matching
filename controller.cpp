@@ -218,8 +218,9 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
-    1 + // Idle Flag
-        1;  // Crouch Flag
+        1 + // Idle Flag
+        1 + // Crouch Flag
+        1;  // Jump Flag
 }
 
 struct joystick_record_sample
@@ -2104,7 +2105,7 @@ int main(int argc, char** argv)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "resources/glb/05-Playground.glb";
+    const char* ground_glb_path = "resources/glb/06-Playground2.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -2304,6 +2305,7 @@ int main(int argc, char** argv)
     float desired_gait_velocity = 0.0f;
     bool desired_crouch_prev = false;
     bool desired_idle_prev = false;
+    bool desired_jump_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2644,6 +2646,7 @@ int main(int argc, char** argv)
     const float base_desired_gait_velocity = desired_gait_velocity;
     const bool base_desired_crouch_prev = desired_crouch_prev;
     const bool base_desired_idle_prev = desired_idle_prev;
+    const bool base_desired_jump_prev = desired_jump_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -2714,6 +2717,7 @@ int main(int argc, char** argv)
         desired_gait_velocity = base_desired_gait_velocity;
         desired_crouch_prev = base_desired_crouch_prev;
         desired_idle_prev = base_desired_idle_prev;
+        desired_jump_prev = base_desired_jump_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -2949,24 +2953,22 @@ int main(int argc, char** argv)
         input_planar.y = 0.0f;
         float desired_input_magnitude = length(input_planar);
 
-        vec3 desired_velocity_planar = desired_velocity_curr;
-        desired_velocity_planar.y = 0.0f;
-        float desired_planar_speed = length(desired_velocity_planar);
+        vec3 simulation_velocity_planar = simulation_velocity;
+        simulation_velocity_planar.y = 0.0f;
+        float simulation_planar_speed = length(simulation_velocity_planar);
 
-        const float idle_enter_input_threshold = 0.08f;
         const float idle_exit_input_threshold = 0.14f;
-        const float idle_enter_speed_threshold = 0.10f;
-        const float idle_exit_speed_threshold = 0.20f;
+        const float idle_enter_speed_threshold = 0.02f;
+        const float idle_exit_speed_threshold = 0.08f;
 
         bool desired_idle = desired_idle_prev;
         bool idle_enter =
             !jump_active &&
-            desired_input_magnitude <= idle_enter_input_threshold &&
-            desired_planar_speed <= idle_enter_speed_threshold;
+            simulation_planar_speed <= idle_enter_speed_threshold;
         bool idle_exit =
             jump_active ||
             desired_input_magnitude >= idle_exit_input_threshold ||
-            desired_planar_speed >= idle_exit_speed_threshold;
+            simulation_planar_speed >= idle_exit_speed_threshold;
 
         if (desired_idle)
         {
@@ -2983,6 +2985,12 @@ int main(int argc, char** argv)
         if (joystick_playback_enabled)
         {
             desired_idle = false;
+        }
+
+        bool desired_jump = jump_pressed || jump_active;
+        if (joystick_playback_enabled)
+        {
+            desired_jump = false;
         }
 
         if (debug) std::cout << "test6" << std::endl;
@@ -3018,6 +3026,13 @@ int main(int argc, char** argv)
             force_search = true;
             force_search_timer = search_time;
             desired_idle_prev = desired_idle;
+        }
+
+        if (desired_jump != desired_jump_prev)
+        {
+            force_search = true;
+            force_search_timer = search_time;
+            desired_jump_prev = desired_jump;
         }
 
         if (force_search_timer <= 0.0f && (
@@ -3084,6 +3099,21 @@ int main(int argc, char** argv)
             simulation_velocity_halflife,
             20.0f * dt,
             ground_plane_model);
+
+        // If future trajectory rises upward, reduce horizontal reach for that point.
+        const float uphill_horizontal_reduce_gain = 0.6f;
+        const float uphill_horizontal_reduce_max = 0.7f;
+        for (int i = 1; i < trajectory_positions.size; i++)
+        {
+            vec3 rel = trajectory_positions(i) - simulation_position;
+            if (rel.y > 0.0f)
+            {
+                float reduce = clampf(rel.y * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
+                float scale_xz = 1.0f - reduce;
+                trajectory_positions(i).x = simulation_position.x + rel.x * scale_xz;
+                trajectory_positions(i).z = simulation_position.z + rel.z * scale_xz;
+            }
+        }
 
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
@@ -3280,6 +3310,13 @@ int main(int argc, char** argv)
             const float crouch_feature_strength = 6.0f;
             if (debug) std::cout << "  Setting crouch flag..." << std::endl;
             query(offset) = desired_crouch ? crouch_feature_strength : 0.0f;
+            offset += 1;
+        }
+        if (offset < db.nfeatures())
+        {
+            const float jump_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting jump flag..." << std::endl;
+            query(offset) = desired_jump ? jump_feature_strength : 0.0f;
             offset += 1;
         }
         if (debug) std::cout << "Done Query" << std::endl;

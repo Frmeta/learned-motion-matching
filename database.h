@@ -39,6 +39,7 @@ struct database
     array2d<float> future_toe_positions;  // 12 floats per frame (6 vec2: L15, R15, L30, R30, L45, R45)
     array2d<bool> crouch_states;          // 1 column per frame: 1 for crouch clip, 0 otherwise
     array2d<bool> idle_states;            // 1 column per frame: 1 for idle clip, 0 otherwise
+    array2d<bool> jump_states;            // 1 column per frame: 1 for jump clip, 0 otherwise
     
     array2d<float> bound_sm_min;
     array2d<float> bound_sm_max;
@@ -101,6 +102,22 @@ void database_load(database& db, const char* filename)
         db.idle_states.resize(db.nframes(), 1);
         db.idle_states.zero();
     }
+
+    // Optional field for newest database versions.
+    long jump_pos = ftell(f);
+    fseek(f, 0, SEEK_END);
+    file_end = ftell(f);
+    fseek(f, jump_pos, SEEK_SET);
+
+    if (file_end - jump_pos >= (long)(2 * sizeof(int)))
+    {
+        array2d_read(db.jump_states, f);
+    }
+    else
+    {
+        db.jump_states.resize(db.nframes(), 1);
+        db.jump_states.zero();
+    }
     
     fclose(f);
 }
@@ -135,6 +152,25 @@ void compute_idle_feature(database& db, int& offset)
     for (int i = 0; i < db.nframes(); i++)
     {
         db.features(i, offset) = has_idle && db.idle_states(i, 0) ? idle_feature_strength : 0.0f;
+    }
+
+    // Keep this semantic flag in raw binary space.
+    db.features_offset(offset) = 0.0f;
+    db.features_scale(offset) = 1.0f;
+    offset += 1;
+}
+
+void compute_jump_feature(database& db, int& offset)
+{
+    const float jump_feature_strength = 6.0f;
+
+    bool has_jump =
+        db.jump_states.rows == db.nframes() &&
+        db.jump_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_jump && db.jump_states(i, 0) ? jump_feature_strength : 0.0f;
     }
 
     // Keep this semantic flag in raw binary space.
@@ -913,7 +949,8 @@ void database_build_matching_features(
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
         1 + // Idle Flag
-        1; // Crouch Flag
+        1 + // Crouch Flag
+        1; // Jump Flag
         
     db.features.resize(db.nframes(), nfeatures);
     db.features_offset.resize(nfeatures);
@@ -931,6 +968,7 @@ void database_build_matching_features(
     compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
     compute_idle_feature(db, offset);
     compute_crouch_feature(db, offset);
+    compute_jump_feature(db, offset);
     
     assert(offset == nfeatures);
     
