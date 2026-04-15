@@ -218,20 +218,16 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
-        3 + // History Left Foot Position (-40)
-        3 + // History Right Foot Position (-40)
-        3 + // History Left Foot Velocity (-40)
-        3 + // History Right Foot Velocity (-40)
-        3 + // History Hip Velocity (-40)
+        3 + // History Left Foot Position (-20)
+        3 + // History Right Foot Position (-20)
+        3 + // History Left Foot Velocity (-20)
+        3 + // History Right Foot Velocity (-20)
+        3 + // History Hip Velocity (-20)
         3 + // History Trajectory Position (-20)
         3 + // History Trajectory Direction (-20)
         3 + // History Trajectory Position (-40)
         3 + // History Trajectory Direction (-40)
-        3 + // History Trajectory Position (-60)
-        3 + // History Trajectory Direction (-60)
         2 + // History Terrain Heights (-15)
-        2 + // History Terrain Heights (-30)
-        2 + // History Terrain Heights (-45)
         1 + // Idle Flag
         1 + // Crouch Flag
         1;  // Jump Flag
@@ -1929,17 +1925,126 @@ void draw_features(
         DrawSphereWires(to_Vector3(htraj_pos), 0.07f, 6, 12, c);
     };
 
+    auto draw_history_bone_position_sphere = [&](int feature_offset, int history_offset, Color c, float radius = 0.05f)
+    {
+        if (features.size <= feature_offset + 2) return;
+
+        int history_frame = clamp_history_frame(frame_index, history_offset);
+        vec3 root_pos_history_db = db.bone_positions(history_frame, 0);
+        quat root_rot_history_db = db.bone_rotations(history_frame, 0);
+
+        vec3 root_pos_history = quat_mul_vec3(db_to_world_rot, root_pos_history_db) + db_to_world_pos;
+        quat root_rot_history = quat_mul(db_to_world_rot, root_rot_history_db);
+
+        vec3 local_feature = vec3(features(feature_offset + 0), features(feature_offset + 1), features(feature_offset + 2));
+        vec3 feature_world = quat_mul_vec3(root_rot_history, local_feature) + root_pos_history;
+
+        Color c_faint = ColorAlpha(c, 0.45f);
+        DrawLine3D(to_Vector3(root_pos_history), to_Vector3(feature_world), c_faint);
+        DrawSphereWires(to_Vector3(feature_world), radius, 4, 10, c);
+    };
+
+    auto draw_history_velocity_sphere = [&](int position_feature_offset, int velocity_feature_offset, int bone, int history_offset, Color c)
+    {
+        if (features.size <= velocity_feature_offset + 2) return;
+
+        int history_frame = clamp_history_frame(frame_index, history_offset);
+        vec3 root_pos_history_db = db.bone_positions(history_frame, 0);
+        quat root_rot_history_db = db.bone_rotations(history_frame, 0);
+
+        vec3 root_pos_history = quat_mul_vec3(db_to_world_rot, root_pos_history_db) + db_to_world_pos;
+        quat root_rot_history = quat_mul(db_to_world_rot, root_rot_history_db);
+
+        vec3 feature_pos_local;
+        if (position_feature_offset >= 0 && features.size > position_feature_offset + 2)
+        {
+            feature_pos_local = vec3(features(position_feature_offset + 0), features(position_feature_offset + 1), features(position_feature_offset + 2));
+        }
+        else
+        {
+            vec3 feature_pos_db;
+            quat feature_rot_db;
+            forward_kinematics(
+                feature_pos_db,
+                feature_rot_db,
+                db.bone_positions(history_frame),
+                db.bone_rotations(history_frame),
+                db.bone_parents,
+                bone);
+            feature_pos_local = quat_inv_mul_vec3(root_rot_history_db, feature_pos_db - root_pos_history_db);
+        }
+        vec3 feature_vel_local = vec3(features(velocity_feature_offset + 0), features(velocity_feature_offset + 1), features(velocity_feature_offset + 2));
+
+        vec3 feature_pos_world = quat_mul_vec3(root_rot_history, feature_pos_local) + root_pos_history;
+        vec3 feature_vel_world = quat_mul_vec3(root_rot_history, feature_vel_local);
+        vec3 feature_vel_end = feature_pos_world + 0.1f * feature_vel_world;
+
+        Color c_faint = ColorAlpha(c, 0.45f);
+        DrawLine3D(to_Vector3(feature_pos_world), to_Vector3(feature_vel_end), c_faint);
+        DrawSphereWires(to_Vector3(feature_vel_end), 0.045f, 4, 10, c);
+    };
+
+    auto draw_history_terrain_spheres = [&](int feature_offset, int history_offset, Color c)
+    {
+        if (features.size <= feature_offset + 1) return;
+
+        int history_frame = clamp_history_frame(frame_index, history_offset);
+        vec3 hip_pos_db;
+        quat hip_rot_db;
+        vec3 left_toe_pos_db;
+        quat left_toe_rot_db;
+        vec3 right_toe_pos_db;
+        quat right_toe_rot_db;
+
+        forward_kinematics(
+            hip_pos_db,
+            hip_rot_db,
+            db.bone_positions(history_frame),
+            db.bone_rotations(history_frame),
+            db.bone_parents,
+            Bone_Hips);
+        forward_kinematics(
+            left_toe_pos_db,
+            left_toe_rot_db,
+            db.bone_positions(history_frame),
+            db.bone_rotations(history_frame),
+            db.bone_parents,
+            Bone_LeftToe);
+        forward_kinematics(
+            right_toe_pos_db,
+            right_toe_rot_db,
+            db.bone_positions(history_frame),
+            db.bone_rotations(history_frame),
+            db.bone_parents,
+            Bone_RightToe);
+
+        vec3 hip_pos_world = quat_mul_vec3(db_to_world_rot, hip_pos_db) + db_to_world_pos;
+        vec3 left_toe_world = quat_mul_vec3(db_to_world_rot, left_toe_pos_db) + db_to_world_pos;
+        vec3 right_toe_world = quat_mul_vec3(db_to_world_rot, right_toe_pos_db) + db_to_world_pos;
+
+        float left_terrain_height = features(feature_offset + 0);
+        float right_terrain_height = features(feature_offset + 1);
+
+        vec3 left_terrain_pos = vec3(left_toe_world.x, hip_pos_world.y + left_terrain_height + 0.01f, left_toe_world.z);
+        vec3 right_terrain_pos = vec3(right_toe_world.x, hip_pos_world.y + right_terrain_height + 0.01f, right_toe_world.z);
+
+        Color c_faint = ColorAlpha(c, 0.45f);
+        DrawLine3D(to_Vector3(vec3(left_toe_world.x, hip_pos_world.y, left_toe_world.z)), to_Vector3(left_terrain_pos), c_faint);
+        DrawLine3D(to_Vector3(vec3(right_toe_world.x, hip_pos_world.y, right_toe_world.z)), to_Vector3(right_terrain_pos), c_faint);
+        DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, c);
+        DrawSphereWires(to_Vector3(right_terrain_pos), 0.03f, 4, 6, c);
+    };
+
     const int history_block_start = MM_HISTORY_FEATURE_START;
 
-    // Always available in both layouts.
-    // Old layout: offset +15 belongs to history -20.
-    // New layout: offset +15 belongs to history -40.
-    const bool has_extended_history = features.size > history_block_start + 29;
-    draw_history_traj_sphere(history_block_start + 15, has_extended_history ? -40 : -20, YELLOW);
-
-    // Available in newer layout only.
-    draw_history_traj_sphere(history_block_start + 21, -20, ORANGE);
-    draw_history_traj_sphere(history_block_start + 27, -60, GOLD);
+    draw_history_bone_position_sphere(history_block_start + 0, -20, SKYBLUE);
+    draw_history_bone_position_sphere(history_block_start + 3, -20, SKYBLUE);
+    draw_history_velocity_sphere(history_block_start + 0, history_block_start + 6, Bone_LeftFoot, -20, VIOLET);
+    draw_history_velocity_sphere(history_block_start + 3, history_block_start + 9, Bone_RightFoot, -20, MAGENTA);
+    draw_history_velocity_sphere(-1, history_block_start + 12, Bone_Hips, -20, LIME);
+    draw_history_traj_sphere(history_block_start + 15, -20, YELLOW);
+    draw_history_traj_sphere(history_block_start + 21, -40, ORANGE);
+    draw_history_terrain_spheres(history_block_start + 27, -15, GREEN);
 }
 
 void draw_trajectory(
@@ -2333,7 +2438,7 @@ int main(int argc, char** argv)
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 0.5f;
 
-    float feature_weight_prev_frame_multiplier = 80.0f;
+    float feature_weight_prev_frame_multiplier = 0.4f;
 
     float feature_weight_history_foot_position = feature_weight_foot_position * feature_weight_prev_frame_multiplier;
     float feature_weight_history_foot_velocity = feature_weight_foot_velocity * feature_weight_prev_frame_multiplier;
@@ -3480,17 +3585,10 @@ int main(int argc, char** argv)
         
         bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
         slice1d<float> query_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
-        int history_frame_40 = database_index_clamp(db, frame_index, -40);
         int history_frame_20 = database_index_clamp(db, frame_index, -20);
         int history_frame_15 = database_index_clamp(db, frame_index, -15);
-        int history_frame_30 = database_index_clamp(db, frame_index, -30);
-        int history_frame_45 = database_index_clamp(db, frame_index, -45);
         slice1d<float> query_features_history_20 = db.features(history_frame_20);
         slice1d<float> query_features_history_15 = db.features(history_frame_15);
-        slice1d<float> query_features_history_30 = db.features(history_frame_30);
-        slice1d<float> query_features_history_45 = db.features(history_frame_45);
-        const bool has_extended_history_layout = db.nfeatures() >= matching_feature_count_expected();
-        slice1d<float> query_features_history_primary = has_extended_history_layout ? db.features(history_frame_40) : query_features_history_20;
         if (debug) std::cout << "Got query features, size=" << query_features.size << std::endl;
         
         int offset = 0;
@@ -3530,19 +3628,19 @@ int main(int argc, char** argv)
 
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 3, src_left_foot_pos_offset,
-            query_features_history_primary, db.features_offset, db.features_scale);
+            query_features_history_20, db.features_offset, db.features_scale);
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 3, src_right_foot_pos_offset,
-            query_features_history_primary, db.features_offset, db.features_scale);
+            query_features_history_20, db.features_offset, db.features_scale);
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 3, src_left_foot_vel_offset,
-            query_features_history_primary, db.features_offset, db.features_scale);
+            query_features_history_20, db.features_offset, db.features_scale);
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 3, src_right_foot_vel_offset,
-            query_features_history_primary, db.features_offset, db.features_scale);
+            query_features_history_20, db.features_offset, db.features_scale);
         query_copy_denormalized_feature_from_source_offset(
             query, offset, 3, src_hip_vel_offset,
-            query_features_history_primary, db.features_offset, db.features_scale);
+            query_features_history_20, db.features_offset, db.features_scale);
 
         auto sample_runtime_history_root = [&](int relative_offset, vec3& out_pos, quat& out_rot)
         {
@@ -3586,44 +3684,15 @@ int main(int argc, char** argv)
             offset += 3;
         };
 
-        if (has_extended_history_layout)
-        {
-            query_write_runtime_history_trajectory(-40);
-            query_write_runtime_history_trajectory(-20);
-            query_write_runtime_history_trajectory(-60);
+        query_write_runtime_history_trajectory(-20);
+        query_write_runtime_history_trajectory(-40);
 
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_left_terrain_offset,
-                query_features_history_15, db.features_offset, db.features_scale);
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_right_terrain_offset,
-                query_features_history_15, db.features_offset, db.features_scale);
-
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_left_terrain_offset,
-                query_features_history_30, db.features_offset, db.features_scale);
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_right_terrain_offset,
-                query_features_history_30, db.features_offset, db.features_scale);
-
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_left_terrain_offset,
-                query_features_history_45, db.features_offset, db.features_scale);
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_right_terrain_offset,
-                query_features_history_45, db.features_offset, db.features_scale);
-        }
-        else
-        {
-            query_write_runtime_history_trajectory(-20);
-
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_left_terrain_offset,
-                query_features_history_15, db.features_offset, db.features_scale);
-            query_copy_denormalized_feature_from_source_offset(
-                query, offset, 1, src_right_terrain_offset,
-                query_features_history_15, db.features_offset, db.features_scale);
-        }
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 1, src_left_terrain_offset,
+            query_features_history_15, db.features_offset, db.features_scale);
+        query_copy_denormalized_feature_from_source_offset(
+            query, offset, 1, src_right_terrain_offset,
+            query_features_history_15, db.features_offset, db.features_scale);
 
         if (offset < db.nfeatures())
         {

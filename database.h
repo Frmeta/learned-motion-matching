@@ -19,7 +19,7 @@ enum
     BOUND_LR_SIZE = 64,
     // Feature layout constants used by MM search masking.
     MM_HISTORY_FEATURE_START = 41,
-    MM_HISTORY_FEATURE_COUNT = 39,
+    MM_HISTORY_FEATURE_COUNT = 32,
     MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
 
@@ -1245,20 +1245,16 @@ void database_build_matching_features(
         8 + // Terrain Heights
         
         // History:
-        3 + // History Left Foot Position (-40)
-        3 + // History Right Foot Position (-40)
-        3 + // History Left Foot Velocity (-40)
-        3 + // History Right Foot Velocity (-40)
-        3 + // History Hip Velocity (-40)
+        3 + // History Left Foot Position (-20)
+        3 + // History Right Foot Position (-20)
+        3 + // History Left Foot Velocity (-20)
+        3 + // History Right Foot Velocity (-20)
+        3 + // History Hip Velocity (-20)
         3 + // History Trajectory Position (-20)
         3 + // History Trajectory Direction (-20)
         3 + // History Trajectory Position (-40)
         3 + // History Trajectory Direction (-40)
-        3 + // History Trajectory Position (-60)
-        3 + // History Trajectory Direction (-60)
         2 + // History Terrain Heights (-15)
-        2 + // History Terrain Heights (-30)
-        2 + // History Terrain Heights (-45)
 
         // Flag:
         1 + // Idle Flag
@@ -1282,7 +1278,7 @@ void database_build_matching_features(
     compute_history_20_feature_block(
         db,
         offset,
-        -40,
+        -20,
         feature_weight_history_foot_position,
         feature_weight_history_foot_velocity,
         feature_weight_history_hip_velocity,
@@ -1297,23 +1293,13 @@ void database_build_matching_features(
     compute_history_trajectory_feature_block(
         db,
         offset,
-        -60,
+        -40,
         feature_weight_history_trajectory_positions,
         feature_weight_history_trajectory_directions);
     compute_history_terrain_feature(
         db,
         offset,
         -15,
-        feature_weight_history_terrain_heights);
-    compute_history_terrain_feature(
-        db,
-        offset,
-        -30,
-        feature_weight_history_terrain_heights);
-    compute_history_terrain_feature(
-        db,
-        offset,
-        -45,
         feature_weight_history_terrain_heights);
     compute_idle_feature(db, offset);
     compute_crouch_feature(db, offset);
