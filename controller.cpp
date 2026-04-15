@@ -3009,10 +3009,11 @@ int main(int argc, char** argv)
             if (sample_terrain_height(ground_plane_model, simulation_position, terrain_height_curr) &&
                 sample_terrain_height(ground_plane_model, probe_ahead, terrain_height_ahead))
             {
-                float uphill_height_delta = terrain_height_ahead - terrain_height_curr;
-                if (uphill_height_delta > climbing_height_threshold)
+                float slope_height_delta = terrain_height_ahead - terrain_height_curr;
+                float slope_height_delta_abs = fabsf(slope_height_delta);
+                if (slope_height_delta_abs > climbing_height_threshold)
                 {
-                    float steepness_t = (uphill_height_delta - climbing_height_threshold) /
+                    float steepness_t = (slope_height_delta_abs - climbing_height_threshold) /
                         maxf(climbing_max_height_delta - climbing_height_threshold, 0.0001f);
                     steepness_t = clampf(steepness_t, 0.0f, 1.0f);
                     climbing_speed_scale = lerpf(1.0f, climbing_min_speed_factor, steepness_t);
