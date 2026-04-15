@@ -33,35 +33,36 @@ def animation_mirror(lrot, lpos, names, parents):
 
 files = [
     # We just use a small section of this clip for the standing idle
-    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351, False), 
+    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351, False, True), 
     # Running
-    ('resources/bvh/run1_subject5.bvh',             90, 7086, False), 
+    ('resources/bvh/run1_subject5.bvh',             90, 7086, False, False), 
     # Walking
-    ('resources/bvh/walk1_subject5.bvh',            80, 7791, False), # decrease file size (original: 7791)
+    ('resources/bvh/walk1_subject5.bvh',            80, 7791, False, False), # decrease file size (original: 7791)
     # Terrain
-    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False),
-    ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False),
+    ('resources/bvh/obstacles1_subject2.bvh',       231, 4972, False, False),
+    ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False, False),
     # Climb
-    ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       1910, 1990, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       2270, 2720, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       3766, 4027, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       4210, 4448, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       1910, 1990, False, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       2270, 2720, False, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       3766, 4027, False, False),
+    ('resources/bvh/obstacles1_subject1.bvh',       4210, 4448, False, False),
     # Jump
-    ('resources/bvh/jumps1_subject1.bvh',       1490, 1600, False),
-    ('resources/bvh/fight1_subject2.bvh',       4290, 4390, False),
-    ('resources/bvh/fight1_subject2.bvh',       4408, 4600, False),
-    ('resources/bvh/fight1_subject3.bvh',       4600, 4700, False),
-    ('resources/bvh/fight1_subject3.bvh',       4780, 4850, False),
-    ('resources/bvh/fight1_subject3.bvh',       5800, 5910, False),
+    ('resources/bvh/jumps1_subject1.bvh',       1490, 1600, False, False),
+    ('resources/bvh/fight1_subject2.bvh',       4290, 4390, False, False),
+    ('resources/bvh/fight1_subject2.bvh',       4408, 4600, False, False),
+    ('resources/bvh/fight1_subject3.bvh',       4600, 4700, False, False),
+    ('resources/bvh/fight1_subject3.bvh',       4780, 4850, False, False),
+    ('resources/bvh/fight1_subject3.bvh',       5800, 5910, False, False),
     # Crouch
-    # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True),
+    # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True, False),
     # Monkey crouch
-    ('resources/bvh/ground2_subject2.bvh',       160, 299, True),
-    ('resources/bvh/ground2_subject2.bvh',       300, 2280, True),
-    ('resources/bvh/ground2_subject2.bvh',       2800, 3000, True),
-    ('resources/bvh/ground2_subject3.bvh',       1035, 1600, True),
-    ('resources/bvh/ground1_subject4.bvh',       3700, 4500, True),
+    ('resources/bvh/ground2_subject2.bvh',       160, 204, True, False), #stand to crouch
+    ('resources/bvh/ground2_subject2.bvh',       205, 325, True, True), #idle
+    ('resources/bvh/ground2_subject2.bvh',       325, 2280, True, False),
+    ('resources/bvh/ground2_subject2.bvh',       2800, 3000, True, False),
+    ('resources/bvh/ground2_subject3.bvh',       1035, 1600, True, False),
+    ('resources/bvh/ground1_subject4.bvh',       3700, 4500, True, False),
 
 ]
 
@@ -79,10 +80,11 @@ range_stops = []
 
 contact_states = []
 crouch_states = []
+idle_states = []
 
 """ Loop Over Files """
 
-for filename, start, stop, is_crouch in files:
+for filename, start, stop, is_crouch, is_idle in files:
     
     # For each file we process it mirrored and not mirrored
     for mirror in [False, True]:
@@ -215,6 +217,7 @@ for filename, start, stop, is_crouch in files:
         
         contact_states.append(contacts)
         crouch_states.append(np.full((len(positions), 1), 1 if is_crouch else 0, dtype=np.uint8))
+        idle_states.append(np.full((len(positions), 1), 1 if is_idle else 0, dtype=np.uint8))
     
     
 """ Concatenate Data """
@@ -230,6 +233,7 @@ range_stops = np.array(range_stops).astype(np.int32)
 
 contact_states = np.concatenate(contact_states, axis=0).astype(np.uint8)
 crouch_states = np.concatenate(crouch_states, axis=0).astype(np.uint8)
+idle_states = np.concatenate(idle_states, axis=0).astype(np.uint8)
 
 """ Compute Future Toe Positions for Rough Terrain Navigation """
 
@@ -512,6 +516,7 @@ with open('resources/bin/database.bin', 'wb') as f:
     nranges = range_starts.shape[0]
     ncontacts = contact_states.shape[1]
     ncrouch = crouch_states.shape[1]
+    nidle = idle_states.shape[1]
     nfuture_toe = future_toe_positions.shape[1]  # Should be 12
     
     f.write(struct.pack('II', nframes, nbones) + bone_positions.ravel().tobytes())
@@ -531,7 +536,10 @@ with open('resources/bin/database.bin', 'wb') as f:
     # Write crouch state (1 column: 1 for crouch clip frames, 0 otherwise)
     f.write(struct.pack('II', nframes, ncrouch) + crouch_states.ravel().tobytes())
 
-print("Database written successfully with future toe positions and crouch labels!")
+    # Write idle state (1 column: 1 for idle clip frames, 0 otherwise)
+    f.write(struct.pack('II', nframes, nidle) + idle_states.ravel().tobytes())
+
+print("Database written successfully with future toe positions, crouch labels, and idle labels!")
 
 
 """ Write Database CSV (debug/inspection format) """
@@ -557,6 +565,7 @@ with open('resources/bin/database.csv', 'w') as csv_f:
     csv_f.write("ncontacts,%d\n" % ncontacts)
     csv_f.write("nfuture_toe,%d\n" % nfuture_toe)
     csv_f.write("ncrouch,%d\n" % ncrouch)
+    csv_f.write("nidle,%d\n" % nidle)
 
     _write_csv_section(csv_f, "bone_positions", bone_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
     _write_csv_section(csv_f, "bone_velocities", bone_velocities[:csv_preview_frames].reshape(csv_preview_frames, -1))
@@ -568,6 +577,7 @@ with open('resources/bin/database.csv', 'w') as csv_f:
     _write_csv_section(csv_f, "contact_states", contact_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
     _write_csv_section(csv_f, "future_toe_positions", future_toe_positions[:csv_preview_frames].reshape(csv_preview_frames, -1))
     _write_csv_section(csv_f, "crouch_states", crouch_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
+    _write_csv_section(csv_f, "idle_states", idle_states[:csv_preview_frames].reshape(csv_preview_frames, -1))
 
 print("database.csv written successfully!")
 

@@ -35,6 +35,7 @@ def expected_feature_count_current_runtime():
         9 +   # Trajectory Positions
         9 +   # Trajectory Directions
         8 +   # Terrain Heights
+        1 +   # Idle Flag
         1     # Crouch Flag
     )
 

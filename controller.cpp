@@ -218,6 +218,7 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
+    1 + // Idle Flag
         1;  // Crouch Flag
 }
 
@@ -2168,7 +2169,7 @@ int main(int argc, char** argv)
     float feature_weight_hip_velocity = 1.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
-    float feature_weight_terrain_heights = 1.0f;
+    float feature_weight_terrain_heights = 0.5f;
     
     
     if (rebuild_features)
@@ -2302,6 +2303,7 @@ int main(int argc, char** argv)
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
     bool desired_crouch_prev = false;
+    bool desired_idle_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2318,9 +2320,9 @@ int main(int argc, char** argv)
     // float simulation_run_side_speed = 3.0f;
     // float simulation_run_back_speed = 2.5f;
 
-    float simulation_run_fwrd_speed = 6.0f;
-    float simulation_run_side_speed = 5.0f;
-    float simulation_run_back_speed = 4.0f;
+    float simulation_run_fwrd_speed = 5.0f;
+    float simulation_run_side_speed = 4.0f;
+    float simulation_run_back_speed = 3.0f;
     
     // float simulation_walk_fwrd_speed = 1.75f;
     // float simulation_walk_side_speed = 1.5f;
@@ -2330,9 +2332,9 @@ int main(int argc, char** argv)
     float simulation_walk_side_speed = 2.0f;
     float simulation_walk_back_speed = 1.5f;
 
-    float simulation_rope_fwrd_speed = 2.5f;
-    float simulation_rope_side_speed = 1.5f;
-    float simulation_rope_back_speed = 1.0f;
+    float simulation_crouch_fwrd_speed = 2.5f;
+    float simulation_crouch_side_speed = 1.5f;
+    float simulation_crouch_back_speed = 1.0f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
@@ -2641,6 +2643,7 @@ int main(int argc, char** argv)
     const float base_desired_gait = desired_gait;
     const float base_desired_gait_velocity = desired_gait_velocity;
     const bool base_desired_crouch_prev = desired_crouch_prev;
+    const bool base_desired_idle_prev = desired_idle_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -2710,6 +2713,7 @@ int main(int argc, char** argv)
         desired_gait = base_desired_gait;
         desired_gait_velocity = base_desired_gait_velocity;
         desired_crouch_prev = base_desired_crouch_prev;
+        desired_idle_prev = base_desired_idle_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -2838,7 +2842,7 @@ int main(int argc, char** argv)
             jump_buffer_timer = 0.0f;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.01f : 1.22f;
+        jump_root_height_offset = crouch_pressed ? 0.2f : 1.2f;
 
         if (jump_pressed)
         {
@@ -2863,9 +2867,9 @@ int main(int argc, char** argv)
 
         if (desired_crouch)
         {
-            simulation_fwrd_speed = simulation_rope_fwrd_speed;
-            simulation_side_speed = simulation_rope_side_speed;
-            simulation_back_speed = simulation_rope_back_speed;
+            simulation_fwrd_speed = simulation_crouch_fwrd_speed;
+            simulation_side_speed = simulation_crouch_side_speed;
+            simulation_back_speed = simulation_crouch_back_speed;
         }
 
         float climbing_speed_scale = 1.0f;
@@ -2941,6 +2945,46 @@ int main(int argc, char** argv)
             desired_velocity_curr.y = jump_vertical_velocity;
         }
 
+        vec3 input_planar = gamepadstick_left;
+        input_planar.y = 0.0f;
+        float desired_input_magnitude = length(input_planar);
+
+        vec3 desired_velocity_planar = desired_velocity_curr;
+        desired_velocity_planar.y = 0.0f;
+        float desired_planar_speed = length(desired_velocity_planar);
+
+        const float idle_enter_input_threshold = 0.08f;
+        const float idle_exit_input_threshold = 0.14f;
+        const float idle_enter_speed_threshold = 0.10f;
+        const float idle_exit_speed_threshold = 0.20f;
+
+        bool desired_idle = desired_idle_prev;
+        bool idle_enter =
+            !jump_active &&
+            desired_input_magnitude <= idle_enter_input_threshold &&
+            desired_planar_speed <= idle_enter_speed_threshold;
+        bool idle_exit =
+            jump_active ||
+            desired_input_magnitude >= idle_exit_input_threshold ||
+            desired_planar_speed >= idle_exit_speed_threshold;
+
+        if (desired_idle)
+        {
+            if (idle_exit)
+            {
+                desired_idle = false;
+            }
+        }
+        else if (idle_enter)
+        {
+            desired_idle = true;
+        }
+
+        if (joystick_playback_enabled)
+        {
+            desired_idle = false;
+        }
+
         if (debug) std::cout << "test6" << std::endl;
         // Get the desired rotation/direction
         quat desired_rotation_curr = desired_rotation_update(
@@ -2967,6 +3011,13 @@ int main(int argc, char** argv)
             force_search = true;
             force_search_timer = search_time;
             desired_crouch_prev = desired_crouch;
+        }
+
+        if (desired_idle != desired_idle_prev)
+        {
+            force_search = true;
+            force_search_timer = search_time;
+            desired_idle_prev = desired_idle;
         }
 
         if (force_search_timer <= 0.0f && (
@@ -3219,6 +3270,13 @@ int main(int argc, char** argv)
             trajectory_rotations);
         if (debug) std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
+        if (offset < db.nfeatures())
+        {
+            const float idle_feature_strength = 6.0f;
+            if (debug) std::cout << "  Setting idle flag..." << std::endl;
+            query(offset) = desired_idle ? idle_feature_strength : 0.0f;
+            offset += 1;
+        }
         if (offset < db.nfeatures())
         {
             const float crouch_feature_strength = 6.0f;
