@@ -45,3 +45,7 @@ range_index,db_start,db_stop,bvh_name,source_start,source_stop,is_mirrored
 43,106318,107334,ground2_subject3.bvh,1035,1600,1
 44,107334,108773,ground1_subject4.bvh,3700,4500,0
 45,108773,110212,ground1_subject4.bvh,3700,4500,1
+46,110212,110337,dance1_subject1.bvh,3180,3250,0
+47,110337,110462,dance1_subject1.bvh,3180,3250,1
+48,110462,110569,dance1_subject1.bvh,3450,3510,0
+49,110569,110676,dance1_subject1.bvh,3450,3510,1

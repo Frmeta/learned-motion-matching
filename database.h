@@ -18,7 +18,7 @@ enum
     BOUND_SM_SIZE = 16,
     BOUND_LR_SIZE = 64,
     // Feature layout constants used by MM search masking.
-    MM_HISTORY_FEATURE_START = 44,
+    MM_HISTORY_FEATURE_START = 45,
     MM_HISTORY_FEATURE_COUNT = 29,
     MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
@@ -44,6 +44,7 @@ struct database
     array2d<bool> crouch_states;          // 1 column per frame: 1 for crouch clip, 0 otherwise
     array2d<bool> idle_states;            // 1 column per frame: 1 for idle clip, 0 otherwise
     array2d<bool> jump_states;            // 1 column per frame: 1 for jump clip, 0 otherwise
+    array2d<bool> cartwheel_states;       // 1 column per frame: 1 for cartwheel clip, 0 otherwise
     
     array2d<float> bound_sm_min;
     array2d<float> bound_sm_max;
@@ -122,6 +123,22 @@ void database_load(database& db, const char* filename)
         db.jump_states.resize(db.nframes(), 1);
         db.jump_states.zero();
     }
+
+    // Optional field for newest database versions.
+    long cartwheel_pos = ftell(f);
+    fseek(f, 0, SEEK_END);
+    file_end = ftell(f);
+    fseek(f, cartwheel_pos, SEEK_SET);
+
+    if (file_end - cartwheel_pos >= (long)(2 * sizeof(int)))
+    {
+        array2d_read(db.cartwheel_states, f);
+    }
+    else
+    {
+        db.cartwheel_states.resize(db.nframes(), 1);
+        db.cartwheel_states.zero();
+    }
     
     fclose(f);
 }
@@ -175,6 +192,25 @@ void compute_jump_feature(database& db, int& offset)
     for (int i = 0; i < db.nframes(); i++)
     {
         db.features(i, offset) = has_jump && db.jump_states(i, 0) ? jump_feature_strength : 0.0f;
+    }
+
+    // Keep this semantic flag in raw binary space.
+    db.features_offset(offset) = 0.0f;
+    db.features_scale(offset) = 1.0f;
+    offset += 1;
+}
+
+void compute_cartwheel_feature(database& db, int& offset)
+{
+    const float cartwheel_feature_strength = 6.0f;
+
+    bool has_cartwheel =
+        db.cartwheel_states.rows == db.nframes() &&
+        db.cartwheel_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_cartwheel && db.cartwheel_states(i, 0) ? cartwheel_feature_strength : 0.0f;
     }
 
     // Keep this semantic flag in raw binary space.
@@ -1248,6 +1284,7 @@ void database_build_matching_features(
         1 + // Idle Flag
         1 + // Crouch Flag
         1 + // Jump Flag
+        1 + // Cartwheel Flag
         
         // History:
         3 + // History Left Foot Position (-20)
@@ -1278,6 +1315,7 @@ void database_build_matching_features(
     compute_idle_feature(db, offset);
     compute_crouch_feature(db, offset);
     compute_jump_feature(db, offset);
+    compute_cartwheel_feature(db, offset);
     compute_history_20_feature_block(
         db,
         offset,

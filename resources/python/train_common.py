@@ -35,6 +35,10 @@ def expected_feature_count_current_runtime():
         9 +   # Trajectory Positions
         9 +   # Trajectory Directions
         8 +   # Terrain Heights
+        1 +   # Idle Flag
+        1 +   # Crouch Flag
+        1 +   # Jump Flag
+        1 +   # Cartwheel Flag
         3 +   # History Left Foot Position (-20)
         3 +   # History Right Foot Position (-20)
         3 +   # History Left Foot Velocity (-20)
@@ -42,10 +46,7 @@ def expected_feature_count_current_runtime():
         3 +   # History Hip Velocity (-20)
         3 +   # History Trajectory Position (-20)
         3 +   # History Trajectory Direction (-20)
-        2 +   # History Terrain Heights (-15)
-        1 +   # Idle Flag
-        1 +   # Crouch Flag
-        1     # Jump Flag
+        2     # History Terrain Heights (-15)
     )
 
 

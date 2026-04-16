@@ -221,6 +221,7 @@ static int matching_feature_count_expected()
         1 + // Idle Flag
         1 + // Crouch Flag
         1 + // Jump Flag
+        1 + // Cartwheel Flag
         3 + // History Left Foot Position (-20)
         3 + // History Right Foot Position (-20)
         3 + // History Left Foot Velocity (-20)
@@ -2593,6 +2594,7 @@ int main(int argc, char** argv)
     float desired_gait = 0.0f;
     float desired_gait_velocity = 0.0f;
     bool desired_crouch_prev = false;
+    bool desired_cartwheel_prev = false;
     bool desired_idle_prev = false;
     bool desired_jump_prev = false;
     
@@ -3142,8 +3144,8 @@ int main(int argc, char** argv)
             IsKeyDown(KEY_J);
         bool desired_crouch =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
-            IsKeyDown(KEY_K) ||
-            IsKeyDown(KEY_L);
+            IsKeyDown(KEY_K);
+        bool desired_cartwheel = IsKeyDown(KEY_L);
         bool crouch_pressed = desired_crouch;
         bool jump_pressed =
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
@@ -3154,6 +3156,7 @@ int main(int argc, char** argv)
             desired_strafe = false;
             desired_walk = false;
             desired_crouch = false;
+            desired_cartwheel = false;
             crouch_pressed = false;
             jump_pressed = false;
             jump_buffer_timer = 0.0f;
@@ -3333,6 +3336,13 @@ int main(int argc, char** argv)
             force_search = true;
             force_search_timer = search_time;
             desired_crouch_prev = desired_crouch;
+        }
+
+        if (desired_cartwheel != desired_cartwheel_prev)
+        {
+            force_search = true;
+            force_search_timer = search_time;
+            desired_cartwheel_prev = desired_cartwheel;
         }
 
         if (desired_idle != desired_idle_prev)
@@ -3636,6 +3646,13 @@ int main(int argc, char** argv)
             const float jump_feature_strength = 6.0f;
             if (debug) std::cout << "  Setting jump flag..." << std::endl;
             query(offset) = desired_jump ? jump_feature_strength : 0.0f;
+            offset += 1;
+        }
+        if (offset < db.nfeatures())
+        {
+            const float cartwheel_feature_strength = 16.0f;
+            if (debug) std::cout << "  Setting cartwheel flag..." << std::endl;
+            query(offset) = desired_cartwheel ? cartwheel_feature_strength : 0.0f;
             offset += 1;
         }
 
@@ -4622,10 +4639,11 @@ int main(int argc, char** argv)
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  30, 145, 20 }, "Camera/Facing: Right Stick");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 145, 20 }, "Strafe: Left Trigger or H");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 145, 20 }, "Walk: A Button or J");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 145, 20 }, "Crouch: Y Button/K/L");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 145, 20 }, "Zoom In: Left Shoulder/E");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 145, 20 }, "Zoom Out: Right Shoulder/Q");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 145, 20 }, "Pad + keyboard can mix");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 145, 20 }, "Crouch: Y Button/K");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 145, 20 }, "Cartwheel: L");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 145, 20 }, "Zoom In: Left Shoulder/E");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 145, 20 }, "Zoom Out: Right Shoulder/Q");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 170, 145, 20 }, "Pad + keyboard can mix");
 
         const int flag_x = ui_right_panel_sm_x + 168;
         GuiLabel((Rectangle){ (float)flag_x, ui_ctrl_hei + 14, 70, 16 }, "Gait Flags");
@@ -4644,6 +4662,7 @@ int main(int argc, char** argv)
         draw_flag_chip(ui_ctrl_hei + 40, "CR", desired_crouch, ORANGE);
         draw_flag_chip(ui_ctrl_hei + 66, "ID", desired_idle, SKYBLUE);
         draw_flag_chip(ui_ctrl_hei + 92, "JP", desired_jump, RED);
+        draw_flag_chip(ui_ctrl_hei + 118, "CW", desired_cartwheel, GOLD);
         
 
         //---------
