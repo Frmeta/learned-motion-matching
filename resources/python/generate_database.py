@@ -40,6 +40,7 @@ files = [
     ('resources/bvh/run1_subject5.bvh',             90, 7086, False, False, False, False), 
     # Walking
     ('resources/bvh/walk1_subject5.bvh',            80, 7791, False, False, False), # decrease file size (original: 7791)
+    
     # Terrain
     ('resources/bvh/obstacles1_subject2.bvh',       231, 1240, False, False, False, False),
     ('resources/bvh/obstacles1_subject2.bvh',       1780, 4972, False, False, False, False), # split this into 2, cut animation that's holding the stair
