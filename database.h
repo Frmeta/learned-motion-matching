@@ -689,6 +689,10 @@ void compute_trajectory_position_feature(database& db, int& offset, float weight
 // Same for direction
 void compute_trajectory_direction_feature(database& db, int& offset, float weight = 1.0f)
 {
+    bool has_cartwheel =
+        db.cartwheel_states.rows == db.nframes() &&
+        db.cartwheel_states.cols >= 1;
+
     for (int i = 0; i < db.nframes(); i++)
     {
         int t0 = database_index_clamp(db, i, 20);
@@ -713,6 +717,43 @@ void compute_trajectory_direction_feature(database& db, int& offset, float weigh
         trajectory_dir0.y = trajectory_pos0.y / maxf(h0, eps);
         trajectory_dir1.y = trajectory_pos1.y / maxf(h1, eps);
         trajectory_dir2.y = trajectory_pos2.y / maxf(h2, eps);
+
+        // Cartwheel clips can have chaotic hip facing, so derive direction from
+        // trajectory position deltas instead of root orientation.
+        if (has_cartwheel && db.cartwheel_states(i, 0))
+        {
+            vec3 delta01 = trajectory_pos1 - trajectory_pos0;
+            vec3 delta12 = trajectory_pos2 - trajectory_pos1;
+
+            float h01 = length(vec3(delta01.x, 0.0f, delta01.z));
+            float h12 = length(vec3(delta12.x, 0.0f, delta12.z));
+
+            if (h01 > eps)
+            {
+                trajectory_dir0 = delta01;
+                trajectory_dir0.y = delta01.y / h01;
+            }
+            else
+            {
+                trajectory_dir0 = trajectory_pos0;
+                trajectory_dir0.y = trajectory_pos0.y / maxf(h0, eps);
+            }
+
+            if (h12 > eps)
+            {
+                trajectory_dir1 = delta12;
+                trajectory_dir1.y = delta12.y / h12;
+                trajectory_dir2 = delta12;
+                trajectory_dir2.y = delta12.y / h12;
+            }
+            else
+            {
+                trajectory_dir1 = trajectory_pos1;
+                trajectory_dir1.y = trajectory_pos1.y / maxf(h1, eps);
+                trajectory_dir2 = trajectory_pos2;
+                trajectory_dir2.y = trajectory_pos2.y / maxf(h2, eps);
+            }
+        }
 
         trajectory_dir0 = normalize(trajectory_dir0);
         trajectory_dir1 = normalize(trajectory_dir1);
@@ -948,6 +989,10 @@ void compute_history_20_feature_block(
     const float feature_weight_trajectory_position,
     const float feature_weight_trajectory_direction)
 {
+    bool has_cartwheel =
+        db.cartwheel_states.rows == db.nframes() &&
+        db.cartwheel_states.cols >= 1;
+
     // Left foot position (3)
     for (int i = 0; i < db.nframes(); i++)
     {
@@ -1111,6 +1156,26 @@ void compute_history_20_feature_block(
         const float eps = 1e-4f;
         float h = length(vec3(trajectory_pos.x, 0.0f, trajectory_pos.z));
         trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+
+        if (has_cartwheel && db.cartwheel_states(p, 0))
+        {
+            int t_next = database_index_clamp(db, p, 40);
+            vec3 trajectory_pos_next = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t_next, 0) - db.bone_positions(p, 0));
+            vec3 delta = trajectory_pos_next - trajectory_pos;
+            float h_delta = length(vec3(delta.x, 0.0f, delta.z));
+
+            if (h_delta > eps)
+            {
+                trajectory_dir = delta;
+                trajectory_dir.y = delta.y / h_delta;
+            }
+            else
+            {
+                trajectory_dir = trajectory_pos;
+                trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+            }
+        }
+
         trajectory_dir = normalize(trajectory_dir);
 
         db.features(i, offset + 0) = trajectory_dir.x;
@@ -1130,6 +1195,10 @@ void compute_history_trajectory_feature_block(
     const float feature_weight_trajectory_position,
     const float feature_weight_trajectory_direction)
 {
+    bool has_cartwheel =
+        db.cartwheel_states.rows == db.nframes() &&
+        db.cartwheel_states.cols >= 1;
+
     // Trajectory position single sample (3): +20 from history frame
     for (int i = 0; i < db.nframes(); i++)
     {
@@ -1155,6 +1224,26 @@ void compute_history_trajectory_feature_block(
         const float eps = 1e-4f;
         float h = length(vec3(trajectory_pos.x, 0.0f, trajectory_pos.z));
         trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+
+        if (has_cartwheel && db.cartwheel_states(p, 0))
+        {
+            int t_next = database_index_clamp(db, p, 40);
+            vec3 trajectory_pos_next = quat_mul_vec3(quat_inv(db.bone_rotations(p, 0)), db.bone_positions(t_next, 0) - db.bone_positions(p, 0));
+            vec3 delta = trajectory_pos_next - trajectory_pos;
+            float h_delta = length(vec3(delta.x, 0.0f, delta.z));
+
+            if (h_delta > eps)
+            {
+                trajectory_dir = delta;
+                trajectory_dir.y = delta.y / h_delta;
+            }
+            else
+            {
+                trajectory_dir = trajectory_pos;
+                trajectory_dir.y = trajectory_pos.y / maxf(h, eps);
+            }
+        }
+
         trajectory_dir = normalize(trajectory_dir);
 
         db.features(i, offset + 0) = trajectory_dir.x;

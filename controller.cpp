@@ -2597,6 +2597,11 @@ int main(int argc, char** argv)
     bool desired_cartwheel_prev = false;
     bool desired_idle_prev = false;
     bool desired_jump_prev = false;
+    float cartwheel_auto_timer = 0.0f;
+    const float cartwheel_auto_duration = 1.0f;
+    bool cartwheel_query_lock_prev = false;
+    vec3 cartwheel_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
+    float cartwheel_query_lock_step_distance = 0.0f;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2628,6 +2633,8 @@ int main(int argc, char** argv)
     float simulation_crouch_fwrd_speed = 2.5f;
     float simulation_crouch_side_speed = 1.5f;
     float simulation_crouch_back_speed = 1.0f;
+    float cartwheel_speed_boost = 1.2f;
+    float jump_speed_boost = 1.5f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
@@ -2952,8 +2959,13 @@ int main(int argc, char** argv)
     const float base_desired_gait = desired_gait;
     const float base_desired_gait_velocity = desired_gait_velocity;
     const bool base_desired_crouch_prev = desired_crouch_prev;
+    const bool base_desired_cartwheel_prev = desired_cartwheel_prev;
     const bool base_desired_idle_prev = desired_idle_prev;
     const bool base_desired_jump_prev = desired_jump_prev;
+    const float base_cartwheel_auto_timer = cartwheel_auto_timer;
+    const bool base_cartwheel_query_lock_prev = cartwheel_query_lock_prev;
+    const vec3 base_cartwheel_query_lock_forward = cartwheel_query_lock_forward;
+    const float base_cartwheel_query_lock_step_distance = cartwheel_query_lock_step_distance;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -3023,8 +3035,13 @@ int main(int argc, char** argv)
         desired_gait = base_desired_gait;
         desired_gait_velocity = base_desired_gait_velocity;
         desired_crouch_prev = base_desired_crouch_prev;
+        desired_cartwheel_prev = base_desired_cartwheel_prev;
         desired_idle_prev = base_desired_idle_prev;
         desired_jump_prev = base_desired_jump_prev;
+        cartwheel_auto_timer = base_cartwheel_auto_timer;
+        cartwheel_query_lock_prev = base_cartwheel_query_lock_prev;
+        cartwheel_query_lock_forward = base_cartwheel_query_lock_forward;
+        cartwheel_query_lock_step_distance = base_cartwheel_query_lock_step_distance;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -3145,11 +3162,25 @@ int main(int argc, char** argv)
         bool desired_crouch =
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
             IsKeyDown(KEY_K);
-        bool desired_cartwheel = IsKeyDown(KEY_L);
+        bool cartwheel_pressed =
+            IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
+            IsKeyPressed(KEY_L);
+        bool desired_cartwheel =
+            IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
+            IsKeyDown(KEY_L);
         bool crouch_pressed = desired_crouch;
         bool jump_pressed =
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
             IsKeyPressed(KEY_SPACE);
+
+        if (cartwheel_pressed)
+        {
+            cartwheel_auto_timer = cartwheel_auto_duration;
+        }
+
+        bool cartwheel_auto_active = cartwheel_auto_timer > 0.0f;
+        desired_cartwheel = desired_cartwheel || cartwheel_auto_active;
+        bool cartwheel_query_lock_active = desired_cartwheel;
 
         if (joystick_playback_enabled)
         {
@@ -3157,9 +3188,18 @@ int main(int argc, char** argv)
             desired_walk = false;
             desired_crouch = false;
             desired_cartwheel = false;
+            cartwheel_auto_timer = 0.0f;
+            cartwheel_auto_active = false;
             crouch_pressed = false;
             jump_pressed = false;
             jump_buffer_timer = 0.0f;
+        }
+
+        cartwheel_query_lock_active = desired_cartwheel;
+
+        if (cartwheel_auto_active)
+        {
+            desired_strafe = true;
         }
 
         jump_root_height_offset = crouch_pressed ? 0.2f : 1.2f;
@@ -3193,9 +3233,11 @@ int main(int argc, char** argv)
         }
 
         float climbing_speed_scale = 1.0f;
-        vec3 move_input_world = quat_mul_vec3(
-            quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)),
-            gamepadstick_left);
+        vec3 move_input_world = cartwheel_query_lock_active
+            ? cartwheel_query_lock_forward
+            : quat_mul_vec3(
+                quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)),
+                gamepadstick_left);
         move_input_world.y = 0.0f;
 
         if (length(move_input_world) > 0.01f)
@@ -3223,15 +3265,47 @@ int main(int argc, char** argv)
         simulation_fwrd_speed *= climbing_speed_scale;
         simulation_side_speed *= climbing_speed_scale;
         simulation_back_speed *= climbing_speed_scale;
+
+        if (cartwheel_query_lock_active)
+        {
+            if (!cartwheel_query_lock_prev)
+            {
+                vec3 lock_forward = quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f));
+                lock_forward.y = 0.0f;
+
+                if (length(lock_forward) > 0.001f)
+                {
+                    cartwheel_query_lock_forward = normalize(lock_forward);
+                }
+
+                cartwheel_query_lock_step_distance = simulation_fwrd_speed * (20.0f * dt);
+            }
+
+            cartwheel_query_lock_prev = true;
+        }
+        else
+        {
+            cartwheel_query_lock_prev = false;
+        }
         
         // Get the desired velocity
-        vec3 desired_velocity_curr = desired_velocity_update(
-            gamepadstick_left,
-            camera_azimuth,
-            simulation_rotation,
-            simulation_fwrd_speed,
-            simulation_side_speed,
-            simulation_back_speed);
+        vec3 desired_velocity_curr;
+        if (cartwheel_query_lock_active)
+        {
+            // Ignore player steering while cartwheeling.
+            desired_velocity_curr = cartwheel_query_lock_forward * simulation_fwrd_speed;
+            desired_velocity_curr.y = 0.0f;
+        }
+        else
+        {
+            desired_velocity_curr = desired_velocity_update(
+                gamepadstick_left,
+                camera_azimuth,
+                simulation_rotation,
+                simulation_fwrd_speed,
+                simulation_side_speed,
+                simulation_back_speed);
+        }
 
         float jump_ground_height = 0.0f;
         bool has_jump_ground = sample_terrain_height(
@@ -3264,6 +3338,26 @@ int main(int argc, char** argv)
         {
             jump_vertical_velocity -= jump_gravity * dt;
             desired_velocity_curr.y = jump_vertical_velocity;
+        }
+
+        // Boost horizontal movement slightly for cartwheel and jump motions.
+        {
+            float motion_speed_boost = 1.0f;
+            if (desired_cartwheel)
+            {
+                motion_speed_boost *= cartwheel_speed_boost;
+            }
+            if (jump_active)
+            {
+                motion_speed_boost *= jump_speed_boost;
+            }
+
+            if (motion_speed_boost > 1.0f)
+            {
+                vec3 planar = vec3(desired_velocity_curr.x, 0.0f, desired_velocity_curr.z);
+                desired_velocity_curr.x = planar.x * motion_speed_boost;
+                desired_velocity_curr.z = planar.z * motion_speed_boost;
+            }
         }
 
         vec3 input_planar = gamepadstick_left;
@@ -3319,6 +3413,14 @@ int main(int argc, char** argv)
             camera_azimuth,
             desired_strafe,
             desired_velocity_curr);
+
+        if (cartwheel_auto_active)
+        {
+            // Keep trajectory position unchanged and only rotate facing 90 degrees left.
+            desired_rotation_curr = quat_mul(
+                quat_from_angle_axis(-0.5f * PIf, vec3(0, 1, 0)),
+                desired_rotation_curr);
+        }
         
         // Check if we should force a search because input changed quickly
         desired_velocity_change_prev = desired_velocity_change_curr;
@@ -3372,6 +3474,11 @@ int main(int argc, char** argv)
         {
             force_search_timer -= dt;
         }
+
+            if (cartwheel_auto_timer > 0.0f)
+            {
+                cartwheel_auto_timer = maxf(0.0f, cartwheel_auto_timer - dt);
+            }
         
         // Predict Future Trajectory
         
@@ -3380,8 +3487,8 @@ int main(int argc, char** argv)
           trajectory_desired_velocities,
           desired_rotation,
           camera_azimuth,
-          gamepadstick_left,
-          gamepadstick_right,
+                    gamepadstick_left,
+                    gamepadstick_right,
           desired_strafe,
           20.0f * dt);
         
@@ -3398,11 +3505,11 @@ int main(int argc, char** argv)
           trajectory_desired_velocities,
           trajectory_rotations,
           desired_velocity,
-                    simulation_position,
-                    ground_plane_model,
-                    jump_active,
-                    jump_vertical_velocity,
-                    jump_gravity,
+          simulation_position,
+          ground_plane_model,
+          jump_active,
+          jump_vertical_velocity,
+          jump_gravity,
           camera_azimuth,
           gamepadstick_left,
           gamepadstick_right,
@@ -3436,6 +3543,26 @@ int main(int argc, char** argv)
                 float scale_xz = 1.0f - reduce;
                 trajectory_positions(i).x = simulation_position.x + rel.x * scale_xz;
                 trajectory_positions(i).z = simulation_position.z + rel.z * scale_xz;
+            }
+        }
+
+        array1d<vec3> query_trajectory_positions = trajectory_positions;
+        array1d<quat> query_trajectory_rotations = trajectory_rotations;
+
+        if (cartwheel_query_lock_active)
+        {
+            float lock_yaw = atan2f(cartwheel_query_lock_forward.x, cartwheel_query_lock_forward.z);
+            quat lock_rotation = quat_from_angle_axis(lock_yaw - 0.5f * PIf, vec3(0.0f, 1.0f, 0.0f));
+            vec3 base_position = bone_positions(0);
+
+            query_trajectory_positions(0) = base_position;
+            query_trajectory_rotations(0) = lock_rotation;
+
+            for (int i = 1; i < query_trajectory_positions.size; i++)
+            {
+                float distance = cartwheel_query_lock_step_distance * (float)i;
+                query_trajectory_positions(i) = base_position + cartwheel_query_lock_forward * distance;
+                query_trajectory_rotations(i) = lock_rotation;
             }
         }
 
@@ -3615,15 +3742,15 @@ int main(int argc, char** argv)
         if (debug) std::cout << "  Copying hip velocity..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
         if (debug) std::cout << "  Computing trajectory position feature..." << std::endl;
-        query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), trajectory_positions);
+        query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), query_trajectory_positions);
         if (debug) std::cout << "  Computing trajectory direction feature..." << std::endl;
         query_compute_trajectory_direction_feature(
             query,
             offset,
             bone_positions(0),
             bone_rotations(0),
-            trajectory_positions,
-            trajectory_rotations);
+            query_trajectory_positions,
+            query_trajectory_rotations);
         if (debug) std::cout << "  Computing terrain height feature..." << std::endl;
         query_compute_terrain_height_feature(query, offset, future_terrain_heights);
 
@@ -4640,7 +4767,7 @@ int main(int argc, char** argv)
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  50, 145, 20 }, "Strafe: Left Trigger or H");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  70, 145, 20 }, "Walk: A Button or J");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei +  90, 145, 20 }, "Crouch: Y Button/K");
-        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 145, 20 }, "Cartwheel: L");
+        GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 110, 145, 20 }, "Cartwheel: X Button/L");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 130, 145, 20 }, "Zoom In: Left Shoulder/E");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 150, 145, 20 }, "Zoom Out: Right Shoulder/Q");
         GuiLabel((Rectangle){ ui_right_panel_sm_x + 20, ui_ctrl_hei + 170, 145, 20 }, "Pad + keyboard can mix");
