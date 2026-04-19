@@ -510,7 +510,7 @@ static inline vec3 from_Vector3(Vector3 v)
     return vec3(v.x, v.y, v.z);
 }
 
-static constexpr float kTerrainFollowMaxVerticalSpeed = 8.0f;
+static constexpr float kTerrainFollowMaxVerticalSpeed = 20.0f;
 static constexpr float kTerrainFollowMinVerticalSpeed = -10.0f;
 
 //--------------------------------------
@@ -3533,13 +3533,13 @@ int main(int argc, char** argv)
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
         const float uphill_horizontal_reduce_gain = 2.0f;
-        const float uphill_horizontal_reduce_max = 0.8f;
+        const float uphill_horizontal_reduce_max = 0.9f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
             vec3 rel = trajectory_positions(i) - simulation_position;
             if (true) // rel.y > 0.0f
             {
-                float reduce = clampf(rel.y * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
+                float reduce = clampf(fabsf(rel.y) * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
                 float scale_xz = 1.0f - reduce;
                 trajectory_positions(i).x = simulation_position.x + rel.x * scale_xz;
                 trajectory_positions(i).z = simulation_position.z + rel.z * scale_xz;
@@ -3569,7 +3569,7 @@ int main(int argc, char** argv)
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
         bool traj_hit = false;
-        int nearest_future_idx = trajectory_positions.size > 1 ? 1 : 0;
+        int nearest_future_idx = trajectory_positions.size > 2 ? 2 : 0;
         Ray traj_ray = { to_Vector3(trajectory_positions(nearest_future_idx) + vec3(0, 10, 0)), {0, -1, 0} };
         for (int i = 0; i < ground_plane_model.meshCount; i++)
         {
@@ -3590,7 +3590,7 @@ int main(int argc, char** argv)
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
-        const float desired_velocity_root_blend = 0.1f;
+        const float desired_velocity_root_blend = 1.0f;
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;

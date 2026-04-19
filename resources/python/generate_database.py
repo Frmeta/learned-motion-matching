@@ -43,8 +43,16 @@ files = [
     
     # Terrain
     ('resources/bvh/obstacles1_subject2.bvh',       231, 1240, False, False, False, False),
-    ('resources/bvh/obstacles1_subject2.bvh',       1780, 4972, False, False, False, False), # split this into 2, cut animation that's holding the stair
+    ('resources/bvh/obstacles1_subject2.bvh',       1780, 5300, False, False, False, False), # split this into 2, cut animation that's holding the stair
     ('resources/bvh/obstacles2_subject5.bvh',       250, 5750, False, False, False, False),
+
+    # Terrain (addition)
+    ('resources/bvh/obstacles1_subject5.bvh',       150, 4750, False, False, False, False),
+    ('resources/bvh/obstacles2_subject1.bvh',       3180, 3550, False, False, False, False),
+    ('resources/bvh/obstacles2_subject1.bvh',       4500, 6250, False, False, False, False),
+    ('resources/bvh/obstacles2_subject2.bvh',       2019, 2800, False, False, False, False),
+    ('resources/bvh/obstacles4_subject2.bvh',       330, 3150, False, False, False, False),
+    ('resources/bvh/obstacles4_subject2.bvh',       6145, 7000, False, False, False, False), # might have hand on rail
     
     # Climb
     ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False, False, False, False),
@@ -60,6 +68,10 @@ files = [
     ('resources/bvh/fight1_subject3.bvh',       4600, 4700, False, False, True, False),
     ('resources/bvh/fight1_subject3.bvh',       4780, 4850, False, False, True, False),
     ('resources/bvh/fight1_subject3.bvh',       5800, 5910, False, False, True, False),
+    ('resources/bvh/obstacles2_subject1.bvh',   4200, 4350, False, False, True, False),
+    ('resources/bvh/obstacles2_subject1.bvh',   6250, 6350, False, False, True, False),
+    ('resources/bvh/obstacles2_subject1.bvh',   6480, 6710, False, False, True, False),
+    ('resources/bvh/obstacles2_subject2.bvh',   5080, 5140, False, False, False, False),
 
     # walk on rope
     # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True, False, False, False),
