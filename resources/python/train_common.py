@@ -36,6 +36,7 @@ def expected_feature_count_current_runtime():
         3 +   # Left Foot Velocity
         3 +   # Right Foot Velocity
         3 +   # Hip Velocity
+        1 +   # Head Y Position
         9 +   # Trajectory Positions
         9 +   # Trajectory Directions
         8 +   # Terrain Heights

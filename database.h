@@ -18,7 +18,7 @@ enum
     BOUND_SM_SIZE = 16,
     BOUND_LR_SIZE = 64,
     // Feature layout constants used by MM search masking.
-    MM_HISTORY_FEATURE_START = 45,
+    MM_HISTORY_FEATURE_START = 46,
     MM_HISTORY_FEATURE_COUNT = 29,
     MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
@@ -621,6 +621,30 @@ void compute_bone_position_feature(database& db, int& offset, int bone, float we
     normalize_feature(db.features, db.features_offset, db.features_scale, offset, 3, weight);
     
     offset += 3;
+}
+
+// Compute a scalar feature for bone height (Y) relative to root.
+void compute_bone_height_feature(database& db, int& offset, int bone, float weight = 1.0f)
+{
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        vec3 bone_position;
+        quat bone_rotation;
+
+        forward_kinematics(
+            bone_position,
+            bone_rotation,
+            db.bone_positions(i),
+            db.bone_rotations(i),
+            db.bone_parents,
+            bone);
+
+        db.features(i, offset) = bone_position.y - db.bone_positions(i, 0).y;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 1, weight);
+
+    offset += 1;
 }
 
 // Similar but for a bone's velocity
@@ -1330,6 +1354,7 @@ void database_build_matching_features(
     const float feature_weight_foot_position,
     const float feature_weight_foot_velocity,
     const float feature_weight_hip_velocity,
+    const float feature_weight_head_position,
     const float feature_weight_trajectory_positions,
     const float feature_weight_trajectory_directions,
     const float feature_weight_terrain_heights,
@@ -1346,6 +1371,7 @@ void database_build_matching_features(
         3 + // Left Foot Velocity
         3 + // Right Foot Velocity
         3 + // Hip Velocity
+        1 + // Head Y Position
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
@@ -1378,6 +1404,7 @@ void database_build_matching_features(
     compute_bone_velocity_feature(db, offset, Bone_LeftFoot, feature_weight_foot_velocity);
     compute_bone_velocity_feature(db, offset, Bone_RightFoot, feature_weight_foot_velocity);
     compute_bone_velocity_feature(db, offset, Bone_Hips, feature_weight_hip_velocity);
+    compute_bone_height_feature(db, offset, Bone_Head, feature_weight_head_position);
     compute_trajectory_position_feature(db, offset, feature_weight_trajectory_positions);
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
