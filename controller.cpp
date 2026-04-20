@@ -2376,6 +2376,11 @@ int main(int argc, char** argv)
     float camera_altitude = 0.4f;
     float camera_distance = 4.0f;
     
+    // Smoothed camera target for smooth following
+    vec3 camera_target_smoothed = vec3(0.0f, 0.0f, 0.0f);
+    vec3 camera_target_velocity = vec3(0.0f, 0.0f, 0.0f);
+    const float camera_target_halflife = 0.15f;  // Adjust this for faster/slower smoothing
+    
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
@@ -4465,12 +4470,21 @@ int main(int argc, char** argv)
         
         // Update camera
         
+        // Smooth camera target toward character root
+        vec3 camera_target_desired = bone_positions(0) + vec3(0, 0, 0);
+        simple_spring_damper_exact(
+            camera_target_smoothed,
+            camera_target_velocity,
+            camera_target_desired,
+            camera_target_halflife,
+            dt);
+        
         orbit_camera_update(
             camera, 
             camera_azimuth,
             camera_altitude,
             camera_distance,
-            bone_positions(0) + vec3(0, 0, 0),
+            camera_target_smoothed,
             // simulation_position + vec3(0, 1, 0),
             gamepadstick_right,
             desired_strafe,
