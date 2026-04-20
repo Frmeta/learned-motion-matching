@@ -2439,7 +2439,7 @@ int main(int argc, char** argv)
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 0.5f;
 
-    float feature_weight_prev_frame_multiplier = 0.4f;
+    float feature_weight_prev_frame_multiplier = 0.0f;
 
     float feature_weight_history_foot_position = feature_weight_foot_position * feature_weight_prev_frame_multiplier;
     float feature_weight_history_foot_velocity = feature_weight_foot_velocity * feature_weight_prev_frame_multiplier;
@@ -3531,20 +3531,48 @@ int main(int argc, char** argv)
             20.0f * dt,
             ground_plane_model);
 
+        float current_terrain_height = 0.0f;
+        const bool has_current_terrain = sample_terrain_height(
+            ground_plane_model,
+            simulation_position,
+            current_terrain_height);
+
+        const float root_ground_offset = has_current_terrain
+            ? (simulation_position.y - current_terrain_height)
+            : jump_root_height_offset;
+
+        auto terrain_anchor_trajectory = [&](slice1d<vec3> trajectory)
+        {
+            for (int i = 1; i < trajectory.size; i++)
+            {
+                float terrain_height = 0.0f;
+                if (sample_terrain_height(ground_plane_model, trajectory(i), terrain_height))
+                {
+                    trajectory(i).y = terrain_height + root_ground_offset;
+                }
+            }
+        };
+
+        terrain_anchor_trajectory(trajectory_positions);
+
         // If future trajectory rises upward, reduce horizontal reach for that point.
-        const float uphill_horizontal_reduce_gain = 2.0f;
-        const float uphill_horizontal_reduce_max = 0.9f;
+        const float uphill_horizontal_reduce_gain = 2.8f;
+        const float uphill_horizontal_reduce_max = 0.98f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
-            vec3 rel = trajectory_positions(i) - simulation_position;
+            vec3 rel = trajectory_positions(i) - trajectory_positions(i-1);
             if (true) // rel.y > 0.0f
             {
                 float reduce = clampf(fabsf(rel.y) * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
                 float scale_xz = 1.0f - reduce;
-                trajectory_positions(i).x = simulation_position.x + rel.x * scale_xz;
-                trajectory_positions(i).z = simulation_position.z + rel.z * scale_xz;
+                trajectory_positions(i).x = trajectory_positions(i-1).x + rel.x * scale_xz;
+                trajectory_positions(i).z = trajectory_positions(i-1).z + rel.z * scale_xz;
             }
         }
+
+        // XZ rescaling above changes sample points, so project Y again to
+        // keep the visible trajectory aligned with terrain elevation.
+        terrain_anchor_trajectory(trajectory_positions);
 
         array1d<vec3> query_trajectory_positions = trajectory_positions;
         array1d<quat> query_trajectory_rotations = trajectory_rotations;
@@ -3565,6 +3593,8 @@ int main(int argc, char** argv)
                 query_trajectory_rotations(i) = lock_rotation;
             }
         }
+
+        terrain_anchor_trajectory(query_trajectory_positions);
 
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
@@ -3590,7 +3620,7 @@ int main(int argc, char** argv)
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
-        const float desired_velocity_root_blend = 1.0f;
+        const float desired_velocity_root_blend = 0.1f;
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
