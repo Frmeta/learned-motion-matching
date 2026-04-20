@@ -27,6 +27,7 @@
 #include <cmath>
 #include <vector>
 #include <chrono>
+#include <stdexcept>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -1059,7 +1060,19 @@ void query_copy_denormalized_feature(
 {
     for (int i = 0; i < size; i++)
     {
-        query(offset + i) = features(offset + i) * features_scale(offset + i) + features_offset(offset + i);
+        const float scale = features_scale(offset + i);
+        const float mean = features_offset(offset + i);
+
+        // Some optional feature blocks can end up with non-finite scale
+        // (e.g. zero feature weight), so avoid 0 * inf -> NaN.
+        if (std::isfinite(scale))
+        {
+            query(offset + i) = features(offset + i) * scale + mean;
+        }
+        else
+        {
+            query(offset + i) = mean;
+        }
     }
     
     offset += size;
@@ -1077,7 +1090,17 @@ void query_copy_denormalized_feature_from_source_offset(
 {
     for (int i = 0; i < size; i++)
     {
-        query(dst_offset + i) = features(src_offset + i) * features_scale(src_offset + i) + features_offset(src_offset + i);
+        const float scale = features_scale(src_offset + i);
+        const float mean = features_offset(src_offset + i);
+
+        if (std::isfinite(scale))
+        {
+            query(dst_offset + i) = features(src_offset + i) * scale + mean;
+        }
+        else
+        {
+            query(dst_offset + i) = mean;
+        }
     }
 
     dst_offset += size;
@@ -1184,8 +1207,8 @@ static bool sample_terrain_height(
     float& out_height)
 {
     bool hit = false;
-    float highest = 0.0f;
-    Ray ray = { to_Vector3(position + vec3(0.0f, 20.0f, 0.0f)), {0.0f, -1.0f, 0.0f} };
+    float highest = -10.0f;
+    Ray ray = { to_Vector3(position + vec3(0.0f, 30.0f, 0.0f)), {0.0f, -1.0f, 0.0f} };
 
     for (int i = 0; i < ground_plane_model.meshCount; i++)
     {
@@ -1405,20 +1428,10 @@ void simulation_positions_update(
     velocity = eydt*(j0 + j1*dt) + desired_velocity;
     acceleration = eydt*(acceleration - j1*y*dt);
     
-    position = simulation_collide_obstacles(
-        position_prev, 
-        position,
-        obstacle_model);
-    
-    // Ground collision: if player is phasing through ground, set velocity.y to positive
-    float terrain_height = 0.0f;
-    if (sample_terrain_height(obstacle_model, position, terrain_height))
-    {
-        if (position.y < terrain_height)
-        {
-            velocity.y = maxf(velocity.y, 0.2f);  // Set to positive value (upward)
-        }
-    }
+    // position = simulation_collide_obstacles(
+    //     position_prev, 
+    //     position,
+    //     obstacle_model);
 }
 
 void simulation_rotations_update(
@@ -2641,7 +2654,7 @@ int main(int argc, char** argv)
     float climbing_height_threshold = 0.1f;
     float climbing_max_height_delta = 0.8f;
     
-    float jump_root_height_offset = 1.2f;
+    float jump_root_height_offset = 0.0f;
     const float jump_initial_vertical_speed = 8.0f;
     const float jump_gravity = 20.0f;
     const float jump_ground_snap_epsilon = 0.08f;
@@ -2755,20 +2768,22 @@ int main(int argc, char** argv)
     if (debug) std::cout << "Loading projector..." << std::endl;
     nnet_load(projector, "./resources/bin/projector.bin");
 
-    const int lmm_latent_size = 32;
     const int expected_features = db.nfeatures();
-    const int expected_features_plus_latent = db.nfeatures() + lmm_latent_size;
+    const int lmm_latent_size = 32;
+    const int lmm_input_size = expected_features + lmm_latent_size;
+    const int projector_input_size = projector.input_mean.size;
+    const int projector_output_size = projector.output_mean.size;
 
     const bool decompressor_input_match =
-        decompressor.input_mean.size == expected_features_plus_latent;
+        decompressor.input_mean.size == lmm_input_size;
     const bool stepper_input_match =
-        stepper.input_mean.size == expected_features_plus_latent;
+        stepper.input_mean.size == lmm_input_size;
     const bool stepper_output_match =
-        stepper.output_mean.size == expected_features_plus_latent;
+        stepper.output_mean.size == lmm_input_size;
     const bool projector_input_match =
-        projector.input_mean.size == expected_features;
+        projector_input_size == expected_features;
     const bool projector_output_match =
-        projector.output_mean.size == expected_features_plus_latent;
+        projector_output_size == lmm_input_size;
 
     bool lmm_networks_compatible =
         decompressor_input_match &&
@@ -2779,19 +2794,20 @@ int main(int argc, char** argv)
 
     if (!lmm_networks_compatible)
     {
-        printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d). Retrain decompressor/projector/stepper for this feature layout.\n", db.nfeatures());
+        printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d).\n", db.nfeatures());
+        printf("         Strict layout required: latent=%d, expected LMM input=%d.\n", lmm_latent_size, lmm_input_size);
         printf("  [%-8s] decompressor.input_mean.size : actual=%d expected=%d\n",
             decompressor_input_match ? "MATCH" : "MISMATCH",
             decompressor.input_mean.size,
-            expected_features_plus_latent);
+            lmm_input_size);
         printf("  [%-8s] stepper.input_mean.size      : actual=%d expected=%d\n",
             stepper_input_match ? "MATCH" : "MISMATCH",
             stepper.input_mean.size,
-            expected_features_plus_latent);
+            lmm_input_size);
         printf("  [%-8s] stepper.output_mean.size     : actual=%d expected=%d\n",
             stepper_output_match ? "MATCH" : "MISMATCH",
             stepper.output_mean.size,
-            expected_features_plus_latent);
+            lmm_input_size);
         printf("  [%-8s] projector.input_mean.size    : actual=%d expected=%d\n",
             projector_input_match ? "MATCH" : "MISMATCH",
             projector.input_mean.size,
@@ -2799,7 +2815,7 @@ int main(int argc, char** argv)
         printf("  [%-8s] projector.output_mean.size   : actual=%d expected=%d\n",
             projector_output_match ? "MATCH" : "MISMATCH",
             projector.output_mean.size,
-            expected_features_plus_latent);
+            lmm_input_size);
     }
     
     if (debug) std::cout << "Setting up evaluations..." << std::endl;
@@ -2882,8 +2898,15 @@ int main(int argc, char** argv)
     int joystick_recording_csv_selected_index = 0;
     bool joystick_recording_csv_dropdown_edit = false;
     char joystick_recording_csv_dropdown_text[4096] = "<no csv files>";
-    const float spawn_height_offset = 5.0f;
+    const float spawn_height_offset = 0.0f;
     vec3 joystick_recording_start_position = bone_positions(0) + vec3(0.0f, spawn_height_offset, 0.0f);
+    {
+        float spawn_terrain_height = 0.0f;
+        if (sample_terrain_height(ground_plane_model, joystick_recording_start_position, spawn_terrain_height))
+        {
+            joystick_recording_start_position.y = spawn_terrain_height + jump_root_height_offset;
+        }
+    }
     quat joystick_recording_start_rotation = bone_rotations(0);
     Camera3D joystick_recording_start_camera = camera;
     float joystick_recording_start_camera_azimuth = camera_azimuth;
@@ -3202,7 +3225,7 @@ int main(int argc, char** argv)
             desired_strafe = true;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.2f : 1.2f;
+        jump_root_height_offset = crouch_pressed ? 0.0f : 0.0f;
 
         if (jump_pressed)
         {
@@ -3596,27 +3619,24 @@ int main(int argc, char** argv)
 
         terrain_anchor_trajectory(query_trajectory_positions);
 
-        // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
-        float traj_ground_height = 0.0f;
-        bool traj_hit = false;
-        int nearest_future_idx = trajectory_positions.size > 2 ? 2 : 0;
-        Ray traj_ray = { to_Vector3(trajectory_positions(nearest_future_idx) + vec3(0, 10, 0)), {0, -1, 0} };
-        for (int i = 0; i < ground_plane_model.meshCount; i++)
-        {
-            RayCollision traj_collision = GetRayCollisionMesh(traj_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-            if (traj_collision.hit && (!traj_hit || traj_collision.point.y > traj_ground_height))
-            {
-                traj_ground_height = traj_collision.point.y;
-                traj_hit = true;
-            }
-        }
-
+        // Keep non-jump motion grounded by following terrain directly under
+        // the simulation root. Using future trajectory heights here can bias
+        // the controller upward and cause visible hovering while walking.
         if (!jump_active)
         {
-            float target_root_height = traj_ground_height + jump_root_height_offset;
-            float height_error = target_root_height - simulation_position.y;
-            const float vertical_gain = 4.0f;
-            desired_velocity_curr.y = clampf(height_error * vertical_gain, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+            float grounded_height = 0.0f;
+            if (sample_terrain_height(ground_plane_model, simulation_position, grounded_height))
+            {
+                std::cout << "target_root_height = " << grounded_height + jump_root_height_offset << std::endl;
+                float target_root_height = grounded_height + jump_root_height_offset;
+                float height_error = target_root_height - simulation_position.y;
+                const float vertical_gain = 6.0f;
+                desired_velocity_curr.y = clampf(height_error * vertical_gain, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+            }
+            else
+            {
+                desired_velocity_curr.y = 0.0f;
+            }
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
@@ -3624,24 +3644,13 @@ int main(int argc, char** argv)
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
-        desired_velocity.y = desired_velocity_curr.y;
+        desired_velocity = desired_velocity_curr;
         
-        // Compute future toe terrain heights relative to hips
+        // Compute future toe terrain heights relative to simulation root height.
         // 4 time samples: current (0), +15, +30, +45 frames
         // future_toe_position contains: 3 frames x 2 toes x 2D positions
         {
-            // Compute forward kinematics to get hip global position
-            global_bone_computed.zero();
-            forward_kinematics_partial(
-                global_bone_positions,
-                global_bone_rotations,
-                global_bone_computed,
-                bone_positions,
-                bone_rotations,
-                db.bone_parents,
-                Bone_Hips);
-            
-            float hip_height = global_bone_positions(Bone_Hips).y;
+            const float root_height = bone_positions(0).y;
             
             // Store relative heights for both toes at each time sample
             for (int time_idx = 0; time_idx < 4; time_idx++)
@@ -3702,6 +3711,8 @@ int main(int argc, char** argv)
                 // Raycast from above to find terrain height
                 float left_terrain_height = 0.0f;
                 float right_terrain_height = 0.0f;
+                bool left_terrain_hit = false;
+                bool right_terrain_hit = false;
                 
                 // Cast rays from 10 units above down to 10 units below
                 Ray left_ray = { to_Vector3(left_toe_pos + vec3(0, 10, 0)), {0, -1, 0} };
@@ -3711,29 +3722,41 @@ int main(int argc, char** argv)
                 for (int i = 0; i < ground_plane_model.meshCount; i++)
                 {
                     RayCollision left_collision = GetRayCollisionMesh(left_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-                    if (left_collision.hit && (left_terrain_height == 0.0f || left_collision.point.y > left_terrain_height))
+                    if (left_collision.hit && (!left_terrain_hit || left_collision.point.y > left_terrain_height))
                     {
                         left_terrain_height = left_collision.point.y;
+                        left_terrain_hit = true;
                     }
                     
                     RayCollision right_collision = GetRayCollisionMesh(right_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-                    if (right_collision.hit && (right_terrain_height == 0.0f || right_collision.point.y > right_terrain_height))
+                    if (right_collision.hit && (!right_terrain_hit || right_collision.point.y > right_terrain_height))
                     {
                         right_terrain_height = right_collision.point.y;
+                        right_terrain_hit = true;
                     }
                 }
+
+                if (!left_terrain_hit)
+                {
+                    left_terrain_height = root_height;
+                }
+
+                if (!right_terrain_hit)
+                {
+                    right_terrain_height = root_height;
+                }
                 
-                // Store relative to hip height, but clamp to avoid extreme negatives while falling.
-                const float min_terrain_feature_height = -2.0f;
-                float left_relative_terrain_height = left_terrain_height - hip_height;
-                float right_relative_terrain_height = right_terrain_height - hip_height;
+                // Store relative to simulation root height, but clamp to avoid extreme negatives while falling.
+                const float min_terrain_feature_height = -10.0f;
+                float left_relative_terrain_height = left_terrain_height - root_height;
+                float right_relative_terrain_height = right_terrain_height - root_height;
 
                 future_terrain_heights(time_idx) = vec2(
                     maxf(left_relative_terrain_height, min_terrain_feature_height),
                     maxf(right_relative_terrain_height, min_terrain_feature_height));
 
                 // std::cout << "LeftToe Terrain World Terrain height: " << left_terrain_height << std::endl;
-                // std::cout << "Hip's world position: " << hip_height << std::endl;
+                // std::cout << "Root world height: " << root_height << std::endl;
                 // std::cout << "Player's world position: " << bone_positions(0).x << " " << bone_positions(0).y << " " << bone_positions(0).z << std::endl;
                 // std::cout << std::endl;
             }
@@ -3891,7 +3914,13 @@ int main(int argc, char** argv)
             query, offset, 1, src_right_terrain_offset,
             query_features_history_15, db.features_offset, db.features_scale);
         if (debug) std::cout << "Done Query" << std::endl;
-        assert(offset == db.nfeatures());
+        if (offset != db.nfeatures())
+        {
+            throw std::runtime_error(
+                std::string("Query feature packing mismatch: built ") + std::to_string(offset) +
+                " features, but database expects " + std::to_string(db.nfeatures()) +
+                ". Rebuild features.bin and ensure query layout matches database_build_matching_features().");
+        }
         if (debug) std::cout << "Done assert" << std::endl;
         // Check if we reached the end of the current anim
         bool end_of_anim = database_index_clamp(db, frame_index, 1) == frame_index;
@@ -3907,13 +3936,19 @@ int main(int argc, char** argv)
                 float best_cost = FLT_MAX;
                 bool transition = false;
                 
+                array1d<float> query_projector(projector_input_size);
+                for (int i = 0; i < projector_input_size; i++)
+                {
+                    query_projector(i) = query(i);
+                }
+
                 projector_evaluate(
                     transition,
                     best_cost,
                     features_proj,
                     latent_proj,
                     projector_evaluation,
-                    query,
+                    query_projector,
                     db.features_offset,
                     db.features_scale,
                     features_curr,
@@ -4103,9 +4138,11 @@ int main(int argc, char** argv)
         vec3 simulation_position_prev = simulation_position;
         
         simulation_positions_update(
+            // OUTPUT
             simulation_position, 
             simulation_velocity, 
             simulation_acceleration,
+            // INPUT
             desired_velocity,
             simulation_velocity_halflife,
             dt,
@@ -4153,10 +4190,10 @@ int main(int argc, char** argv)
                 bone_rotations(0), 
                 synchronization_data_factor);
           
-            synchronized_position = simulation_collide_obstacles(
-                simulation_position_prev,
-                synchronized_position,
-                ground_plane_model);
+            // synchronized_position = simulation_collide_obstacles(
+            //     simulation_position_prev,
+            //     synchronized_position,
+            //     ground_plane_model);
             
             simulation_position = synchronized_position;
             simulation_rotation = synchronized_rotation;
@@ -4290,14 +4327,16 @@ int main(int argc, char** argv)
                     toe_bone);
                 
                 // Raycast to find terrain height under this foot
-                float terrain_height = 0.0f;
+                float terrain_height = global_bone_positions(toe_bone).y;
+                bool terrain_hit = false;
                 Ray foot_ray = { to_Vector3(global_bone_positions(toe_bone) + vec3(0, 10, 0)), {0, -1, 0} };
                 for (int mesh_idx = 0; mesh_idx < ground_plane_model.meshCount; mesh_idx++)
                 {
                     RayCollision collision = GetRayCollisionMesh(foot_ray, ground_plane_model.meshes[mesh_idx], ground_plane_model.transform);
-                    if (collision.hit && (terrain_height == 0.0f || collision.point.y > terrain_height))
+                    if (collision.hit && (!terrain_hit || collision.point.y > terrain_height))
                     {
                         terrain_height = collision.point.y;
+                        terrain_hit = true;
                     }
                 }
                 float foot_target_height = terrain_height + ik_foot_height;
@@ -4396,7 +4435,7 @@ int main(int argc, char** argv)
                     global_bone_positions(toe_bone);
                     
                 vec3 toe_end_targ = toe_end_curr;
-                toe_end_targ.y = maxf(toe_end_targ.y, ik_foot_height);
+                toe_end_targ.y = maxf(toe_end_targ.y, foot_target_height);
                 
                 ik_look_at(
                     adjusted_bone_rotations(toe_bone),
@@ -4496,6 +4535,8 @@ int main(int argc, char** argv)
         // Draw Simulation Object
         
         DrawCylinderWires(to_Vector3(simulation_position), 0.6f, 0.6f, 0.001f, 17, ORANGE);
+        vec3 tmp = simulation_position;
+        std::cout << "simulation y position: " << tmp.y << std::endl;
         DrawSphereWires(to_Vector3(simulation_position), 0.05f, 4, 10, ORANGE);
         DrawLine3D(to_Vector3(simulation_position), to_Vector3(
             simulation_position + 0.6f * quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f))), ORANGE);

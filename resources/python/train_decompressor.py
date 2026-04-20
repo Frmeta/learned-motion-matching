@@ -1,5 +1,6 @@
 import sys
 import struct
+import os
 
 import numpy as np
 import tquat
@@ -12,13 +13,22 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    class SummaryWriter:
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def add_scalars(self, *args, **kwargs):
+            pass
 
 from train_common import (
     load_database,
     load_features,
     save_network,
     bin_path,
+    expected_lmm_latent_size,
     validate_runtime_compatibility,
 )
 
@@ -84,7 +94,7 @@ if __name__ == '__main__':
     nbones = Ypos.shape[1]
     nextra = contacts.shape[1]
     nfeatures = X.shape[1]
-    nlatent = 32
+    nlatent = expected_lmm_latent_size()
 
     validate_runtime_compatibility(X, future_toe_positions)
     
@@ -93,7 +103,7 @@ if __name__ == '__main__':
     seed = 1234
     batchsize = 32
     lr = 0.001
-    niter = 500000
+    niter = int(os.environ.get('MOTION_MATCHING_NITER', '500000'))
     window = 2
     dt = 1.0 / 60.0
     

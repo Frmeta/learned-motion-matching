@@ -29,6 +29,21 @@ def animation_mirror(lrot, lpos, names, parents):
     
     return quat.ik(grot_mirror, gpos_mirror, parents)
 
+
+def query_terrain_height(terrain_points_xzy, query_x, query_z):
+    """Nearest-neighbor terrain height query in XZ plane.
+
+    terrain_points_xzy is expected in [x, z, y_height] layout.
+    """
+    if terrain_points_xzy.shape[0] == 0:
+        return 0.0
+
+    dx = terrain_points_xzy[:, 0] - query_x
+    dz = terrain_points_xzy[:, 1] - query_z
+    distance_sq = dx * dx + dz * dz
+    nearest_idx = np.argmin(distance_sq)
+    return terrain_points_xzy[nearest_idx, 2]
+
 """ Files to Process """
 
 files = [
@@ -160,10 +175,45 @@ for entry in files:
         # Specify joints to use for simulation bone 
         sim_position_joint = bvh_data['names'].index("Spine2")
         sim_rotation_joint = bvh_data['names'].index("Hips")
+
+        # Build terrain samples from toe contact points in this clip (nearest-neighbor floor query).
+        left_toe_joint = bvh_data['names'].index("LeftToe")
+        right_toe_joint = bvh_data['names'].index("RightToe")
+
+        toe_global_positions = global_positions[:, np.array([left_toe_joint, right_toe_joint])]
+        toe_global_velocities = np.zeros_like(toe_global_positions)
+        toe_global_velocities[1:-1] = (
+            0.5 * (toe_global_positions[2:] - toe_global_positions[1:-1]) * 60.0 +
+            0.5 * (toe_global_positions[1:-1] - toe_global_positions[:-2]) * 60.0)
+        toe_global_velocities[0] = toe_global_velocities[1]
+        toe_global_velocities[-1] = toe_global_velocities[-2]
+
+        contact_velocity_threshold = 0.15
+        toe_contact_velocity = np.sqrt(np.sum(toe_global_velocities ** 2, axis=-1))
+        toe_contacts = toe_contact_velocity < contact_velocity_threshold
+
+        for ci in range(toe_contacts.shape[1]):
+            toe_contacts[:, ci] = ndimage.median_filter(
+                toe_contacts[:, ci],
+                size=6,
+                mode='nearest')
+
+        left_contact_points = toe_global_positions[toe_contacts[:, 0], 0]
+        right_contact_points = toe_global_positions[toe_contacts[:, 1], 1]
+
+        terrain_points_xzy = np.concatenate([
+            np.stack([left_contact_points[:, 0], left_contact_points[:, 2], left_contact_points[:, 1]], axis=-1),
+            np.stack([right_contact_points[:, 0], right_contact_points[:, 2], right_contact_points[:, 1]], axis=-1)
+        ], axis=0)
         
-        # Position comes from spine joint
-        sim_position = np.array([1.0, 1.0, 1.0]) * global_positions[:,sim_position_joint:sim_position_joint+1] # zeroes out Y
-        sim_position = signal.savgol_filter(sim_position, 31, 3, axis=0, mode='interp')
+        # Position X/Z follows Spine2; Y is queried floor height under Spine2.
+        sim_position = np.array(global_positions[:,sim_position_joint:sim_position_joint+1], copy=True)
+        sim_position = np.asarray(signal.savgol_filter(sim_position, 31, 3, axis=0, mode='interp'))
+
+        for fi in range(int(sim_position.shape[0])):
+            query_x = sim_position[fi, 0, 0]
+            query_z = sim_position[fi, 0, 2]
+            sim_position[fi, 0, 1] = query_terrain_height(terrain_points_xzy, query_x, query_z)
         
         # Direction comes from projected hip forward direction
         sim_direction = np.array([1.0, 0.0, 1.0]) * quat.mul_vec(global_rotations[:,sim_rotation_joint:sim_rotation_joint+1], np.array([0.0, 1.0, 0.0]))
@@ -180,8 +230,8 @@ for entry in files:
         positions[:,0:1] = quat.mul_vec(quat.inv(sim_rotation), positions[:,0:1] - sim_position)
         rotations[:,0:1] = quat.mul(quat.inv(sim_rotation), rotations[:,0:1])
         
-        positions = np.concatenate([sim_position, positions], axis=1)
-        rotations = np.concatenate([sim_rotation, rotations], axis=1)
+        positions = np.concatenate((sim_position, positions), axis=1)
+        rotations = np.concatenate((sim_rotation, rotations), axis=1)
         
         bone_parents = np.concatenate([[-1], bvh_data['parents'] + 1])
         

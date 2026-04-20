@@ -5,6 +5,10 @@ import numpy as np
 import torch
 
 
+# Single source of truth for LMM latent dimension used by training scripts.
+LMM_LATENT_SIZE = 32
+
+
 def project_root():
     env_root = os.environ.get('MOTION_MATCHING_ROOT', '').strip()
     if env_root:
@@ -46,8 +50,19 @@ def expected_feature_count_current_runtime():
         3 +   # History Hip Velocity (-20)
         3 +   # History Trajectory Position (-20)
         3 +   # History Trajectory Direction (-20)
+        3 +   # History Trajectory Position (-40)
+        3 +   # History Trajectory Direction (-40)
         2     # History Terrain Heights (-15)
     )
+
+
+def expected_lmm_latent_size():
+    # LMM latent size is a fixed runtime contract.
+    return LMM_LATENT_SIZE
+
+
+def expected_lmm_input_size_current_runtime():
+    return expected_feature_count_current_runtime() + expected_lmm_latent_size()
 
 
 def validate_runtime_compatibility(features, future_toe_positions):
@@ -62,6 +77,21 @@ def validate_runtime_compatibility(features, future_toe_positions):
         raise RuntimeError(
             f'Future-toe layout mismatch: got {future_toe_positions.shape[1]} floats per frame, '
             f'expected 12 (3 samples x 2 toes x 2 coords). Rebuild database.bin with current schema.'
+        )
+
+
+def validate_latent_compatibility(latent, expected_frames=None):
+    expected_latent = expected_lmm_latent_size()
+    if latent.shape[1] != expected_latent:
+        raise RuntimeError(
+            f'Latent layout mismatch: got {latent.shape[1]}, expected {expected_latent}. '
+            f'Re-run train_decompressor.py to regenerate latent.bin and decompressor.bin.'
+        )
+
+    if expected_frames is not None and latent.shape[0] != expected_frames:
+        raise RuntimeError(
+            f'Latent frame count mismatch: got {latent.shape[0]} frames, '
+            f'expected {expected_frames}. Re-run train_decompressor.py after rebuilding features/database.'
         )
 
 def load_database(filename):

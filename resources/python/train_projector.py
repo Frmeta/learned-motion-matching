@@ -1,5 +1,6 @@
 import sys
 import struct
+import os
 
 import numpy as np
 import tquat
@@ -12,7 +13,15 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    class SummaryWriter:
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def add_scalars(self, *args, **kwargs):
+            pass
 
 from sklearn.neighbors import BallTree
 
@@ -22,6 +31,8 @@ from train_common import (
     load_latent,
     save_network,
     bin_path,
+    expected_lmm_latent_size,
+    validate_latent_compatibility,
     validate_runtime_compatibility,
 )
 
@@ -61,17 +72,18 @@ if __name__ == '__main__':
     Z = load_latent(bin_path('latent.bin'))['latent'].copy().astype(np.float32)
 
     validate_runtime_compatibility(X, future_toe_positions)
+    validate_latent_compatibility(Z, expected_frames=X.shape[0])
     
     nframes = X.shape[0]
     nfeatures = X.shape[1]
-    nlatent = Z.shape[1]
+    nlatent = expected_lmm_latent_size()
     
     # Parameters
     
     seed = 1234
     batchsize = 32
     lr = 0.001
-    niter = 500000
+    niter = int(os.environ.get('MOTION_MATCHING_NITER', '500000'))
     
     np.random.seed(seed)
     torch.manual_seed(seed)
