@@ -1345,44 +1345,44 @@ static bool nearest_point_on_model(
 }
 
 // Collide against the obstacle model by finding nearest point on mesh surface and pushing out.
-vec3 simulation_collide_obstacles(
-    const vec3 prev_pos,
-    const vec3 next_pos,
-    const Model& obstacle_model,
-    const float radius = 0.8f)
-{
-    vec3 dx = next_pos - prev_pos;
-    vec3 proj_pos = prev_pos;
+// vec3 simulation_collide_obstacles(
+//     const vec3 prev_pos,
+//     const vec3 next_pos,
+//     const Model& obstacle_model,
+//     const float radius = 0.8f)
+// {
+//     vec3 dx = next_pos - prev_pos;
+//     vec3 proj_pos = prev_pos;
     
-    // Substep because I'm too lazy to implement CCD
-    int substeps = 1 + (int)(length(dx) * 5.0f);
+//     // Substep because I'm too lazy to implement CCD
+//     int substeps = 1 + (int)(length(dx) * 5.0f);
     
-    for (int j = 0; j < substeps; j++)
-    {
-        proj_pos = proj_pos + dx / substeps;
+//     for (int j = 0; j < substeps; j++)
+//     {
+//         proj_pos = proj_pos + dx / substeps;
 
-        vec3 nearest;
-        vec3 nearest_normal;
-        if (nearest_point_on_model(obstacle_model, proj_pos, nearest, nearest_normal))
-        {
-            vec3 delta = proj_pos - nearest;
-            float dist_sq = dot(delta, delta);
-            if (dist_sq < radius * radius)
-            {
-                if (dist_sq > 1e-10f)
-                {
-                    proj_pos = nearest + radius * normalize(delta);
-                }
-                else
-                {
-                    proj_pos = nearest + radius * nearest_normal;
-                }
-            }
-        }
-    } 
+//         vec3 nearest;
+//         vec3 nearest_normal;
+//         if (nearest_point_on_model(obstacle_model, proj_pos, nearest, nearest_normal))
+//         {
+//             vec3 delta = proj_pos - nearest;
+//             float dist_sq = dot(delta, delta);
+//             if (dist_sq < radius * radius)
+//             {
+//                 if (dist_sq > 1e-10f)
+//                 {
+//                     proj_pos = nearest + radius * normalize(delta);
+//                 }
+//                 else
+//                 {
+//                     proj_pos = nearest + radius * nearest_normal;
+//                 }
+//             }
+//         }
+//     } 
     
-    return proj_pos;
-}
+//     return proj_pos;
+// }
 
 // Taken from https://theorangeduck.com/page/spring-roll-call#controllers
 void simulation_positions_update(
@@ -1406,10 +1406,10 @@ void simulation_positions_update(
     velocity = eydt*(j0 + j1*dt) + desired_velocity;
     acceleration = eydt*(acceleration - j1*y*dt);
     
-    position = simulation_collide_obstacles(
-        position_prev, 
-        position,
-        obstacle_model);
+    // position = simulation_collide_obstacles(
+    //     position_prev, 
+    //     position,
+    //     obstacle_model);
     
     // Ground collision: if player is phasing through ground, set velocity.y to positive
     float terrain_height = 0.0f;
@@ -3554,15 +3554,7 @@ int main(int argc, char** argv)
             20.0f * dt,
             ground_plane_model);
 
-        float current_terrain_height = 0.0f;
-        const bool has_current_terrain = sample_terrain_height(
-            ground_plane_model,
-            simulation_position,
-            current_terrain_height);
-
-        const float root_ground_offset = has_current_terrain
-            ? (simulation_position.y - current_terrain_height)
-            : jump_root_height_offset;
+        const float root_ground_offset = jump_active ? jump_root_height_offset : 0.02f;
 
         auto terrain_anchor_trajectory = [&](slice1d<vec3> trajectory)
         {
@@ -3628,7 +3620,7 @@ int main(int argc, char** argv)
             trajectory_positions(nearest_future_idx),
             traj_ground_height);
 
-        std::cout << "spine2 height weight = " << feature_weight_spine2_position << std::endl;
+        std::cout << "simulation_position.y = " << simulation_position.y << std::endl;
 
         float terrain_follow_target_root_height = simulation_position.y;
         bool terrain_follow_target_valid = false;
@@ -4159,9 +4151,15 @@ int main(int argc, char** argv)
             vec3 desired_velocity_planar = desired_velocity;
             desired_velocity_planar.y = 0.0f;
 
-            float simulation_prev_y = simulation_position.y;
-            float simulation_prev_vy = simulation_velocity.y;
-            float simulation_prev_ay = simulation_acceleration.y;
+            if (terrain_follow_target_valid)
+            {
+                float vertical_error = terrain_follow_target_root_height - simulation_position.y;
+                float vertical_halflife = maxf(terrain_follow_vertical_halflife, 1e-4f);
+                desired_velocity_planar.y = clampf(
+                    vertical_error / vertical_halflife,
+                    -simulation_run_back_speed,
+                    simulation_run_fwrd_speed);
+            }
 
             simulation_positions_update(
                 simulation_position,
@@ -4172,22 +4170,17 @@ int main(int argc, char** argv)
                 dt,
                 ground_plane_model);
 
-            // Keep Y owned by terrain-follow spring while grounded.
-            simulation_position.y = simulation_prev_y;
-            simulation_velocity.y = simulation_prev_vy;
-            simulation_acceleration.y = simulation_prev_ay;
-
-            if (terrain_follow_target_valid)
-            {
-                float simulation_prev_vertical_velocity = simulation_velocity.y;
-                simple_spring_damper_exact(
-                    simulation_position.y,
-                    simulation_velocity.y,
-                    terrain_follow_target_root_height,
-                    terrain_follow_vertical_halflife,
-                    dt);
-                simulation_acceleration.y = (simulation_velocity.y - simulation_prev_vertical_velocity) / maxf(dt, 1e-5f);
-            }
+            // if (terrain_follow_target_valid)
+            // {
+            //     float simulation_prev_vertical_velocity = simulation_velocity.y;
+            //     simple_spring_damper_exact(
+            //         simulation_position.y,
+            //         simulation_velocity.y,
+            //         terrain_follow_target_root_height,
+            //         terrain_follow_vertical_halflife,
+            //         dt);
+            //     simulation_acceleration.y = (simulation_velocity.y - simulation_prev_vertical_velocity) / maxf(dt, 1e-5f);
+            // }
         }
 
         if (jump_active)
@@ -4232,10 +4225,6 @@ int main(int argc, char** argv)
                 bone_rotations(0), 
                 synchronization_data_factor);
           
-            synchronized_position = simulation_collide_obstacles(
-                simulation_position_prev,
-                synchronized_position,
-                ground_plane_model);
             
             simulation_position = synchronized_position;
             simulation_rotation = synchronized_rotation;
