@@ -1354,7 +1354,7 @@ void database_build_matching_features(
     const float feature_weight_foot_position,
     const float feature_weight_foot_velocity,
     const float feature_weight_hip_velocity,
-    const float feature_weight_head_position,
+    const float feature_weight_spine2_position,
     const float feature_weight_trajectory_positions,
     const float feature_weight_trajectory_directions,
     const float feature_weight_terrain_heights,
@@ -1371,7 +1371,7 @@ void database_build_matching_features(
         3 + // Left Foot Velocity
         3 + // Right Foot Velocity
         3 + // Hip Velocity
-        1 + // Head Y Position
+        1 + // Spine2 Y Position
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
         8 + // Terrain Heights
@@ -1404,7 +1404,7 @@ void database_build_matching_features(
     compute_bone_velocity_feature(db, offset, Bone_LeftFoot, feature_weight_foot_velocity);
     compute_bone_velocity_feature(db, offset, Bone_RightFoot, feature_weight_foot_velocity);
     compute_bone_velocity_feature(db, offset, Bone_Hips, feature_weight_hip_velocity);
-    compute_bone_height_feature(db, offset, Bone_Head, feature_weight_head_position);
+    compute_bone_height_feature(db, offset, Bone_Spine2, feature_weight_spine2_position);
     compute_trajectory_position_feature(db, offset, feature_weight_trajectory_positions);
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);

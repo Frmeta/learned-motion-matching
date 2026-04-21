@@ -215,7 +215,7 @@ static int matching_feature_count_expected()
         3 + // Left Foot Velocity
         3 + // Right Foot Velocity
         3 + // Hip Velocity
-        1 + // Head Y Position
+        1 + // Spine2 Y Position
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
@@ -511,7 +511,7 @@ static inline vec3 from_Vector3(Vector3 v)
     return vec3(v.x, v.y, v.z);
 }
 
-static constexpr float kTerrainFollowMaxVerticalSpeed = 20.0f;
+static constexpr float kTerrainFollowMaxVerticalSpeed = 10.0f;
 static constexpr float kTerrainFollowMinVerticalSpeed = -10.0f;
 
 //--------------------------------------
@@ -2254,6 +2254,7 @@ int main(int argc, char** argv)
     try
     {
         bool start_with_lmm_enabled = false;
+        bool force_rebuild_features = false;
         enum app_mode
         {
             APP_MODE_WINDOW,
@@ -2285,6 +2286,10 @@ int main(int argc, char** argv)
             else if (strcmp(argv[argi], "--analyze-lmm") == 0)
             {
                 mode = APP_MODE_ANALYZE_LMM;
+            }
+            else if (strcmp(argv[argi], "--rebuild-features") == 0)
+            {
+                force_rebuild_features = true;
             }
             else if (strncmp(argv[argi], "--mode=", 7) == 0)
             {
@@ -2327,8 +2332,8 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
-                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> --input=<csv>\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--rebuild-features] --input=<csv>\n", argv[0]);
                 return 0;
             }
             else
@@ -2422,11 +2427,18 @@ int main(int argc, char** argv)
     const char* database_path = "./resources/bin/database.bin";
     const char* features_path = "./resources/bin/features.bin";
 
-    bool rebuild_features = should_rebuild_features(database_path, features_path);
+    bool rebuild_features = force_rebuild_features || should_rebuild_features(database_path, features_path);
     const int expected_feature_count = matching_feature_count_expected();
     if (rebuild_features)
     {
-        std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
+        if (force_rebuild_features)
+        {
+            std::cout << "--rebuild-features enabled. Rebuilding matching features..." << std::endl;
+        }
+        else
+        {
+            std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
+        }
     }
     else
     {
@@ -2436,7 +2448,7 @@ int main(int argc, char** argv)
     float feature_weight_foot_position = 0.75f;
     float feature_weight_foot_velocity = 1.0f;
     float feature_weight_hip_velocity = 1.0f;
-    float feature_weight_head_position = 1.0f;
+    float feature_weight_spine2_position = 5.0f;
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 0.5f;
@@ -2460,7 +2472,7 @@ int main(int argc, char** argv)
             feature_weight_foot_position,
             feature_weight_foot_velocity,
             feature_weight_hip_velocity,
-            feature_weight_head_position,
+            feature_weight_spine2_position,
             feature_weight_trajectory_positions,
             feature_weight_trajectory_directions,
             feature_weight_terrain_heights,
@@ -2490,7 +2502,7 @@ int main(int argc, char** argv)
                 feature_weight_foot_position,
                 feature_weight_foot_velocity,
                 feature_weight_hip_velocity,
-                feature_weight_head_position,
+                feature_weight_spine2_position,
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
                 feature_weight_terrain_heights,
@@ -2649,9 +2661,6 @@ int main(int argc, char** argv)
     float climbing_height_threshold = 0.1f;
     float climbing_max_height_delta = 0.8f;
 
-    float target_head_height_standing = 1.6f;
-    float target_head_height_crouching = 0.5f;
-    
     float jump_root_height_offset = 1.2f;
     const float jump_initial_vertical_speed = 8.0f;
     const float jump_gravity = 20.0f;
@@ -3570,8 +3579,8 @@ int main(int argc, char** argv)
         terrain_anchor_trajectory(trajectory_positions);
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
-        const float uphill_horizontal_reduce_gain = 2.8f;
-        const float uphill_horizontal_reduce_max = 0.98f;
+        const float uphill_horizontal_reduce_gain = 0.3f;
+        const float uphill_horizontal_reduce_max = 0.9f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
             vec3 rel = trajectory_positions(i) - trajectory_positions(i-1);
@@ -3619,11 +3628,7 @@ int main(int argc, char** argv)
             trajectory_positions(nearest_future_idx),
             traj_ground_height);
 
-        std::cout
-            << "traj_ground_height=" << traj_ground_height
-            << " simulation_position.y=" << simulation_position.y
-            << " traj_hit=" << (traj_hit ? 1 : 0)
-            << std::endl;
+        std::cout << "spine2 height weight = " << feature_weight_spine2_position << std::endl;
 
         float terrain_follow_target_root_height = simulation_position.y;
         bool terrain_follow_target_valid = false;
@@ -3804,8 +3809,8 @@ int main(int argc, char** argv)
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Right Foot Velocity
         if (debug) std::cout << "  Copying hip velocity..." << std::endl;
         query_copy_denormalized_feature(query, offset, 3, query_features, db.features_offset, db.features_scale); // Hip Velocity
-        if (debug) std::cout << "  Setting head Y position target..." << std::endl;
-        query(offset) = desired_crouch ? target_head_height_crouching : target_head_height_standing;
+        if (debug) std::cout << "  Setting Spine2 Y position target..." << std::endl;
+        query(offset) = desired_crouch ? 0.7f : 1.2f;
         offset += 1;
         if (debug) std::cout << "  Computing trajectory position feature..." << std::endl;
         query_compute_trajectory_position_feature(query, offset, bone_positions(0), bone_rotations(0), query_trajectory_positions);
@@ -5188,7 +5193,7 @@ int main(int argc, char** argv)
                 feature_weight_foot_position,
                 feature_weight_foot_velocity,
                 feature_weight_hip_velocity,
-                feature_weight_head_position,
+                feature_weight_spine2_position,
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
                 feature_weight_terrain_heights,
