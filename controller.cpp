@@ -3556,8 +3556,9 @@ int main(int argc, char** argv)
         terrain_anchor_trajectory(trajectory_positions);
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
-        const float uphill_horizontal_reduce_gain = 2.8f;
-        const float uphill_horizontal_reduce_max = 0.98f;
+        const float uphill_horizontal_reduce_gain = 1.0f;
+        const float uphill_horizontal_reduce_max = 0.9f;
+        float min_trajectory_scale_xz = 1.0f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
             vec3 rel = trajectory_positions(i) - trajectory_positions(i-1);
@@ -3565,10 +3566,21 @@ int main(int argc, char** argv)
             {
                 float reduce = clampf(fabsf(rel.y) * uphill_horizontal_reduce_gain, 0.0f, uphill_horizontal_reduce_max);
                 float scale_xz = 1.0f - reduce;
+                if (i < 3) {
+                    min_trajectory_scale_xz = minf(min_trajectory_scale_xz, scale_xz);
+                }
+                
                 trajectory_positions(i).x = trajectory_positions(i-1).x + rel.x * scale_xz;
                 trajectory_positions(i).z = trajectory_positions(i-1).z + rel.z * scale_xz;
             }
         }
+
+        // Keep desired velocity in sync with the strongest trajectory compression.
+        float trajectory_xz_speed_scale = clampf(min_trajectory_scale_xz, 0.0f, 1.0f);
+        desired_velocity_curr.x *= trajectory_xz_speed_scale;
+        desired_velocity_curr.z *= trajectory_xz_speed_scale;
+        desired_velocity.x *= trajectory_xz_speed_scale;
+        desired_velocity.z *= trajectory_xz_speed_scale;
 
         // XZ rescaling above changes sample points, so project Y again to
         // keep the visible trajectory aligned with terrain elevation.
@@ -3599,7 +3611,7 @@ int main(int argc, char** argv)
         // Override: Add vertical velocity to move root toward terrain sampled along future trajectory.
         float traj_ground_height = 0.0f;
         bool traj_hit = false;
-        int nearest_future_idx = trajectory_positions.size > 2 ? 2 : 0;
+        int nearest_future_idx = trajectory_positions.size > 1 ? 1 : 0;
         Ray traj_ray = { to_Vector3(trajectory_positions(nearest_future_idx) + vec3(0, 10, 0)), {0, -1, 0} };
         for (int i = 0; i < ground_plane_model.meshCount; i++)
         {
@@ -3620,7 +3632,7 @@ int main(int argc, char** argv)
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
-        const float desired_velocity_root_blend = 0.1f;
+        const float desired_velocity_root_blend = 0.9f;
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
