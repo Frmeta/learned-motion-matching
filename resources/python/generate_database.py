@@ -35,7 +35,8 @@ files = [
     # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
     # Semantic feature order used by runtime/database: idle -> crouch -> jump -> cartwheel.
     # We just use a small section of this clip for the standing idle
-    ('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351, False, True, False, False), 
+    #('resources/bvh/pushAndStumble1_subject5.bvh', 194,  351, False, True, False, False), 
+    ('resources/bvh/pushAndStumble1_subject5.bvh',  194,  195, False, True, False, False), 
     # Running
     ('resources/bvh/run1_subject5.bvh',             90, 7086, False, False, False, False), 
     # Walking
@@ -71,14 +72,15 @@ files = [
     ('resources/bvh/obstacles2_subject1.bvh',   4200, 4350, False, False, True, False),
     ('resources/bvh/obstacles2_subject1.bvh',   6250, 6350, False, False, True, False),
     ('resources/bvh/obstacles2_subject1.bvh',   6480, 6710, False, False, True, False),
-    ('resources/bvh/obstacles2_subject2.bvh',   5080, 5140, False, False, False, False),
+    #('resources/bvh/obstacles2_subject2.bvh',   5080, 5140, False, False, False, False),
 
     # walk on rope
     # ('resources/bvh/obstacles5_subject3.bvh',       350, 1750, True, False, False, False),
 
     # Monkey crouch
     ('resources/bvh/ground2_subject2.bvh',       160, 204, True, False, False, False), #stand to crouch
-    ('resources/bvh/ground2_subject2.bvh',       205, 325, True, True, False, False), #idle
+    #('resources/bvh/ground2_subject2.bvh',       205, 325, True, True, False, False), #idle
+    ('resources/bvh/ground2_subject2.bvh',       205, 206, True, True, False, False), #idle
     ('resources/bvh/ground2_subject2.bvh',       325, 2280, True, False, False, False),
     ('resources/bvh/ground2_subject2.bvh',       2800, 3000, True, False, False, False),
     ('resources/bvh/ground2_subject3.bvh',       1035, 1600, True, False, False, False),
@@ -114,6 +116,7 @@ cartwheel_states = []
 for entry in files:
     filename, start, stop, is_crouch, is_idle, is_jump, *rest = entry
     is_cartwheel = bool(rest[0]) if len(rest) > 0 else False
+    min_clip_frames = 35
     
     # For each file we process it mirrored and not mirrored
     for mirror in [False, True]:
@@ -125,6 +128,35 @@ for entry in files:
         bvh_data = bvh.load(filename)
         bvh_data['positions'] = bvh_data['positions'][start:stop]
         bvh_data['rotations'] = bvh_data['rotations'][start:stop]
+
+        # Very short clips break large Savitzky-Golay windows.
+        # Repeat the last frame so stationary clips (e.g., idle) remain stable.
+        clip_frames = bvh_data['positions'].shape[0]
+        if clip_frames < min_clip_frames:
+            pad_count = min_clip_frames - clip_frames
+            print(
+                'Notice: repeating "%s" [%d:%d] %s from %d to %d frames (+%d repeated frame%s).' % (
+                    filename,
+                    start,
+                    stop,
+                    '(Mirrored)' if mirror else '',
+                    clip_frames,
+                    min_clip_frames,
+                    pad_count,
+                    '' if pad_count == 1 else 's'))
+
+            bvh_data['positions'] = np.concatenate(
+                [
+                    bvh_data['positions'],
+                    np.repeat(bvh_data['positions'][-1:], pad_count, axis=0)
+                ],
+                axis=0)
+            bvh_data['rotations'] = np.concatenate(
+                [
+                    bvh_data['rotations'],
+                    np.repeat(bvh_data['rotations'][-1:], pad_count, axis=0)
+                ],
+                axis=0)
         
         positions = bvh_data['positions']
         rotations = quat.unroll(quat.from_euler(np.radians(bvh_data['rotations']), order=bvh_data['order']))
