@@ -2366,7 +2366,7 @@ int main(int argc, char** argv)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "resources/glb/06-Playground2.glb";
+    const char* ground_glb_path = "resources/glb/07-Playground3.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -3628,7 +3628,11 @@ int main(int argc, char** argv)
             float target_root_height = traj_ground_height + jump_root_height_offset;
             float height_error = target_root_height - simulation_position.y;
             const float vertical_gain = 4.0f;
-            desired_velocity_curr.y = clampf(height_error * vertical_gain, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+            const float damping_gain = 0.5f;  // Damping coefficient
+            
+            // Reduce desired velocity if already moving in that direction
+            float damped_command = height_error * vertical_gain - damping_gain * simulation_velocity.y;
+            desired_velocity_curr.y = clampf(damped_command, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
@@ -4662,7 +4666,7 @@ int main(int argc, char** argv)
         float ui_metrics_wid = 300;
         float ui_metrics_hgt = 130;
         
-        GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, ui_metrics_hgt }, "performance metrics");
+        GuiGroupBox((Rectangle){ 490, ui_metrics_hei, ui_metrics_wid, ui_metrics_hgt }, "Performance metrics");
         
         // Frame time display
         GuiLabel((Rectangle){ 510, ui_metrics_hei + 15, 260, 20 },
