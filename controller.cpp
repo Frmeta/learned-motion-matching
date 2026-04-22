@@ -3557,7 +3557,7 @@ int main(int argc, char** argv)
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
         const float uphill_horizontal_reduce_gain = 1.0f;
-        const float uphill_horizontal_reduce_max = 0.9f;
+        const float uphill_horizontal_reduce_max = 0.75f;
         float min_trajectory_scale_xz = 1.0f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
