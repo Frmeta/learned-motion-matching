@@ -510,7 +510,7 @@ static inline vec3 from_Vector3(Vector3 v)
     return vec3(v.x, v.y, v.z);
 }
 
-static constexpr float kTerrainFollowMaxVerticalSpeed = 20.0f;
+static constexpr float kTerrainFollowMaxVerticalSpeed = 10.0f;
 static constexpr float kTerrainFollowMinVerticalSpeed = -10.0f;
 
 //--------------------------------------
@@ -1405,10 +1405,10 @@ void simulation_positions_update(
     velocity = eydt*(j0 + j1*dt) + desired_velocity;
     acceleration = eydt*(acceleration - j1*y*dt);
     
-    position = simulation_collide_obstacles(
-        position_prev, 
-        position,
-        obstacle_model);
+    // position = simulation_collide_obstacles(
+    //     position_prev, 
+    //     position,
+    //     obstacle_model);
     
     // Ground collision: if player is phasing through ground, set velocity.y to positive
     float terrain_height = 0.0f;
@@ -2448,7 +2448,7 @@ int main(int argc, char** argv)
     float feature_weight_history_trajectory_directions = feature_weight_trajectory_directions * feature_weight_prev_frame_multiplier;
     float feature_weight_history_terrain_heights = feature_weight_terrain_heights * feature_weight_prev_frame_multiplier;
     
-    bool mm_include_previous_frame_features = true;
+    bool mm_include_previous_frame_features = false;
     
     
     if (rebuild_features)
@@ -2630,15 +2630,15 @@ int main(int argc, char** argv)
     // float simulation_walk_side_speed = 2.0f;
     // float simulation_walk_back_speed = 1.5f;
 
-    float simulation_crouch_fwrd_speed = 2.5f;
+    float simulation_crouch_fwrd_speed = 2.0f;
     float simulation_crouch_side_speed = 1.5f;
-    float simulation_crouch_back_speed = 1.0f;
+    float simulation_crouch_back_speed = 1.25f;
     float cartwheel_speed_boost = 1.2f;
     float jump_speed_boost = 1.5f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
-    float climbing_height_threshold = 0.1f;
+    float climbing_height_threshold = 1.0f;
     float climbing_max_height_delta = 0.8f;
     
     float jump_root_height_offset = 1.2f;
@@ -3202,7 +3202,7 @@ int main(int argc, char** argv)
             desired_strafe = true;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.2f : 1.2f;
+        jump_root_height_offset = crouch_pressed ? 0.6f : 1.2f;
 
         if (jump_pressed)
         {
@@ -4165,10 +4165,10 @@ int main(int argc, char** argv)
                 bone_rotations(0), 
                 synchronization_data_factor);
           
-            synchronized_position = simulation_collide_obstacles(
-                simulation_position_prev,
-                synchronized_position,
-                ground_plane_model);
+            // synchronized_position = simulation_collide_obstacles(
+            //     simulation_position_prev,
+            //     synchronized_position,
+            //     ground_plane_model);
             
             simulation_position = synchronized_position;
             simulation_rotation = synchronized_rotation;
@@ -4430,6 +4430,8 @@ int main(int argc, char** argv)
             adjusted_bone_positions,
             adjusted_bone_rotations,
             db.bone_parents);
+
+        // printf("root_y=%.6f\n", global_bone_positions(0).y);
 
         if (analysis_capture_enabled)
         {
