@@ -2366,7 +2366,7 @@ int main(int argc, char** argv)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "resources/glb/07-Playground3.glb";
+    const char* ground_glb_path = "resources/glb/10-Playground6.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -3636,7 +3636,7 @@ int main(int argc, char** argv)
         }
 
         // Blend a small amount of root velocity to reduce abrupt target changes.
-        const float desired_velocity_root_blend = 0.9f;
+        const float desired_velocity_root_blend = 0.0f;
         vec3 desired_velocity_blended = lerp(desired_velocity_curr, bone_velocities(0), desired_velocity_root_blend);
         desired_velocity_blended.y = desired_velocity_curr.y;
         desired_velocity_curr = desired_velocity_blended;
