@@ -2627,6 +2627,7 @@ int main(int argc, char** argv)
     bool cartwheel_query_lock_prev = false;
     vec3 cartwheel_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
     float cartwheel_query_lock_step_distance = 0.0f;
+    float cartwheel_first_search_step_distance = 0.0f;
     bool cartwheel_root_velocity_override_prev = false;
     
     vec3 simulation_position;
@@ -2993,6 +2994,7 @@ int main(int argc, char** argv)
     const bool base_cartwheel_query_lock_prev = cartwheel_query_lock_prev;
     const vec3 base_cartwheel_query_lock_forward = cartwheel_query_lock_forward;
     const float base_cartwheel_query_lock_step_distance = cartwheel_query_lock_step_distance;
+    const float base_cartwheel_first_search_step_distance = cartwheel_first_search_step_distance;
     const bool base_cartwheel_root_velocity_override_prev = cartwheel_root_velocity_override_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
@@ -3071,6 +3073,7 @@ int main(int argc, char** argv)
         cartwheel_query_lock_prev = base_cartwheel_query_lock_prev;
         cartwheel_query_lock_forward = base_cartwheel_query_lock_forward;
         cartwheel_query_lock_step_distance = base_cartwheel_query_lock_step_distance;
+        cartwheel_first_search_step_distance = base_cartwheel_first_search_step_distance;
         cartwheel_root_velocity_override_prev = base_cartwheel_root_velocity_override_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
@@ -3231,6 +3234,10 @@ int main(int argc, char** argv)
         bool cartwheel_search_freeze_started =
             cartwheel_search_freeze_active && !cartwheel_search_freeze_prev;
         cartwheel_search_freeze_prev = cartwheel_search_freeze_active;
+        if (cartwheel_search_freeze_started)
+        {
+            cartwheel_first_search_step_distance = simulation_run_fwrd_speed * (20.0f * dt);
+        }
 
         if (cartwheel_auto_active)
         {
@@ -3451,9 +3458,9 @@ int main(int argc, char** argv)
 
         if (cartwheel_auto_active)
         {
-            // Keep trajectory position unchanged and only rotate facing 90 degrees left.
+            // Keep trajectory position unchanged
             desired_rotation_curr = quat_mul(
-                quat_from_angle_axis(-0.5f * PIf, vec3(0, 1, 0)),
+                quat_from_angle_axis(0, vec3(0, 1, 0)),
                 desired_rotation_curr);
         }
         
@@ -3635,7 +3642,10 @@ int main(int argc, char** argv)
 
             for (int i = 1; i < query_trajectory_positions.size; i++)
             {
-                float distance = cartwheel_query_lock_step_distance * (float)i;
+                float step_distance = cartwheel_search_freeze_started
+                    ? cartwheel_first_search_step_distance
+                    : cartwheel_query_lock_step_distance;
+                float distance = step_distance * (float)i;
                 query_trajectory_positions(i) = base_position + cartwheel_query_lock_forward * distance;
                 query_trajectory_rotations(i) = lock_rotation;
             }
