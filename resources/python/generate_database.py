@@ -87,8 +87,8 @@ files = [
     ('resources/bvh/ground1_subject4.bvh',       3700, 4500, True, False, False, False),
 
     # Cartwheel
-    ('resources/bvh/dance1_subject1.bvh',       3180, 3250, False, False, False, True),
-    ('resources/bvh/dance1_subject1.bvh',       3450, 3510, False, False, False, True),
+    ('resources/bvh/dance1_subject1.bvh',       3190, 3245, False, False, False, True),
+    ('resources/bvh/dance1_subject1.bvh',       3450, 3500, False, False, False, True),
 
 ]
 

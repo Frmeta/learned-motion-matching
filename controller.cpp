@@ -2263,11 +2263,16 @@ int main(int argc, char** argv)
         app_mode mode = APP_MODE_WINDOW;
         char analyze_input_path[512] = "./resources/input-recording";
         bool analyze_input_is_file = false;
+        bool force_rebuild_features = false;
         for (int argi = 1; argi < argc; argi++)
         {
             if (strcmp(argv[argi], "--learned") == 0)
             {
                 start_with_lmm_enabled = true;
+            }
+            else if (strcmp(argv[argi], "--rebuild-features") == 0)
+            {
+                force_rebuild_features = true;
             }
             else if (strcmp(argv[argi], "--window") == 0)
             {
@@ -2326,7 +2331,7 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
                 printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> --input=<csv>\n", argv[0]);
                 return 0;
             }
@@ -2421,11 +2426,18 @@ int main(int argc, char** argv)
     const char* database_path = "./resources/bin/database.bin";
     const char* features_path = "./resources/bin/features.bin";
 
-    bool rebuild_features = should_rebuild_features(database_path, features_path);
+    bool rebuild_features = force_rebuild_features || should_rebuild_features(database_path, features_path);
     const int expected_feature_count = matching_feature_count_expected();
     if (rebuild_features)
     {
-        std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
+        if (force_rebuild_features)
+        {
+            std::cout << "--rebuild-features requested. Rebuilding matching features..." << std::endl;
+        }
+        else
+        {
+            std::cout << "Database is new or features.bin is missing. Building matching features..." << std::endl;
+        }
     }
     else
     {
@@ -2438,6 +2450,10 @@ int main(int argc, char** argv)
     float feature_weight_trajectory_positions = 1.0f;
     float feature_weight_trajectory_directions = 1.5f;
     float feature_weight_terrain_heights = 0.5f;
+    float feature_weight_idle = 2.0f;
+    float feature_weight_crouch = 2.0f;
+    float feature_weight_jump = 2.0f;
+    float feature_weight_cartwheel = 2.0f;
 
     float feature_weight_prev_frame_multiplier = 0.0f;
 
@@ -2461,6 +2477,10 @@ int main(int argc, char** argv)
             feature_weight_trajectory_positions,
             feature_weight_trajectory_directions,
             feature_weight_terrain_heights,
+            feature_weight_idle,
+            feature_weight_crouch,
+            feature_weight_jump,
+            feature_weight_cartwheel,
             feature_weight_history_foot_position,
             feature_weight_history_foot_velocity,
             feature_weight_history_hip_velocity,
@@ -2490,6 +2510,10 @@ int main(int argc, char** argv)
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
                 feature_weight_terrain_heights,
+                feature_weight_idle,
+                feature_weight_crouch,
+                feature_weight_jump,
+                feature_weight_cartwheel,
                 feature_weight_history_foot_position,
                 feature_weight_history_foot_velocity,
                 feature_weight_history_hip_velocity,
@@ -2599,9 +2623,11 @@ int main(int argc, char** argv)
     bool desired_jump_prev = false;
     float cartwheel_auto_timer = 0.0f;
     const float cartwheel_auto_duration = 1.0f;
+    bool cartwheel_search_freeze_prev = false;
     bool cartwheel_query_lock_prev = false;
     vec3 cartwheel_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
     float cartwheel_query_lock_step_distance = 0.0f;
+    bool cartwheel_root_velocity_override_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2963,9 +2989,11 @@ int main(int argc, char** argv)
     const bool base_desired_idle_prev = desired_idle_prev;
     const bool base_desired_jump_prev = desired_jump_prev;
     const float base_cartwheel_auto_timer = cartwheel_auto_timer;
+    const bool base_cartwheel_search_freeze_prev = cartwheel_search_freeze_prev;
     const bool base_cartwheel_query_lock_prev = cartwheel_query_lock_prev;
     const vec3 base_cartwheel_query_lock_forward = cartwheel_query_lock_forward;
     const float base_cartwheel_query_lock_step_distance = cartwheel_query_lock_step_distance;
+    const bool base_cartwheel_root_velocity_override_prev = cartwheel_root_velocity_override_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -3039,9 +3067,11 @@ int main(int argc, char** argv)
         desired_idle_prev = base_desired_idle_prev;
         desired_jump_prev = base_desired_jump_prev;
         cartwheel_auto_timer = base_cartwheel_auto_timer;
+        cartwheel_search_freeze_prev = base_cartwheel_search_freeze_prev;
         cartwheel_query_lock_prev = base_cartwheel_query_lock_prev;
         cartwheel_query_lock_forward = base_cartwheel_query_lock_forward;
         cartwheel_query_lock_step_distance = base_cartwheel_query_lock_step_distance;
+        cartwheel_root_velocity_override_prev = base_cartwheel_root_velocity_override_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -3197,12 +3227,17 @@ int main(int argc, char** argv)
 
         cartwheel_query_lock_active = desired_cartwheel;
 
+        bool cartwheel_search_freeze_active = cartwheel_auto_active;
+        bool cartwheel_search_freeze_started =
+            cartwheel_search_freeze_active && !cartwheel_search_freeze_prev;
+        cartwheel_search_freeze_prev = cartwheel_search_freeze_active;
+
         if (cartwheel_auto_active)
         {
             desired_strafe = true;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.6f : 1.2f;
+        jump_root_height_offset = crouch_pressed ? 0.7f : 1.2f;
 
         if (jump_pressed)
         {
@@ -3802,30 +3837,26 @@ int main(int argc, char** argv)
 
         if (offset < db.nfeatures())
         {
-            const float idle_feature_strength = 6.0f;
             if (debug) std::cout << "  Setting idle flag..." << std::endl;
-            query(offset) = desired_idle ? idle_feature_strength : 0.0f;
+            query(offset) = desired_idle ? 1.0f : 0.0f;
             offset += 1;
         }
         if (offset < db.nfeatures())
         {
-            const float crouch_feature_strength = 6.0f;
             if (debug) std::cout << "  Setting crouch flag..." << std::endl;
-            query(offset) = desired_crouch ? crouch_feature_strength : 0.0f;
+            query(offset) = desired_crouch ? 1.0f : 0.0f;
             offset += 1;
         }
         if (offset < db.nfeatures())
         {
-            const float jump_feature_strength = 6.0f;
             if (debug) std::cout << "  Setting jump flag..." << std::endl;
-            query(offset) = desired_jump ? jump_feature_strength : 0.0f;
+            query(offset) = desired_jump ? 1.0f : 0.0f;
             offset += 1;
         }
         if (offset < db.nfeatures())
         {
-            const float cartwheel_feature_strength = 16.0f;
             if (debug) std::cout << "  Setting cartwheel flag..." << std::endl;
-            query(offset) = desired_cartwheel ? cartwheel_feature_strength : 0.0f;
+            query(offset) = desired_cartwheel ? 1.0f : 0.0f;
             offset += 1;
         }
 
@@ -3914,128 +3945,150 @@ int main(int argc, char** argv)
         
         // Do we need to search?
         if (debug) std::cout << "Do we?" << std::endl;
-        if (force_search || search_timer <= 0.0f || end_of_anim)
+        bool search_requested = force_search || search_timer <= 0.0f || end_of_anim;
+        bool force_projector_on_cartwheel_freeze_start =
+            lmm_runtime_enabled && cartwheel_search_freeze_started;
+        bool force_mm_search_on_cartwheel_freeze_start =
+            !lmm_runtime_enabled && cartwheel_search_freeze_started;
+        bool allow_mm_search =
+            !cartwheel_search_freeze_active || force_mm_search_on_cartwheel_freeze_start;
+        bool allow_lmm_projector =
+            !cartwheel_search_freeze_active || force_projector_on_cartwheel_freeze_start;
+        bool ran_search_or_projector = false;
+
+        if (search_requested || force_projector_on_cartwheel_freeze_start)
         {
             if (lmm_runtime_enabled)
             {
-                // Project query onto nearest feature vector
-                
-                float best_cost = FLT_MAX;
-                bool transition = false;
-                
-                projector_evaluate(
-                    transition,
-                    best_cost,
-                    features_proj,
-                    latent_proj,
-                    projector_evaluation,
-                    query,
-                    db.features_offset,
-                    db.features_scale,
-                    features_curr,
-                    projector);
-                
-                // If projection is sufficiently different from current
-                if (transition)
-                {   
-                    // Evaluate pose for projected features
-                    decompressor_evaluate(
-                        trns_bone_positions,
-                        trns_bone_velocities,
-                        trns_bone_rotations,
-                        trns_bone_angular_velocities,
-                        trns_bone_contacts,
-                        future_toe_position,
-                        decompressor_evaluation,
+                if (allow_lmm_projector)
+                {
+                    // Project query onto nearest feature vector
+                    
+                    float best_cost = FLT_MAX;
+                    bool transition = false;
+                    ran_search_or_projector = true;
+                    
+                    projector_evaluate(
+                        transition,
+                        best_cost,
                         features_proj,
                         latent_proj,
-                        curr_bone_positions(0),
-                        curr_bone_rotations(0),
-                        decompressor,
-                        dt);
+                        projector_evaluation,
+                        query,
+                        db.features_offset,
+                        db.features_scale,
+                        features_curr,
+                        projector);
                     
-                    // Transition inertializer to this pose
-                    inertialize_pose_transition(
-                        bone_offset_positions,
-                        bone_offset_velocities,
-                        bone_offset_rotations,
-                        bone_offset_angular_velocities,
-                        transition_src_position,
-                        transition_src_rotation,
-                        transition_dst_position,
-                        transition_dst_rotation,
-                        bone_positions(0),
-                        bone_velocities(0),
-                        bone_rotations(0),
-                        bone_angular_velocities(0),
-                        curr_bone_positions,
-                        curr_bone_velocities,
-                        curr_bone_rotations,
-                        curr_bone_angular_velocities,
-                        trns_bone_positions,
-                        trns_bone_velocities,
-                        trns_bone_rotations,
-                        trns_bone_angular_velocities);
-                    
-                    // Update current features and latents
-                    features_curr = features_proj;
-                    latent_curr = latent_proj;
+                    // If projection is sufficiently different from current
+                    if (transition)
+                    {   
+                        // Evaluate pose for projected features
+                        decompressor_evaluate(
+                            trns_bone_positions,
+                            trns_bone_velocities,
+                            trns_bone_rotations,
+                            trns_bone_angular_velocities,
+                            trns_bone_contacts,
+                            future_toe_position,
+                            decompressor_evaluation,
+                            features_proj,
+                            latent_proj,
+                            curr_bone_positions(0),
+                            curr_bone_rotations(0),
+                            decompressor,
+                            dt);
+                        
+                        // Transition inertializer to this pose
+                        inertialize_pose_transition(
+                            bone_offset_positions,
+                            bone_offset_velocities,
+                            bone_offset_rotations,
+                            bone_offset_angular_velocities,
+                            transition_src_position,
+                            transition_src_rotation,
+                            transition_dst_position,
+                            transition_dst_rotation,
+                            bone_positions(0),
+                            bone_velocities(0),
+                            bone_rotations(0),
+                            bone_angular_velocities(0),
+                            curr_bone_positions,
+                            curr_bone_velocities,
+                            curr_bone_rotations,
+                            curr_bone_angular_velocities,
+                            trns_bone_positions,
+                            trns_bone_velocities,
+                            trns_bone_rotations,
+                            trns_bone_angular_velocities);
+                        
+                        // Update current features and latents
+                        features_curr = features_proj;
+                        latent_curr = latent_proj;
+                    }
                 }
             }
             else
             {
-                // Search
-                
-                int best_index = end_of_anim ? -1 : frame_index;
-                float best_cost = FLT_MAX;
-                
-                database_search(
-                    best_index,
-                    best_cost,
-                    db,
-                    query,
-                    0.0f,
-                    20,
-                    20,
-                    mm_include_previous_frame_features);
-                
-                // Transition if better frame found
-                if (debug) std::cout << "Do2" << std::endl;
-                if (best_index != frame_index)
+                if (allow_mm_search)
                 {
-                    trns_bone_positions = db.bone_positions(best_index);
-                    trns_bone_velocities = db.bone_velocities(best_index);
-                    trns_bone_rotations = db.bone_rotations(best_index);
-                    trns_bone_angular_velocities = db.bone_angular_velocities(best_index);
+                    // Search
                     
-                    inertialize_pose_transition(
-                        bone_offset_positions,
-                        bone_offset_velocities,
-                        bone_offset_rotations,
-                        bone_offset_angular_velocities,
-                        transition_src_position,
-                        transition_src_rotation,
-                        transition_dst_position,
-                        transition_dst_rotation,
-                        bone_positions(0),
-                        bone_velocities(0),
-                        bone_rotations(0),
-                        bone_angular_velocities(0),
-                        curr_bone_positions,
-                        curr_bone_velocities,
-                        curr_bone_rotations,
-                        curr_bone_angular_velocities,
-                        trns_bone_positions,
-                        trns_bone_velocities,
-                        trns_bone_rotations,
-                        trns_bone_angular_velocities);
+                    int best_index = end_of_anim ? -1 : frame_index;
+                    float best_cost = FLT_MAX;
+                    ran_search_or_projector = true;
                     
-                    frame_index = best_index;
+                    database_search(
+                        best_index,
+                        best_cost,
+                        db,
+                        query,
+                        0.0f,
+                        20,
+                        20,
+                        mm_include_previous_frame_features);
+                    
+                    // Transition if better frame found
+                    if (debug) std::cout << "Do2" << std::endl;
+                    if (best_index != frame_index)
+                    {
+                        trns_bone_positions = db.bone_positions(best_index);
+                        trns_bone_velocities = db.bone_velocities(best_index);
+                        trns_bone_rotations = db.bone_rotations(best_index);
+                        trns_bone_angular_velocities = db.bone_angular_velocities(best_index);
+                        
+                        inertialize_pose_transition(
+                            bone_offset_positions,
+                            bone_offset_velocities,
+                            bone_offset_rotations,
+                            bone_offset_angular_velocities,
+                            transition_src_position,
+                            transition_src_rotation,
+                            transition_dst_position,
+                            transition_dst_rotation,
+                            bone_positions(0),
+                            bone_velocities(0),
+                            bone_rotations(0),
+                            bone_angular_velocities(0),
+                            curr_bone_positions,
+                            curr_bone_velocities,
+                            curr_bone_rotations,
+                            curr_bone_angular_velocities,
+                            trns_bone_positions,
+                            trns_bone_velocities,
+                            trns_bone_rotations,
+                            trns_bone_angular_velocities);
+                        
+                        frame_index = best_index;
+                    }
                 }
             }
 
             // Reset search timer
-            search_timer = search_time;
+            if (ran_search_or_projector)
+            {
+                search_timer = search_time;
+            }
         }
         
         // Tick down search timer
@@ -4117,15 +4170,34 @@ int main(int argc, char** argv)
         if (debug) std::cout << "test3" << std::endl;
         
         vec3 simulation_position_prev = simulation_position;
-        
-        simulation_positions_update(
-            simulation_position, 
-            simulation_velocity, 
-            simulation_acceleration,
-            desired_velocity,
-            simulation_velocity_halflife,
-            dt,
-            ground_plane_model);
+
+        if (desired_cartwheel)
+        {
+            // During cartwheel, move by raw matched root velocity (no spring damping/smoothing).
+            simulation_velocity = bone_velocities(0);
+            simulation_position = simulation_position + simulation_velocity * dt;
+            simulation_acceleration = vec3();
+            cartwheel_root_velocity_override_prev = true;
+        }
+        else
+        {
+            // Leaving override: clear acceleration before resuming spring update.
+            if (cartwheel_root_velocity_override_prev)
+            {
+                simulation_acceleration = vec3();
+            }
+
+            simulation_positions_update(
+                simulation_position, 
+                simulation_velocity, 
+                simulation_acceleration,
+                desired_velocity,
+                simulation_velocity_halflife,
+                dt,
+                ground_plane_model);
+
+            cartwheel_root_velocity_override_prev = false;
+        }
 
         if (jump_active)
         {
@@ -5135,6 +5207,10 @@ int main(int argc, char** argv)
                 feature_weight_trajectory_positions,
                 feature_weight_trajectory_directions,
                 feature_weight_terrain_heights,
+                feature_weight_idle,
+                feature_weight_crouch,
+                feature_weight_jump,
+                feature_weight_cartwheel,
                 feature_weight_history_foot_position,
                 feature_weight_history_foot_velocity,
                 feature_weight_history_hip_velocity,

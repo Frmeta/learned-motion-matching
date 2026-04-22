@@ -63,7 +63,7 @@ range_index,db_start,db_stop,bvh_name,source_start,source_stop,is_mirrored
 61,148698,149714,ground2_subject3.bvh,1035,1600,1
 62,149714,151153,ground1_subject4.bvh,3700,4500,0
 63,151153,152592,ground1_subject4.bvh,3700,4500,1
-64,152592,152717,dance1_subject1.bvh,3180,3250,0
-65,152717,152842,dance1_subject1.bvh,3180,3250,1
-66,152842,152949,dance1_subject1.bvh,3450,3510,0
-67,152949,153056,dance1_subject1.bvh,3450,3510,1
+64,152592,152690,dance1_subject1.bvh,3190,3245,0
+65,152690,152788,dance1_subject1.bvh,3190,3245,1
+66,152788,152877,dance1_subject1.bvh,3450,3500,0
+67,152877,152966,dance1_subject1.bvh,3450,3500,1

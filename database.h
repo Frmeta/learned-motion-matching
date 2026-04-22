@@ -143,82 +143,6 @@ void database_load(database& db, const char* filename)
     fclose(f);
 }
 
-void compute_crouch_feature(database& db, int& offset)
-{
-    const float crouch_feature_strength = 6.0f;
-
-    bool has_crouch =
-        db.crouch_states.rows == db.nframes() &&
-        db.crouch_states.cols >= 1;
-
-    for (int i = 0; i < db.nframes(); i++)
-    {
-        db.features(i, offset) = has_crouch && db.crouch_states(i, 0) ? crouch_feature_strength : 0.0f;
-    }
-
-    // Keep this semantic flag in raw binary space.
-    db.features_offset(offset) = 0.0f;
-    db.features_scale(offset) = 1.0f;
-    offset += 1;
-}
-
-void compute_idle_feature(database& db, int& offset)
-{
-    const float idle_feature_strength = 6.0f;
-
-    bool has_idle =
-        db.idle_states.rows == db.nframes() &&
-        db.idle_states.cols >= 1;
-
-    for (int i = 0; i < db.nframes(); i++)
-    {
-        db.features(i, offset) = has_idle && db.idle_states(i, 0) ? idle_feature_strength : 0.0f;
-    }
-
-    // Keep this semantic flag in raw binary space.
-    db.features_offset(offset) = 0.0f;
-    db.features_scale(offset) = 1.0f;
-    offset += 1;
-}
-
-void compute_jump_feature(database& db, int& offset)
-{
-    const float jump_feature_strength = 6.0f;
-
-    bool has_jump =
-        db.jump_states.rows == db.nframes() &&
-        db.jump_states.cols >= 1;
-
-    for (int i = 0; i < db.nframes(); i++)
-    {
-        db.features(i, offset) = has_jump && db.jump_states(i, 0) ? jump_feature_strength : 0.0f;
-    }
-
-    // Keep this semantic flag in raw binary space.
-    db.features_offset(offset) = 0.0f;
-    db.features_scale(offset) = 1.0f;
-    offset += 1;
-}
-
-void compute_cartwheel_feature(database& db, int& offset)
-{
-    const float cartwheel_feature_strength = 6.0f;
-
-    bool has_cartwheel =
-        db.cartwheel_states.rows == db.nframes() &&
-        db.cartwheel_states.cols >= 1;
-
-    for (int i = 0; i < db.nframes(); i++)
-    {
-        db.features(i, offset) = has_cartwheel && db.cartwheel_states(i, 0) ? cartwheel_feature_strength : 0.0f;
-    }
-
-    // Keep this semantic flag in raw binary space.
-    db.features_offset(offset) = 0.0f;
-    db.features_scale(offset) = 1.0f;
-    offset += 1;
-}
-
 void database_save_matching_features(const database& db, const char* filename, bool is_saved_as_csv = false)
 {
     FILE* f = fopen(filename, "wb");
@@ -976,6 +900,66 @@ void compute_terrain_height_feature(database& db, int& offset, int bone, float w
     offset += 4;
 }
 
+void compute_crouch_feature(database& db, int& offset, float weight = 1.0f)
+{
+    bool has_crouch =
+        db.crouch_states.rows == db.nframes() &&
+        db.crouch_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_crouch && db.crouch_states(i, 0) ? 1.0f : 0.0f;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 1, weight);
+    offset += 1;
+}
+
+void compute_idle_feature(database& db, int& offset, float weight = 1.0f)
+{
+    bool has_idle =
+        db.idle_states.rows == db.nframes() &&
+        db.idle_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_idle && db.idle_states(i, 0) ? 1.0f : 0.0f;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 1, weight);
+    offset += 1;
+}
+
+void compute_jump_feature(database& db, int& offset, float weight = 1.0f)
+{
+    bool has_jump =
+        db.jump_states.rows == db.nframes() &&
+        db.jump_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_jump && db.jump_states(i, 0) ? 1.0f : 0.0f;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 1, weight);
+    offset += 1;
+}
+
+void compute_cartwheel_feature(database& db, int& offset, float weight = 1.0f)
+{
+    bool has_cartwheel =
+        db.cartwheel_states.rows == db.nframes() &&
+        db.cartwheel_states.cols >= 1;
+
+    for (int i = 0; i < db.nframes(); i++)
+    {
+        db.features(i, offset) = has_cartwheel && db.cartwheel_states(i, 0) ? 1.0f : 0.0f;
+    }
+
+    normalize_feature(db.features, db.features_offset, db.features_scale, offset, 1, weight);
+    offset += 1;
+}
+
 // History feature at a fixed frame offset:
 // Left/Right foot position, Left/Right foot velocity, Hip velocity,
 // one trajectory position sample, one trajectory direction sample.
@@ -1352,6 +1336,10 @@ void database_build_matching_features(
     const float feature_weight_trajectory_positions,
     const float feature_weight_trajectory_directions,
     const float feature_weight_terrain_heights,
+    const float feature_weight_idle,
+    const float feature_weight_crouch,
+    const float feature_weight_jump,
+    const float feature_weight_cartwheel,
     const float feature_weight_history_foot_position,
     const float feature_weight_history_foot_velocity,
     const float feature_weight_history_hip_velocity,
@@ -1401,10 +1389,10 @@ void database_build_matching_features(
     compute_trajectory_direction_feature(db, offset, feature_weight_trajectory_directions);
     compute_terrain_height_feature(db, offset, Bone_LeftToe, feature_weight_terrain_heights);
     compute_terrain_height_feature(db, offset, Bone_RightToe, feature_weight_terrain_heights);
-    compute_idle_feature(db, offset);
-    compute_crouch_feature(db, offset);
-    compute_jump_feature(db, offset);
-    compute_cartwheel_feature(db, offset);
+    compute_idle_feature(db, offset, feature_weight_idle);
+    compute_crouch_feature(db, offset, feature_weight_crouch);
+    compute_jump_feature(db, offset, feature_weight_jump);
+    compute_cartwheel_feature(db, offset, feature_weight_cartwheel);
     compute_history_20_feature_block(
         db,
         offset,
