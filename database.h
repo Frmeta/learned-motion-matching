@@ -19,7 +19,7 @@ enum
     BOUND_LR_SIZE = 64,
     // Feature layout constants used by MM search masking.
     MM_HISTORY_FEATURE_START = 45,
-    MM_HISTORY_FEATURE_COUNT = 29,
+    MM_HISTORY_FEATURE_COUNT = 23,
     MM_HISTORY_FEATURE_END = MM_HISTORY_FEATURE_START + MM_HISTORY_FEATURE_COUNT,
 };
 
@@ -1371,8 +1371,6 @@ void database_build_matching_features(
         3 + // History Hip Velocity (-20)
         3 + // History Trajectory Position (-20)
         3 + // History Trajectory Direction (-20)
-        3 + // History Trajectory Position (-40)
-        3 + // History Trajectory Direction (-40)
         2; // History Terrain Heights (-15)
         
     db.features.resize(db.nframes(), nfeatures);
@@ -1406,12 +1404,6 @@ void database_build_matching_features(
         db,
         offset,
         -20,
-        feature_weight_history_trajectory_positions,
-        feature_weight_history_trajectory_directions);
-    compute_history_trajectory_feature_block(
-        db,
-        offset,
-        -40,
         feature_weight_history_trajectory_positions,
         feature_weight_history_trajectory_directions);
     compute_history_terrain_feature(

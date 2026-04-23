@@ -218,10 +218,14 @@ static int matching_feature_count_expected()
         9 + // Trajectory Positions
         9 + // Trajectory Directions
         8 + // Terrain Heights (left+right, 4 samples each)
+
+        // Flag
         1 + // Idle Flag
         1 + // Crouch Flag
         1 + // Jump Flag
         1 + // Cartwheel Flag
+
+        // History
         3 + // History Left Foot Position (-20)
         3 + // History Right Foot Position (-20)
         3 + // History Left Foot Velocity (-20)
@@ -229,8 +233,6 @@ static int matching_feature_count_expected()
         3 + // History Hip Velocity (-20)
         3 + // History Trajectory Position (-20)
         3 + // History Trajectory Direction (-20)
-        3 + // History Trajectory Position (-40)
-        3 + // History Trajectory Direction (-40)
         2;  // History Terrain Heights (-15)
 }
 
@@ -1797,8 +1799,15 @@ void draw_features(
     const vec3 hip_global_position,
     const slice1d<vec3> global_bone_positions,
     const slice1d<int> contact_bones,
-    const database& db,
-    const int frame_index)
+    const std::vector<vec3>& root_history_positions,
+    const std::vector<quat>& root_history_rotations,
+    const std::vector<vec3>& history_left_foot_positions,
+    const std::vector<vec3>& history_right_foot_positions,
+    const std::vector<vec3>& history_left_foot_velocities,
+    const std::vector<vec3>& history_right_foot_velocities,
+    const std::vector<vec3>& history_hip_positions,
+    const std::vector<vec3>& history_hip_velocities,
+    const std::vector<vec2>& history_terrain_heights)
 {
     vec3 lfoot_pos = quat_mul_vec3(rot, vec3(features( 0), features( 1), features( 2))) + pos;
     vec3 rfoot_pos = quat_mul_vec3(rot, vec3(features( 3), features( 4), features( 5))) + pos;
@@ -1884,60 +1893,52 @@ void draw_features(
         DrawLine3D(to_Vector3(right_hip_level), to_Vector3(right_terrain_pos), terrain_colors[i]);
     }
 
-    // Draw history trajectory-position markers from the MM history block in
-    // true world-space using the historical root transforms.
-    auto clamp_history_frame = [&](int frame, int history_offset)
+    auto sample_runtime_history_idx = [&](int relative_offset)
     {
-        for (int r = 0; r < db.nranges(); r++)
-        {
-            int range_start = db.range_starts(r);
-            int range_stop = db.range_stops(r);
-            if (frame >= range_start && frame < range_stop)
-            {
-                return clamp(frame + history_offset, range_start, range_stop - 1);
-            }
-        }
-        return frame;
+        if (root_history_positions.empty()) return 0;
+        int last = (int)root_history_positions.size() - 1;
+        return clamp(last + relative_offset, 0, last);
     };
 
-    // Align DB-root space to current runtime root-space so history markers stay
-    // coherent with the rendered character instead of popping between spaces.
-    vec3 db_root_pos_curr = db.bone_positions(frame_index, 0);
-    quat db_root_rot_curr = db.bone_rotations(frame_index, 0);
-    quat db_to_world_rot = quat_mul(rot, quat_inv(db_root_rot_curr));
-    vec3 db_to_world_pos = pos - quat_mul_vec3(db_to_world_rot, db_root_pos_curr);
-
-    auto draw_history_traj_sphere = [&](int feature_offset, int history_offset, Color c)
+    auto draw_history_traj_sphere = [&](int history_offset, Color c)
     {
-        if (features.size <= feature_offset + 2) return;
-        int history_frame = clamp_history_frame(frame_index, history_offset);
-        vec3 root_pos_history_db = db.bone_positions(history_frame, 0);
-        quat root_rot_history_db = db.bone_rotations(history_frame, 0);
+        if (root_history_positions.empty() || root_history_rotations.empty()) return;
 
-        vec3 root_pos_history = quat_mul_vec3(db_to_world_rot, root_pos_history_db) + db_to_world_pos;
-        quat root_rot_history = quat_mul(db_to_world_rot, root_rot_history_db);
+        int anchor_idx = sample_runtime_history_idx(history_offset);
+        int traj_idx = sample_runtime_history_idx(history_offset + 20);
 
-        vec3 history_traj_local = vec3(features(feature_offset + 0), features(feature_offset + 1), features(feature_offset + 2));
-        vec3 htraj_pos = quat_mul_vec3(root_rot_history, history_traj_local) + root_pos_history;
+        vec3 root_pos_history = root_history_positions[anchor_idx];
+        quat root_rot_history = root_history_rotations[anchor_idx];
+        vec3 htraj_pos = root_history_positions[traj_idx];
 
         Color c_faint = ColorAlpha(c, 0.55f);
         DrawSphereWires(to_Vector3(root_pos_history), 0.03f, 4, 6, c_faint);
         DrawLine3D(to_Vector3(root_pos_history), to_Vector3(htraj_pos), c_faint);
         DrawSphereWires(to_Vector3(htraj_pos), 0.07f, 6, 12, c);
+
+        vec3 history_traj_local = quat_inv_mul_vec3(root_rot_history, htraj_pos - root_pos_history);
+        vec3 history_traj_dir = quat_inv_mul_vec3(
+            root_rot_history,
+            quat_mul_vec3(root_history_rotations[traj_idx], vec3(0.0f, 0.0f, 1.0f)));
+
+        const float eps = 1e-4f;
+        float h = length(vec3(history_traj_local.x, 0.0f, history_traj_local.z));
+        history_traj_dir.y = history_traj_local.y / maxf(h, eps);
+        history_traj_dir = normalize(history_traj_dir);
+
+        vec3 history_traj_dir_world = quat_mul_vec3(root_rot_history, history_traj_dir);
+        DrawLine3D(to_Vector3(htraj_pos), to_Vector3(htraj_pos + 0.25f * history_traj_dir_world), c_faint);
     };
 
-    auto draw_history_bone_position_sphere = [&](int feature_offset, int history_offset, Color c, float radius = 0.05f)
+    auto draw_history_bone_position_sphere = [&](const std::vector<vec3>& history_positions, int history_offset, Color c, float radius = 0.05f)
     {
-        if (features.size <= feature_offset + 2) return;
+        if (root_history_positions.empty() || root_history_rotations.empty() || history_positions.empty()) return;
 
-        int history_frame = clamp_history_frame(frame_index, history_offset);
-        vec3 root_pos_history_db = db.bone_positions(history_frame, 0);
-        quat root_rot_history_db = db.bone_rotations(history_frame, 0);
+        int idx = sample_runtime_history_idx(history_offset);
+        vec3 root_pos_history = root_history_positions[idx];
+        quat root_rot_history = root_history_rotations[idx];
 
-        vec3 root_pos_history = quat_mul_vec3(db_to_world_rot, root_pos_history_db) + db_to_world_pos;
-        quat root_rot_history = quat_mul(db_to_world_rot, root_rot_history_db);
-
-        vec3 local_feature = vec3(features(feature_offset + 0), features(feature_offset + 1), features(feature_offset + 2));
+        vec3 local_feature = history_positions[idx];
         vec3 feature_world = quat_mul_vec3(root_rot_history, local_feature) + root_pos_history;
 
         Color c_faint = ColorAlpha(c, 0.45f);
@@ -1945,36 +1946,21 @@ void draw_features(
         DrawSphereWires(to_Vector3(feature_world), radius, 4, 10, c);
     };
 
-    auto draw_history_velocity_sphere = [&](int position_feature_offset, int velocity_feature_offset, int bone, int history_offset, Color c)
+    auto draw_history_velocity_sphere = [&](const std::vector<vec3>& history_positions, const std::vector<vec3>& history_velocities, int history_offset, Color c)
     {
-        if (features.size <= velocity_feature_offset + 2) return;
+        if (root_history_positions.empty() || root_history_rotations.empty() || history_velocities.empty()) return;
 
-        int history_frame = clamp_history_frame(frame_index, history_offset);
-        vec3 root_pos_history_db = db.bone_positions(history_frame, 0);
-        quat root_rot_history_db = db.bone_rotations(history_frame, 0);
+        int idx = sample_runtime_history_idx(history_offset);
+        vec3 root_pos_history = root_history_positions[idx];
+        quat root_rot_history = root_history_rotations[idx];
 
-        vec3 root_pos_history = quat_mul_vec3(db_to_world_rot, root_pos_history_db) + db_to_world_pos;
-        quat root_rot_history = quat_mul(db_to_world_rot, root_rot_history_db);
-
-        vec3 feature_pos_local;
-        if (position_feature_offset >= 0 && features.size > position_feature_offset + 2)
+        vec3 feature_pos_local = vec3();
+        if (!history_positions.empty())
         {
-            feature_pos_local = vec3(features(position_feature_offset + 0), features(position_feature_offset + 1), features(position_feature_offset + 2));
+            feature_pos_local = history_positions[idx];
         }
-        else
-        {
-            vec3 feature_pos_db;
-            quat feature_rot_db;
-            forward_kinematics(
-                feature_pos_db,
-                feature_rot_db,
-                db.bone_positions(history_frame),
-                db.bone_rotations(history_frame),
-                db.bone_parents,
-                bone);
-            feature_pos_local = quat_inv_mul_vec3(root_rot_history_db, feature_pos_db - root_pos_history_db);
-        }
-        vec3 feature_vel_local = vec3(features(velocity_feature_offset + 0), features(velocity_feature_offset + 1), features(velocity_feature_offset + 2));
+
+        vec3 feature_vel_local = history_velocities[idx];
 
         vec3 feature_pos_world = quat_mul_vec3(root_rot_history, feature_pos_local) + root_pos_history;
         vec3 feature_vel_world = quat_mul_vec3(root_rot_history, feature_vel_local);
@@ -1985,67 +1971,44 @@ void draw_features(
         DrawSphereWires(to_Vector3(feature_vel_end), 0.045f, 4, 10, c);
     };
 
-    auto draw_history_terrain_spheres = [&](int feature_offset, int history_offset, Color c)
+    auto draw_history_terrain_spheres = [&](int history_offset, Color c)
     {
-        if (features.size <= feature_offset + 1) return;
+        if (root_history_positions.empty() || root_history_rotations.empty()) return;
+        if (history_terrain_heights.empty() || history_left_foot_positions.empty() || history_right_foot_positions.empty()) return;
 
-        int history_frame = clamp_history_frame(frame_index, history_offset);
-        vec3 hip_pos_db;
-        quat hip_rot_db;
-        vec3 left_toe_pos_db;
-        quat left_toe_rot_db;
-        vec3 right_toe_pos_db;
-        quat right_toe_rot_db;
+        int idx = sample_runtime_history_idx(history_offset);
+        vec3 root_pos_history = root_history_positions[idx];
+        quat root_rot_history = root_history_rotations[idx];
 
-        forward_kinematics(
-            hip_pos_db,
-            hip_rot_db,
-            db.bone_positions(history_frame),
-            db.bone_rotations(history_frame),
-            db.bone_parents,
-            Bone_Hips);
-        forward_kinematics(
-            left_toe_pos_db,
-            left_toe_rot_db,
-            db.bone_positions(history_frame),
-            db.bone_rotations(history_frame),
-            db.bone_parents,
-            Bone_LeftToe);
-        forward_kinematics(
-            right_toe_pos_db,
-            right_toe_rot_db,
-            db.bone_positions(history_frame),
-            db.bone_rotations(history_frame),
-            db.bone_parents,
-            Bone_RightToe);
+        vec3 left_toe_world = quat_mul_vec3(root_rot_history, history_left_foot_positions[idx]) + root_pos_history;
+        vec3 right_toe_world = quat_mul_vec3(root_rot_history, history_right_foot_positions[idx]) + root_pos_history;
 
-        vec3 hip_pos_world = quat_mul_vec3(db_to_world_rot, hip_pos_db) + db_to_world_pos;
-        vec3 left_toe_world = quat_mul_vec3(db_to_world_rot, left_toe_pos_db) + db_to_world_pos;
-        vec3 right_toe_world = quat_mul_vec3(db_to_world_rot, right_toe_pos_db) + db_to_world_pos;
+        float left_terrain_height = history_terrain_heights[idx].x;
+        float right_terrain_height = history_terrain_heights[idx].y;
 
-        float left_terrain_height = features(feature_offset + 0);
-        float right_terrain_height = features(feature_offset + 1);
+        float hip_y = root_pos_history.y;
+        if (!history_hip_positions.empty())
+        {
+            hip_y = history_hip_positions[idx].y;
+        }
 
-        vec3 left_terrain_pos = vec3(left_toe_world.x, hip_pos_world.y + left_terrain_height + 0.01f, left_toe_world.z);
-        vec3 right_terrain_pos = vec3(right_toe_world.x, hip_pos_world.y + right_terrain_height + 0.01f, right_toe_world.z);
+        vec3 left_terrain_pos = vec3(left_toe_world.x, hip_y + left_terrain_height + 0.01f, left_toe_world.z);
+        vec3 right_terrain_pos = vec3(right_toe_world.x, hip_y + right_terrain_height + 0.01f, right_toe_world.z);
 
         Color c_faint = ColorAlpha(c, 0.45f);
-        DrawLine3D(to_Vector3(vec3(left_toe_world.x, hip_pos_world.y, left_toe_world.z)), to_Vector3(left_terrain_pos), c_faint);
-        DrawLine3D(to_Vector3(vec3(right_toe_world.x, hip_pos_world.y, right_toe_world.z)), to_Vector3(right_terrain_pos), c_faint);
+        DrawLine3D(to_Vector3(vec3(left_toe_world.x, hip_y, left_toe_world.z)), to_Vector3(left_terrain_pos), c_faint);
+        DrawLine3D(to_Vector3(vec3(right_toe_world.x, hip_y, right_toe_world.z)), to_Vector3(right_terrain_pos), c_faint);
         DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, c);
         DrawSphereWires(to_Vector3(right_terrain_pos), 0.03f, 4, 6, c);
     };
 
-    const int history_block_start = MM_HISTORY_FEATURE_START;
-
-    draw_history_bone_position_sphere(history_block_start + 0, -20, SKYBLUE);
-    draw_history_bone_position_sphere(history_block_start + 3, -20, SKYBLUE);
-    draw_history_velocity_sphere(history_block_start + 0, history_block_start + 6, Bone_LeftFoot, -20, VIOLET);
-    draw_history_velocity_sphere(history_block_start + 3, history_block_start + 9, Bone_RightFoot, -20, MAGENTA);
-    draw_history_velocity_sphere(-1, history_block_start + 12, Bone_Hips, -20, LIME);
-    draw_history_traj_sphere(history_block_start + 15, -20, YELLOW);
-    draw_history_traj_sphere(history_block_start + 21, -40, ORANGE);
-    draw_history_terrain_spheres(history_block_start + 27, -15, GREEN);
+    draw_history_bone_position_sphere(history_left_foot_positions, -20, SKYBLUE);
+    draw_history_bone_position_sphere(history_right_foot_positions, -20, SKYBLUE);
+    draw_history_velocity_sphere(history_left_foot_positions, history_left_foot_velocities, -20, VIOLET);
+    draw_history_velocity_sphere(history_right_foot_positions, history_right_foot_velocities, -20, MAGENTA);
+    draw_history_velocity_sphere(history_hip_positions, history_hip_velocities, -20, LIME);
+    draw_history_traj_sphere(-20, YELLOW);
+    draw_history_terrain_spheres(-15, GREEN);
 }
 
 void draw_trajectory(
@@ -2854,19 +2817,123 @@ int main(int argc, char** argv)
 
     std::vector<vec3> root_history_positions;
     std::vector<quat> root_history_rotations;
-    const int root_history_max_frames = 256;
-    auto push_root_history = [&](const vec3& root_pos, const quat& root_rot)
+    std::vector<vec3> history_left_foot_positions;
+    std::vector<vec3> history_right_foot_positions;
+    std::vector<vec3> history_left_foot_velocities;
+    std::vector<vec3> history_right_foot_velocities;
+    std::vector<vec3> history_hip_positions;
+    std::vector<vec3> history_hip_velocities;
+    std::vector<vec2> history_terrain_heights;
+    const int root_history_max_frames = 32;
+    auto trim_runtime_history = [&]()
     {
-        root_history_positions.push_back(root_pos);
-        root_history_rotations.push_back(root_rot);
-
         if ((int)root_history_positions.size() > root_history_max_frames)
         {
             root_history_positions.erase(root_history_positions.begin());
             root_history_rotations.erase(root_history_rotations.begin());
+            history_left_foot_positions.erase(history_left_foot_positions.begin());
+            history_right_foot_positions.erase(history_right_foot_positions.begin());
+            history_left_foot_velocities.erase(history_left_foot_velocities.begin());
+            history_right_foot_velocities.erase(history_right_foot_velocities.begin());
+            history_hip_positions.erase(history_hip_positions.begin());
+            history_hip_velocities.erase(history_hip_velocities.begin());
+            history_terrain_heights.erase(history_terrain_heights.begin());
         }
     };
-    push_root_history(bone_positions(0), bone_rotations(0));
+    auto push_runtime_history = [&]()
+    {
+        vec3 left_foot_pos;
+        quat left_foot_rot;
+        forward_kinematics(
+            left_foot_pos,
+            left_foot_rot,
+            bone_positions,
+            bone_rotations,
+            db.bone_parents,
+            Bone_LeftFoot);
+
+        vec3 right_foot_pos;
+        quat right_foot_rot;
+        forward_kinematics(
+            right_foot_pos,
+            right_foot_rot,
+            bone_positions,
+            bone_rotations,
+            db.bone_parents,
+            Bone_RightFoot);
+
+        vec3 left_foot_vel;
+        vec3 left_foot_ang_vel;
+        forward_kinematics_velocity(
+            left_foot_pos,
+            left_foot_vel,
+            left_foot_rot,
+            left_foot_ang_vel,
+            bone_positions,
+            bone_velocities,
+            bone_rotations,
+            bone_angular_velocities,
+            db.bone_parents,
+            Bone_LeftFoot);
+
+        vec3 right_foot_vel;
+        vec3 right_foot_ang_vel;
+        forward_kinematics_velocity(
+            right_foot_pos,
+            right_foot_vel,
+            right_foot_rot,
+            right_foot_ang_vel,
+            bone_positions,
+            bone_velocities,
+            bone_rotations,
+            bone_angular_velocities,
+            db.bone_parents,
+            Bone_RightFoot);
+
+        vec3 hip_pos;
+        quat hip_rot;
+        vec3 hip_vel;
+        vec3 hip_ang_vel;
+        forward_kinematics_velocity(
+            hip_pos,
+            hip_vel,
+            hip_rot,
+            hip_ang_vel,
+            bone_positions,
+            bone_velocities,
+            bone_rotations,
+            bone_angular_velocities,
+            db.bone_parents,
+            Bone_Hips);
+
+        quat inv_root_rot = quat_inv(bone_rotations(0));
+        vec3 left_pos_local = quat_mul_vec3(inv_root_rot, left_foot_pos - bone_positions(0));
+        vec3 right_pos_local = quat_mul_vec3(inv_root_rot, right_foot_pos - bone_positions(0));
+        vec3 left_vel_local = quat_mul_vec3(inv_root_rot, left_foot_vel);
+        vec3 right_vel_local = quat_mul_vec3(inv_root_rot, right_foot_vel);
+        vec3 hip_vel_local = quat_mul_vec3(inv_root_rot, hip_vel);
+
+        float left_terrain_height = 0.0f;
+        float right_terrain_height = 0.0f;
+        bool has_left_terrain = sample_terrain_height(ground_plane_model, left_foot_pos, left_terrain_height);
+        bool has_right_terrain = sample_terrain_height(ground_plane_model, right_foot_pos, right_terrain_height);
+        vec2 terrain_pair = vec2(
+            has_left_terrain ? (left_terrain_height - hip_pos.y) : 0.0f,
+            has_right_terrain ? (right_terrain_height - hip_pos.y) : 0.0f);
+
+        root_history_positions.push_back(bone_positions(0));
+        root_history_rotations.push_back(bone_rotations(0));
+        history_left_foot_positions.push_back(left_pos_local);
+        history_right_foot_positions.push_back(right_pos_local);
+        history_left_foot_velocities.push_back(left_vel_local);
+        history_right_foot_velocities.push_back(right_vel_local);
+        history_hip_positions.push_back(hip_pos);
+        history_hip_velocities.push_back(hip_vel_local);
+        history_terrain_heights.push_back(terrain_pair);
+
+        trim_runtime_history();
+    };
+    push_runtime_history();
     
     // Go
 
@@ -3110,7 +3177,14 @@ int main(int argc, char** argv)
 
         root_history_positions.clear();
         root_history_rotations.clear();
-        push_root_history(bone_positions(0), bone_rotations(0));
+        history_left_foot_positions.clear();
+        history_right_foot_positions.clear();
+        history_left_foot_velocities.clear();
+        history_right_foot_velocities.clear();
+        history_hip_positions.clear();
+        history_hip_velocities.clear();
+        history_terrain_heights.clear();
+        push_runtime_history();
 
         joystick_playback_enabled = false;
         joystick_playback_index = 0;
@@ -3183,9 +3257,9 @@ int main(int argc, char** argv)
             joystick_recording_time += dt;
         }
 
-        // Keep a runtime root history so query history trajectory uses
-        // actual previous character motion rather than database snapshots.
-        push_root_history(bone_positions(0), bone_rotations(0));
+        // Keep runtime history so query history features use actual
+        // previous character motion rather than database snapshots.
+        push_runtime_history();
         
         // Get if strafe is desired
         bool desired_strafe = desired_strafe_update();
@@ -3814,10 +3888,6 @@ int main(int argc, char** argv)
         
         bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
         slice1d<float> query_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
-        int history_frame_20 = database_index_clamp(db, frame_index, -20);
-        int history_frame_15 = database_index_clamp(db, frame_index, -15);
-        slice1d<float> query_features_history_20 = db.features(history_frame_20);
-        slice1d<float> query_features_history_15 = db.features(history_frame_15);
         if (debug) std::cout << "Got query features, size=" << query_features.size << std::endl;
         
         int offset = 0;
@@ -3870,31 +3940,39 @@ int main(int argc, char** argv)
             offset += 1;
         }
 
-        // History block: copy foot/velocity/hip from DB history, but compute
-        // history trajectory from runtime previous root positions/rotations.
-        const int src_left_foot_pos_offset = 0;
-        const int src_right_foot_pos_offset = 3;
-        const int src_left_foot_vel_offset = 6;
-        const int src_right_foot_vel_offset = 9;
-        const int src_hip_vel_offset = 12;
-        const int src_left_terrain_offset = 33;  // t=0 sample for left toe terrain feature
-        const int src_right_terrain_offset = 37; // t=0 sample for right toe terrain feature
+        auto sample_runtime_history_idx = [&](int relative_offset) -> int
+        {
+            if (root_history_positions.empty())
+            {
+                return 0;
+            }
+            int last = (int)root_history_positions.size() - 1;
+            return clamp(last + relative_offset, 0, last);
+        };
 
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 3, src_left_foot_pos_offset,
-            query_features_history_20, db.features_offset, db.features_scale);
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 3, src_right_foot_pos_offset,
-            query_features_history_20, db.features_offset, db.features_scale);
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 3, src_left_foot_vel_offset,
-            query_features_history_20, db.features_offset, db.features_scale);
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 3, src_right_foot_vel_offset,
-            query_features_history_20, db.features_offset, db.features_scale);
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 3, src_hip_vel_offset,
-            query_features_history_20, db.features_offset, db.features_scale);
+        auto query_write_runtime_history_vec3 = [&](const std::vector<vec3>& history, int relative_offset)
+        {
+            if (history.empty())
+            {
+                query(offset + 0) = 0.0f;
+                query(offset + 1) = 0.0f;
+                query(offset + 2) = 0.0f;
+            }
+            else
+            {
+                int idx = sample_runtime_history_idx(relative_offset);
+                query(offset + 0) = history[idx].x;
+                query(offset + 1) = history[idx].y;
+                query(offset + 2) = history[idx].z;
+            }
+            offset += 3;
+        };
+
+        query_write_runtime_history_vec3(history_left_foot_positions, -20);
+        query_write_runtime_history_vec3(history_right_foot_positions, -20);
+        query_write_runtime_history_vec3(history_left_foot_velocities, -20);
+        query_write_runtime_history_vec3(history_right_foot_velocities, -20);
+        query_write_runtime_history_vec3(history_hip_velocities, -20);
 
         auto sample_runtime_history_root = [&](int relative_offset, vec3& out_pos, quat& out_rot)
         {
@@ -3905,8 +3983,7 @@ int main(int argc, char** argv)
                 return;
             }
 
-            int last = (int)root_history_positions.size() - 1;
-            int idx = clamp(last + relative_offset, 0, last);
+            int idx = sample_runtime_history_idx(relative_offset);
             out_pos = root_history_positions[idx];
             out_rot = root_history_rotations[idx];
         };
@@ -3939,14 +4016,19 @@ int main(int argc, char** argv)
         };
 
         query_write_runtime_history_trajectory(-20);
-        query_write_runtime_history_trajectory(-40);
 
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 1, src_left_terrain_offset,
-            query_features_history_15, db.features_offset, db.features_scale);
-        query_copy_denormalized_feature_from_source_offset(
-            query, offset, 1, src_right_terrain_offset,
-            query_features_history_15, db.features_offset, db.features_scale);
+        if (history_terrain_heights.empty())
+        {
+            query(offset + 0) = 0.0f;
+            query(offset + 1) = 0.0f;
+        }
+        else
+        {
+            int terrain_idx = sample_runtime_history_idx(-15);
+            query(offset + 0) = history_terrain_heights[terrain_idx].x;
+            query(offset + 1) = history_terrain_heights[terrain_idx].y;
+        }
+        offset += 2;
         if (debug) std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
         if (debug) std::cout << "Done assert" << std::endl;
@@ -4715,7 +4797,11 @@ int main(int argc, char** argv)
         denormalize_features(current_features, db.features_offset, db.features_scale);        
         draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON,
             future_toe_position, future_terrain_heights, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones,
-            db, frame_index);
+            root_history_positions, root_history_rotations,
+            history_left_foot_positions, history_right_foot_positions,
+            history_left_foot_velocities, history_right_foot_velocities,
+            history_hip_positions, history_hip_velocities,
+            history_terrain_heights);
         
         // Draw Simuation Bone
         
