@@ -2418,7 +2418,7 @@ int main(int argc, char** argv)
     float feature_weight_jump = 2.0f;
     float feature_weight_cartwheel = 2.0f;
 
-    float feature_weight_prev_frame_multiplier = 0.0f;
+    float feature_weight_prev_frame_multiplier = 1.0f;
 
     float feature_weight_history_foot_position = feature_weight_foot_position * feature_weight_prev_frame_multiplier;
     float feature_weight_history_foot_velocity = feature_weight_foot_velocity * feature_weight_prev_frame_multiplier;
@@ -2427,7 +2427,14 @@ int main(int argc, char** argv)
     float feature_weight_history_trajectory_directions = feature_weight_trajectory_directions * feature_weight_prev_frame_multiplier;
     float feature_weight_history_terrain_heights = feature_weight_terrain_heights * feature_weight_prev_frame_multiplier;
     
-    bool mm_include_previous_frame_features = false;
+    enum mm_history_search_mode
+    {
+        MM_HISTORY_SEARCH_OFF = 0,
+        MM_HISTORY_SEARCH_ON = 1,
+        MM_HISTORY_SEARCH_BOTH = 2,
+    };
+    int mm_history_mode = MM_HISTORY_SEARCH_OFF;
+    bool mm_history_mode_dropdown_edit = false;
     
     
     if (rebuild_features)
@@ -2495,6 +2502,8 @@ int main(int argc, char** argv)
     }
     
     int frame_index = db.range_starts(0);
+    int mm_last_best_with_history = frame_index;
+    int mm_last_best_without_history = frame_index;
     float inertialize_blending_halflife = 0.1f;
 
     array1d<vec3> curr_bone_positions = db.bone_positions(frame_index);
@@ -2518,6 +2527,46 @@ int main(int argc, char** argv)
     array1d<vec3> bone_offset_velocities(db.nbones());
     array1d<quat> bone_offset_rotations(db.nbones());
     array1d<vec3> bone_offset_angular_velocities(db.nbones());
+
+    array1d<vec3> curr_bone_positions_with_history = db.bone_positions(frame_index);
+    array1d<vec3> curr_bone_velocities_with_history = db.bone_velocities(frame_index);
+    array1d<quat> curr_bone_rotations_with_history = db.bone_rotations(frame_index);
+    array1d<vec3> curr_bone_angular_velocities_with_history = db.bone_angular_velocities(frame_index);
+
+    array1d<vec3> bone_positions_with_history = db.bone_positions(frame_index);
+    array1d<vec3> bone_velocities_with_history = db.bone_velocities(frame_index);
+    array1d<quat> bone_rotations_with_history = db.bone_rotations(frame_index);
+    array1d<vec3> bone_angular_velocities_with_history = db.bone_angular_velocities(frame_index);
+    
+    array1d<vec3> bone_offset_positions_with_history(db.nbones());
+    array1d<vec3> bone_offset_velocities_with_history(db.nbones());
+    array1d<quat> bone_offset_rotations_with_history(db.nbones());
+    array1d<vec3> bone_offset_angular_velocities_with_history(db.nbones());
+
+    vec3 transition_src_position_with_history;
+    quat transition_src_rotation_with_history;
+    vec3 transition_dst_position_with_history;
+    quat transition_dst_rotation_with_history;
+
+    array1d<vec3> curr_bone_positions_without_history = db.bone_positions(frame_index);
+    array1d<vec3> curr_bone_velocities_without_history = db.bone_velocities(frame_index);
+    array1d<quat> curr_bone_rotations_without_history = db.bone_rotations(frame_index);
+    array1d<vec3> curr_bone_angular_velocities_without_history = db.bone_angular_velocities(frame_index);
+
+    array1d<vec3> bone_positions_without_history = db.bone_positions(frame_index);
+    array1d<vec3> bone_velocities_without_history = db.bone_velocities(frame_index);
+    array1d<quat> bone_rotations_without_history = db.bone_rotations(frame_index);
+    array1d<vec3> bone_angular_velocities_without_history = db.bone_angular_velocities(frame_index);
+    
+    array1d<vec3> bone_offset_positions_without_history(db.nbones());
+    array1d<vec3> bone_offset_velocities_without_history(db.nbones());
+    array1d<quat> bone_offset_rotations_without_history(db.nbones());
+    array1d<vec3> bone_offset_angular_velocities_without_history(db.nbones());
+
+    vec3 transition_src_position_without_history;
+    quat transition_src_rotation_without_history;
+    vec3 transition_dst_position_without_history;
+    quat transition_dst_rotation_without_history;
     
     array1d<vec3> global_bone_positions(db.nbones());
     array1d<vec3> global_bone_velocities(db.nbones());
@@ -2561,6 +2610,28 @@ int main(int argc, char** argv)
         transition_dst_rotation,
         inertialize_blending_halflife,
         0.0f);
+
+    inertialize_pose_update(
+        bone_positions_with_history, bone_velocities_with_history,
+        bone_rotations_with_history, bone_angular_velocities_with_history,
+        bone_offset_positions_with_history, bone_offset_velocities_with_history,
+        bone_offset_rotations_with_history, bone_offset_angular_velocities_with_history,
+        db.bone_positions(frame_index), db.bone_velocities(frame_index),
+        db.bone_rotations(frame_index), db.bone_angular_velocities(frame_index),
+        transition_src_position_with_history, transition_src_rotation_with_history,
+        transition_dst_position_with_history, transition_dst_rotation_with_history,
+        inertialize_blending_halflife, 0.0f);
+
+    inertialize_pose_update(
+        bone_positions_without_history, bone_velocities_without_history,
+        bone_rotations_without_history, bone_angular_velocities_without_history,
+        bone_offset_positions_without_history, bone_offset_velocities_without_history,
+        bone_offset_rotations_without_history, bone_offset_angular_velocities_without_history,
+        db.bone_positions(frame_index), db.bone_velocities(frame_index),
+        db.bone_rotations(frame_index), db.bone_angular_velocities(frame_index),
+        transition_src_position_without_history, transition_src_rotation_without_history,
+        transition_dst_position_without_history, transition_dst_rotation_without_history,
+        inertialize_blending_halflife, 0.0f);
         
     // Trajectory & Gameplay Data
     
@@ -4124,21 +4195,107 @@ int main(int argc, char** argv)
             {
                 if (allow_mm_search)
                 {
-                    // Search
-                    
-                    int best_index = end_of_anim ? -1 : frame_index;
-                    float best_cost = FLT_MAX;
+                    int best_index_with_history = end_of_anim ? -1 : frame_index;
+                    int best_index_without_history = end_of_anim ? -1 : frame_index;
+                    float best_cost_with_history = FLT_MAX;
+                    float best_cost_without_history = FLT_MAX;
                     ran_search_or_projector = true;
-                    
-                    database_search(
-                        best_index,
-                        best_cost,
-                        db,
-                        query,
-                        0.0f,
-                        20,
-                        20,
-                        mm_include_previous_frame_features);
+
+                    const bool run_with_history =
+                        mm_history_mode == MM_HISTORY_SEARCH_ON ||
+                        mm_history_mode == MM_HISTORY_SEARCH_BOTH;
+                    const bool run_without_history =
+                        mm_history_mode == MM_HISTORY_SEARCH_OFF ||
+                        mm_history_mode == MM_HISTORY_SEARCH_BOTH;
+
+                    if (run_with_history)
+                    {
+                        database_search(
+                            best_index_with_history,
+                            best_cost_with_history,
+                            db,
+                            query,
+                            0.0f,
+                            20,
+                            20,
+                            true);
+
+                        if (best_index_with_history < 0 || best_index_with_history >= db.nframes())
+                        {
+                            best_index_with_history = frame_index;
+                        }
+                        if (best_index_with_history != mm_last_best_with_history)
+                        {
+                            array1d<vec3> trns_pos = db.bone_positions(best_index_with_history);
+                            array1d<vec3> trns_vel = db.bone_velocities(best_index_with_history);
+                            array1d<quat> trns_rot = db.bone_rotations(best_index_with_history);
+                            array1d<vec3> trns_ang_vel = db.bone_angular_velocities(best_index_with_history);
+                            
+                            inertialize_pose_transition(
+                                bone_offset_positions_with_history, bone_offset_velocities_with_history,
+                                bone_offset_rotations_with_history, bone_offset_angular_velocities_with_history,
+                                transition_src_position_with_history, transition_src_rotation_with_history,
+                                transition_dst_position_with_history, transition_dst_rotation_with_history,
+                                bone_positions_with_history(0), bone_velocities_with_history(0),
+                                bone_rotations_with_history(0), bone_angular_velocities_with_history(0),
+                                curr_bone_positions_with_history, curr_bone_velocities_with_history,
+                                curr_bone_rotations_with_history, curr_bone_angular_velocities_with_history,
+                                trns_pos, trns_vel, trns_rot, trns_ang_vel);
+                        }
+                        mm_last_best_with_history = best_index_with_history;
+                    }
+
+                    if (run_without_history)
+                    {
+                        database_search(
+                            best_index_without_history,
+                            best_cost_without_history,
+                            db,
+                            query,
+                            0.0f,
+                            20,
+                            20,
+                            false);
+
+                        if (best_index_without_history < 0 || best_index_without_history >= db.nframes())
+                        {
+                            best_index_without_history = frame_index;
+                        }
+                        if (best_index_without_history != mm_last_best_without_history)
+                        {
+                            array1d<vec3> trns_pos = db.bone_positions(best_index_without_history);
+                            array1d<vec3> trns_vel = db.bone_velocities(best_index_without_history);
+                            array1d<quat> trns_rot = db.bone_rotations(best_index_without_history);
+                            array1d<vec3> trns_ang_vel = db.bone_angular_velocities(best_index_without_history);
+                            
+                            inertialize_pose_transition(
+                                bone_offset_positions_without_history, bone_offset_velocities_without_history,
+                                bone_offset_rotations_without_history, bone_offset_angular_velocities_without_history,
+                                transition_src_position_without_history, transition_src_rotation_without_history,
+                                transition_dst_position_without_history, transition_dst_rotation_without_history,
+                                bone_positions_without_history(0), bone_velocities_without_history(0),
+                                bone_rotations_without_history(0), bone_angular_velocities_without_history(0),
+                                curr_bone_positions_without_history, curr_bone_velocities_without_history,
+                                curr_bone_rotations_without_history, curr_bone_angular_velocities_without_history,
+                                trns_pos, trns_vel, trns_rot, trns_ang_vel);
+                        }
+                        mm_last_best_without_history = best_index_without_history;
+                    }
+
+                    int best_index = frame_index;
+                    if (mm_history_mode == MM_HISTORY_SEARCH_ON)
+                    {
+                        best_index = best_index_with_history;
+                    }
+                    else if (mm_history_mode == MM_HISTORY_SEARCH_OFF)
+                    {
+                        best_index = best_index_without_history;
+                    }
+                    else
+                    {
+                        // In BOTH mode, drive runtime from the history-enabled search.
+                        best_index = best_index_with_history;
+                    }
                     
                     // Transition if better frame found
                     if (debug) std::cout << "Do2" << std::endl;
@@ -4217,6 +4374,8 @@ int main(int argc, char** argv)
         {
             // Tick frame
             frame_index++; // Assumes dt is fixed to 60fps
+            mm_last_best_with_history = database_index_clamp(db, mm_last_best_with_history, 1);
+            mm_last_best_without_history = database_index_clamp(db, mm_last_best_without_history, 1);
             
             // Look-up Next Pose
             curr_bone_positions = db.bone_positions(frame_index);
@@ -4224,6 +4383,15 @@ int main(int argc, char** argv)
             curr_bone_rotations = db.bone_rotations(frame_index);
             curr_bone_angular_velocities = db.bone_angular_velocities(frame_index);
             curr_bone_contacts = db.contact_states(frame_index);
+            curr_bone_positions_with_history = db.bone_positions(mm_last_best_with_history);
+            curr_bone_velocities_with_history = db.bone_velocities(mm_last_best_with_history);
+            curr_bone_rotations_with_history = db.bone_rotations(mm_last_best_with_history);
+            curr_bone_angular_velocities_with_history = db.bone_angular_velocities(mm_last_best_with_history);
+
+            curr_bone_positions_without_history = db.bone_positions(mm_last_best_without_history);
+            curr_bone_velocities_without_history = db.bone_velocities(mm_last_best_without_history);
+            curr_bone_rotations_without_history = db.bone_rotations(mm_last_best_without_history);
+            curr_bone_angular_velocities_without_history = db.bone_angular_velocities(mm_last_best_without_history);
             
             // Retrieve precomputed future_toe_position from database
             // Database stores 12 floats per frame: [L15_x, L15_z, R15_x, R15_z, L30_x, L30_z, R30_x, R30_z, L45_x, L45_z, R45_x, R45_z]
@@ -4257,6 +4425,28 @@ int main(int argc, char** argv)
             transition_dst_rotation,
             inertialize_blending_halflife,
             dt);
+        
+        inertialize_pose_update(
+            bone_positions_with_history, bone_velocities_with_history,
+            bone_rotations_with_history, bone_angular_velocities_with_history,
+            bone_offset_positions_with_history, bone_offset_velocities_with_history,
+            bone_offset_rotations_with_history, bone_offset_angular_velocities_with_history,
+            curr_bone_positions_with_history, curr_bone_velocities_with_history,
+            curr_bone_rotations_with_history, curr_bone_angular_velocities_with_history,
+            transition_src_position_with_history, transition_src_rotation_with_history,
+            transition_dst_position_with_history, transition_dst_rotation_with_history,
+            inertialize_blending_halflife, dt);
+
+        inertialize_pose_update(
+            bone_positions_without_history, bone_velocities_without_history,
+            bone_rotations_without_history, bone_angular_velocities_without_history,
+            bone_offset_positions_without_history, bone_offset_velocities_without_history,
+            bone_offset_rotations_without_history, bone_offset_angular_velocities_without_history,
+            curr_bone_positions_without_history, curr_bone_velocities_without_history,
+            curr_bone_rotations_without_history, curr_bone_angular_velocities_without_history,
+            transition_src_position_without_history, transition_src_rotation_without_history,
+            transition_dst_position_without_history, transition_dst_rotation_without_history,
+            inertialize_blending_halflife, dt);
         
         // Update Simulation
         if (debug) std::cout << "test3" << std::endl;
@@ -4729,13 +4919,14 @@ int main(int argc, char** argv)
 
         // During playback, render only MM/LMM selections to avoid a third
         // duplicate character from the default draw path.
-        bool render_playback_characters = joystick_playback_enabled;
+        // Also hide the default character when comparing both MM search modes.
+        bool render_playback_characters = joystick_playback_enabled || (!lmm_runtime_enabled && mm_history_mode == MM_HISTORY_SEARCH_BOTH);
 
         if (!render_playback_characters)
         {
             if (show_stickman)
             {
-                draw_stickman(global_bone_positions, db.bone_parents, SKYBLUE);
+                draw_stickman(global_bone_positions, db.bone_parents, BROWN);
             }
             else
             {
@@ -4795,13 +4986,61 @@ int main(int argc, char** argv)
         
         array1d<float> current_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
         denormalize_features(current_features, db.features_offset, db.features_scale);        
-        draw_features(current_features, bone_positions(0), bone_rotations(0), MAROON,
+        draw_features(current_features, global_bone_positions(0), global_bone_rotations(0), MAROON,
             future_toe_position, future_terrain_heights, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones,
             root_history_positions, root_history_rotations,
             history_left_foot_positions, history_right_foot_positions,
             history_left_foot_velocities, history_right_foot_velocities,
             history_hip_positions, history_hip_velocities,
             history_terrain_heights);
+
+        if (!lmm_runtime_enabled && mm_history_mode == MM_HISTORY_SEARCH_BOTH)
+        {
+            // Compare both MM search modes directly in scene using stickman overlays.
+            array1d<vec3> mm_with_history_positions(db.nbones());
+            array1d<quat> mm_with_history_rotations(db.nbones());
+            array1d<vec3> mm_without_history_positions(db.nbones());
+            array1d<quat> mm_without_history_rotations(db.nbones());
+
+            forward_kinematics_full(
+                mm_with_history_positions,
+                mm_with_history_rotations,
+                bone_positions_with_history,
+                bone_rotations_with_history,
+                db.bone_parents);
+
+            forward_kinematics_full(
+                mm_without_history_positions,
+                mm_without_history_rotations,
+                bone_positions_without_history,
+                bone_rotations_without_history,
+                db.bone_parents);
+
+            auto rebase_pose_to_runtime_root = [&](array1d<vec3>& pose_positions, const array1d<quat>& pose_rotations)
+            {
+                if (pose_positions.size <= 0)
+                {
+                    return;
+                }
+
+                vec3 src_root_pos = pose_positions(0);
+                quat src_root_rot = pose_rotations(0);
+                vec3 dst_root_pos = global_bone_positions(0);
+                quat dst_root_rot = global_bone_rotations(0);
+
+                for (int bi = 0; bi < pose_positions.size; bi++)
+                {
+                    vec3 local_from_src_root = quat_inv_mul_vec3(src_root_rot, pose_positions(bi) - src_root_pos);
+                    pose_positions(bi) = quat_mul_vec3(dst_root_rot, local_from_src_root) + dst_root_pos;
+                }
+            };
+
+            rebase_pose_to_runtime_root(mm_with_history_positions, mm_with_history_rotations);
+            rebase_pose_to_runtime_root(mm_without_history_positions, mm_without_history_rotations);
+
+            draw_stickman(mm_without_history_positions, db.bone_parents, SKYBLUE);
+            draw_stickman(mm_with_history_positions, db.bone_parents, GREEN);
+        }
         
         // Draw Simuation Bone
         
@@ -5288,10 +5527,19 @@ int main(int argc, char** argv)
             TextFormat("%5.3f", feature_weight_terrain_heights), 
             &feature_weight_terrain_heights, 0.001f, 3.0f);
 
-        GuiCheckBox(
-            (Rectangle){ 30, 210, 20, 20 },
-            "MM include previous-frame block",
-            &mm_include_previous_frame_features);
+        if (GuiDropdownBox(
+            (Rectangle){ 30, 210, 110, 20 },
+            "mm hist off;mm hist on;mm hist both",
+            &mm_history_mode,
+            mm_history_mode_dropdown_edit))
+        {
+            mm_history_mode_dropdown_edit = !mm_history_mode_dropdown_edit;
+        }
+
+        if (mm_history_mode == MM_HISTORY_SEARCH_BOTH)
+        {
+            GuiLabel((Rectangle){ 30, 233, 260, 16 }, "Both mode: GREEN=history on, SKYBLUE=history off");
+        }
             
         if (GuiButton((Rectangle){ 150, 210, 120, 20 }, "rebuild database"))
         {

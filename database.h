@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <math.h>
 
+
 //--------------------------------------
 
 enum
@@ -1585,7 +1586,21 @@ void database_search(
     array1d<float> query_normalized(db.nfeatures());
     for (int i = 0; i < db.nfeatures(); i++)
     {
-        query_normalized(i) = (query(i) - db.features_offset(i)) / db.features_scale(i);
+        float scale = db.features_scale(i);
+        float q = query(i);
+
+        if (!std::isfinite(scale) || fabsf(scale) < 1e-8f || !std::isfinite(q))
+        {
+            // Treat invalid or near-zero scales as disabled dimensions.
+            query_normalized(i) = 0.0f;
+            continue;
+        }
+
+        query_normalized(i) = (q - db.features_offset(i)) / scale;
+        if (!std::isfinite(query_normalized(i)))
+        {
+            query_normalized(i) = 0.0f;
+        }
     }
     
     // Search
