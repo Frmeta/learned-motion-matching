@@ -2766,6 +2766,11 @@ int main(int argc, char** argv)
     array1d<vec3> contact_offset_positions(contact_bones.size);
     array1d<vec3> contact_offset_velocities(contact_bones.size);
     
+    array1d<float> smoothed_clamp_offsets(contact_bones.size);
+    array1d<float> smoothed_clamp_offset_velocities(contact_bones.size);
+    smoothed_clamp_offsets.zero();
+    smoothed_clamp_offset_velocities.zero();
+    
     for (int i = 0; i < contact_bones.size; i++)
     {
         vec3 bone_position;
@@ -3157,6 +3162,8 @@ int main(int argc, char** argv)
     const array1d<vec3> base_contact_targets = contact_targets;
     const array1d<vec3> base_contact_offset_positions = contact_offset_positions;
     const array1d<vec3> base_contact_offset_velocities = contact_offset_velocities;
+    const array1d<float> base_smoothed_clamp_offsets = smoothed_clamp_offsets;
+    const array1d<float> base_smoothed_clamp_offset_velocities = smoothed_clamp_offset_velocities;
     const array1d<vec3> base_adjusted_bone_positions = adjusted_bone_positions;
     const array1d<quat> base_adjusted_bone_rotations = adjusted_bone_rotations;
     const array1d<float> base_features_proj = features_proj;
@@ -3235,6 +3242,8 @@ int main(int argc, char** argv)
         contact_targets = base_contact_targets;
         contact_offset_positions = base_contact_offset_positions;
         contact_offset_velocities = base_contact_offset_velocities;
+        smoothed_clamp_offsets = base_smoothed_clamp_offsets;
+        smoothed_clamp_offset_velocities = base_smoothed_clamp_offset_velocities;
         adjusted_bone_positions = base_adjusted_bone_positions;
         adjusted_bone_rotations = base_adjusted_bone_rotations;
         features_proj = base_features_proj;
@@ -4695,9 +4704,19 @@ int main(int argc, char** argv)
                     ik_blending_halflife,
                     dt);
                 
-                // Ensure contact position never goes through floor
+                // Smoothly ensure contact position never goes through floor
                 vec3 contact_position_clamp = contact_positions(i);
-                contact_position_clamp.y = maxf(contact_position_clamp.y, foot_target_height);
+                float target_clamp_offset = maxf(0.0f, foot_target_height - contact_position_clamp.y);
+                
+                float clamp_smooth_halflife = 0.05f;
+                simple_spring_damper_exact(
+                    smoothed_clamp_offsets(i),
+                    smoothed_clamp_offset_velocities(i),
+                    target_clamp_offset,
+                    clamp_smooth_halflife,
+                    dt);
+
+                contact_position_clamp.y += smoothed_clamp_offsets(i);
                 
                 // Re-compute toe, heel, knee, hip, and root bone positions
                 for (int bone : {heel_bone, knee_bone, hip_bone, root_bone})
