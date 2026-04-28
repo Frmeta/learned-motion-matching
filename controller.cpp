@@ -1451,6 +1451,7 @@ void trajectory_desired_velocities_predict(
     const bool jump_active,
     const float jump_vertical_velocity,
     const float jump_gravity,
+    const float jump_root_height_offset,
   const float camera_azimuth,
   const vec3 gamepadstick_left,
   const vec3 gamepadstick_right,
@@ -2662,7 +2663,6 @@ int main(int argc, char** argv)
     vec3 cartwheel_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
     float cartwheel_query_lock_step_distance = 0.0f;
     float cartwheel_first_search_step_distance = 0.0f;
-    bool cartwheel_root_velocity_override_prev = false;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -3133,7 +3133,6 @@ int main(int argc, char** argv)
     const vec3 base_cartwheel_query_lock_forward = cartwheel_query_lock_forward;
     const float base_cartwheel_query_lock_step_distance = cartwheel_query_lock_step_distance;
     const float base_cartwheel_first_search_step_distance = cartwheel_first_search_step_distance;
-    const bool base_cartwheel_root_velocity_override_prev = cartwheel_root_velocity_override_prev;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -3212,7 +3211,6 @@ int main(int argc, char** argv)
         cartwheel_query_lock_forward = base_cartwheel_query_lock_forward;
         cartwheel_query_lock_step_distance = base_cartwheel_query_lock_step_distance;
         cartwheel_first_search_step_distance = base_cartwheel_first_search_step_distance;
-        cartwheel_root_velocity_override_prev = base_cartwheel_root_velocity_override_prev;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -3697,6 +3695,7 @@ int main(int argc, char** argv)
           jump_active,
           jump_vertical_velocity,
           jump_gravity,
+          jump_root_height_offset,
           camera_azimuth,
           gamepadstick_left,
           gamepadstick_right,
@@ -4453,33 +4452,22 @@ int main(int argc, char** argv)
         
         vec3 simulation_position_prev = simulation_position;
 
-        if (desired_cartwheel)
+        // Move by raw matched root velocity (no spring damping/smoothing).
+        if (jump_active)
         {
-            // During cartwheel, move by raw matched root velocity (no spring damping/smoothing).
-            simulation_velocity = bone_velocities(0);
-            simulation_position = simulation_position + simulation_velocity * dt;
-            simulation_acceleration = vec3();
-            cartwheel_root_velocity_override_prev = true;
+            simulation_velocity.y = jump_vertical_velocity;
+            simulation_position.y += simulation_velocity.y * dt;
+            simulation_velocity.x = bone_velocities(0).x;
+            simulation_velocity.z = bone_velocities(0).z;
+            simulation_position.x = bone_positions(0).x;
+            simulation_position.z = bone_positions(0).z;
         }
         else
         {
-            // Leaving override: clear acceleration before resuming spring update.
-            if (cartwheel_root_velocity_override_prev)
-            {
-                simulation_acceleration = vec3();
-            }
-
-            simulation_positions_update(
-                simulation_position, 
-                simulation_velocity, 
-                simulation_acceleration,
-                desired_velocity,
-                simulation_velocity_halflife,
-                dt,
-                ground_plane_model);
-
-            cartwheel_root_velocity_override_prev = false;
+            simulation_velocity = bone_velocities(0);
+            simulation_position = bone_positions(0);
         }
+        simulation_acceleration = vec3();
 
         if (jump_active)
         {
