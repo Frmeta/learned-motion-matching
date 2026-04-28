@@ -1459,6 +1459,9 @@ void trajectory_desired_velocities_predict(
   const float fwrd_speed,
   const float side_speed,
   const float back_speed,
+  const float jump_speed_boost,
+  const float jump_gait_timer,
+  const float jump_gait_hold_time,
   const float dt)
 {
     desired_velocities(0) = desired_velocity;
@@ -1486,10 +1489,24 @@ void trajectory_desired_velocities_predict(
             side_speed,
             back_speed);
 
+        if (jump_active && jump_speed_boost > 1.0f)
+        {
+            desired_velocities(i).x *= jump_speed_boost;
+            desired_velocities(i).z *= jump_speed_boost;
+        }
+
         if (jump_active)
         {
             float predicted_vy = jump_vertical_velocity - jump_gravity * (i * dt);
             desired_velocities(i).y = clampf(predicted_vy, kTerrainFollowMinVerticalSpeed, kTerrainFollowMaxVerticalSpeed);
+        }
+        else if (jump_gait_timer > 0.0f)
+        {
+            // Fading downward arc during holdover: simulates post-landing settling,
+            // scaled by how much holdover time remains (fades smoothly to 0)
+            float holdover_blend = jump_gait_timer / jump_gait_hold_time;
+            float predicted_vy = -jump_gravity * (i * dt) * holdover_blend;
+            desired_velocities(i).y = clampf(predicted_vy, kTerrainFollowMinVerticalSpeed, 0.0f);
         }
         else if (has_current_terrain)
         {
@@ -2699,7 +2716,7 @@ int main(int argc, char** argv)
     float simulation_crouch_side_speed = 1.5f;
     float simulation_crouch_back_speed = 1.25f;
     float cartwheel_speed_boost = 1.2f;
-    float jump_speed_boost = 1.5f;
+    float jump_speed_boost = 3.0f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
@@ -2717,6 +2734,8 @@ int main(int argc, char** argv)
     float jump_vertical_velocity = 0.0f;
     float jump_buffer_timer = 0.0f;
     float jump_coyote_timer = 0.0f;
+    float jump_gait_timer = 0.0f;
+    const float jump_gait_hold_time = 0.7f;
     
     array1d<vec3> trajectory_desired_velocities(4);
     array1d<quat> trajectory_desired_rotations(4);
@@ -3152,6 +3171,7 @@ int main(int argc, char** argv)
     const float base_jump_vertical_velocity = jump_vertical_velocity;
     const float base_jump_buffer_timer = jump_buffer_timer;
     const float base_jump_coyote_timer = jump_coyote_timer;
+    const float base_jump_gait_timer = jump_gait_timer;
     const array1d<vec3> base_trajectory_desired_velocities = trajectory_desired_velocities;
     const array1d<quat> base_trajectory_desired_rotations = trajectory_desired_rotations;
     const array1d<vec3> base_trajectory_positions = trajectory_positions;
@@ -3233,6 +3253,7 @@ int main(int argc, char** argv)
         jump_vertical_velocity = base_jump_vertical_velocity;
         jump_buffer_timer = base_jump_buffer_timer;
         jump_coyote_timer = base_jump_coyote_timer;
+        jump_gait_timer = base_jump_gait_timer;
         trajectory_desired_velocities = base_trajectory_desired_velocities;
         trajectory_desired_rotations = base_trajectory_desired_rotations;
         trajectory_positions = base_trajectory_positions;
@@ -3532,7 +3553,16 @@ int main(int argc, char** argv)
             jump_vertical_velocity = jump_initial_vertical_speed;
             jump_buffer_timer = 0.0f;
             jump_coyote_timer = 0.0f;
+            jump_gait_timer = jump_gait_hold_time; // hold jump gait for 0.5s
         }
+
+        // Tick jump_gait_timer down
+        if (!jump_active && jump_gait_timer > 0.0f)
+        {
+            jump_gait_timer = maxf(0.0f, jump_gait_timer - dt);
+        }
+        
+        bool jump_gait_active = jump_active || jump_gait_timer > 0.0f;
 
         if (jump_active)
         {
@@ -3547,7 +3577,7 @@ int main(int argc, char** argv)
             {
                 motion_speed_boost *= cartwheel_speed_boost;
             }
-            if (jump_active)
+            if (jump_gait_active)
             {
                 motion_speed_boost *= jump_speed_boost;
             }
@@ -3618,7 +3648,7 @@ int main(int argc, char** argv)
             desired_idle = false;
         }
 
-        bool desired_jump = jump_pressed || jump_active;
+        bool desired_jump = jump_pressed || jump_active || jump_gait_timer > 0.0f;
         if (joystick_playback_enabled)
         {
             desired_jump = false;
@@ -3738,6 +3768,9 @@ int main(int argc, char** argv)
           simulation_fwrd_speed,
           simulation_side_speed,
           simulation_back_speed,
+          jump_active ? jump_speed_boost : (jump_gait_timer > 0.0f ? jump_speed_boost : 1.0f),
+          jump_gait_timer,
+          jump_gait_hold_time,
           20.0f * dt);
         
         trajectory_positions_predict(
@@ -4508,8 +4541,10 @@ int main(int argc, char** argv)
         // Move by raw matched root velocity (no spring damping/smoothing).
         if (jump_active)
         {
-            simulation_velocity.y = jump_vertical_velocity;
-            simulation_position.y += simulation_velocity.y * dt;
+            // simulation_velocity.y = jump_vertical_velocity;
+            // simulation_position.y += simulation_velocity.y * dt;
+            simulation_velocity.y = bone_velocities(0).y;
+            simulation_position.y = bone_velocities(0).y;
             simulation_velocity.x = bone_velocities(0).x;
             simulation_velocity.z = bone_velocities(0).z;
             simulation_position.x = bone_positions(0).x;
