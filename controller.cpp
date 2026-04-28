@@ -3736,6 +3736,7 @@ int main(int argc, char** argv)
             ? (simulation_position.y - current_terrain_height)
             : jump_root_height_offset;
 
+        const float trajectory_y_speed = 5.0f; // m/s
         auto terrain_anchor_trajectory = [&](slice1d<vec3> trajectory)
         {
             for (int i = 1; i < trajectory.size; i++)
@@ -3743,7 +3744,15 @@ int main(int argc, char** argv)
                 float terrain_height = 0.0f;
                 if (sample_terrain_height(ground_plane_model, trajectory(i), terrain_height))
                 {
-                    trajectory(i).y = terrain_height + root_ground_offset;
+                    float target_y = terrain_height + jump_root_height_offset;
+                    float current_y = trajectory(i - 1).y;
+                    float max_delta = trajectory_y_speed * (20.0f * dt);
+                    
+                    if (current_y < target_y) {
+                        trajectory(i).y = minf(current_y + max_delta, target_y);
+                    } else {
+                        trajectory(i).y = maxf(current_y - max_delta, target_y);
+                    }
                 }
             }
         };
