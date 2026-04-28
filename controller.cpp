@@ -3717,6 +3717,15 @@ int main(int argc, char** argv)
             20.0f * dt,
             ground_plane_model);
 
+        if (length(gamepadstick_left) < 0.01f)
+        {
+            for (int i = 1; i < trajectory_positions.size; i++)
+            {
+                trajectory_positions(i).x = simulation_position.x;
+                trajectory_positions(i).z = simulation_position.z;
+            }
+        }
+
         float current_terrain_height = 0.0f;
         const bool has_current_terrain = sample_terrain_height(
             ground_plane_model,
