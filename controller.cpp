@@ -3428,6 +3428,7 @@ int main(int argc, char** argv)
         if (jump_pressed)
         {
             jump_buffer_timer = jump_buffer_time;
+            jump_gait_timer = jump_gait_hold_time; // lock jump gait for 0.7s from press
         }
         else
         {
@@ -3553,11 +3554,10 @@ int main(int argc, char** argv)
             jump_vertical_velocity = jump_initial_vertical_speed;
             jump_buffer_timer = 0.0f;
             jump_coyote_timer = 0.0f;
-            jump_gait_timer = jump_gait_hold_time; // hold jump gait for 0.5s
         }
 
-        // Tick jump_gait_timer down
-        if (!jump_active && jump_gait_timer > 0.0f)
+        // Tick jump_gait_timer down unconditionally every frame
+        if (jump_gait_timer > 0.0f)
         {
             jump_gait_timer = maxf(0.0f, jump_gait_timer - dt);
         }
@@ -3648,7 +3648,8 @@ int main(int argc, char** argv)
             desired_idle = false;
         }
 
-        bool desired_jump = jump_pressed || jump_active || jump_gait_timer > 0.0f;
+        // desired_jump is locked for the full 0.7s from space press — nothing can interrupt it
+        bool desired_jump = jump_pressed || jump_gait_timer > 0.0f;
         if (joystick_playback_enabled)
         {
             desired_jump = false;
