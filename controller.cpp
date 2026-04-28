@@ -1630,6 +1630,7 @@ void contact_update(
     const float foot_height,
     const float halflife,
     const float dt,
+    const bool force_unlock = false,
     const float eps=1e-8)
 {
     // First compute the input contact position velocity via finite difference
@@ -1652,8 +1653,10 @@ void contact_update(
     
     // If the contact point is too far from the current input position 
     // then we need to unlock the contact
-    bool unlock_contact = contact_lock && (
-        length(contact_point - input_contact_position) > unlock_radius);
+    // Disabled as per user request to force foot sticking:
+    // bool unlock_contact = contact_lock && (
+    //    length(contact_point - input_contact_position) > unlock_radius);
+    bool unlock_contact = contact_lock && force_unlock;
     
     // If the contact was previously inactive but is now active we 
     // need to transition to the locked contact state
@@ -2655,6 +2658,7 @@ int main(int argc, char** argv)
     bool desired_crouch_prev = false;
     bool desired_cartwheel_prev = false;
     bool desired_idle_prev = false;
+    float idle_gait_timer = 0.0f;
     bool desired_jump_prev = false;
     float cartwheel_auto_timer = 0.0f;
     const float cartwheel_auto_duration = 1.0f;
@@ -2702,7 +2706,7 @@ int main(int argc, char** argv)
     float climbing_height_threshold = 1.0f;
     float climbing_max_height_delta = 0.8f;
     
-    float jump_root_height_offset = 1.2f;
+    float jump_root_height_offset = 1.3f;
     const float jump_initial_vertical_speed = 8.0f;
     const float jump_gravity = 20.0f;
     const float jump_ground_snap_epsilon = 0.08f;
@@ -2748,7 +2752,7 @@ int main(int argc, char** argv)
     float ik_max_length_buffer = 0.015f;
     float ik_foot_height = 0.02f;
     float ik_toe_length = 0.15f;
-    float ik_unlock_radius = 0.2f;
+    float ik_unlock_radius = 0.05f;
     float ik_blending_halflife = 0.1f;
     
     // Contact and Foot Locking data
@@ -3131,6 +3135,7 @@ int main(int argc, char** argv)
     const bool base_desired_crouch_prev = desired_crouch_prev;
     const bool base_desired_cartwheel_prev = desired_cartwheel_prev;
     const bool base_desired_idle_prev = desired_idle_prev;
+    const float base_idle_gait_timer = idle_gait_timer;
     const bool base_desired_jump_prev = desired_jump_prev;
     const float base_cartwheel_auto_timer = cartwheel_auto_timer;
     const bool base_cartwheel_search_freeze_prev = cartwheel_search_freeze_prev;
@@ -3211,6 +3216,7 @@ int main(int argc, char** argv)
         desired_crouch_prev = base_desired_crouch_prev;
         desired_cartwheel_prev = base_desired_cartwheel_prev;
         desired_idle_prev = base_desired_idle_prev;
+        idle_gait_timer = base_idle_gait_timer;
         desired_jump_prev = base_desired_jump_prev;
         cartwheel_auto_timer = base_cartwheel_auto_timer;
         cartwheel_search_freeze_prev = base_cartwheel_search_freeze_prev;
@@ -3396,7 +3402,7 @@ int main(int argc, char** argv)
             desired_strafe = true;
         }
 
-        jump_root_height_offset = crouch_pressed ? 0.7f : 1.2f;
+        jump_root_height_offset = crouch_pressed ? 0.65f : 1.2f;
 
         if (jump_pressed)
         {
@@ -3562,18 +3568,38 @@ int main(int argc, char** argv)
         simulation_velocity_planar.y = 0.0f;
         float simulation_planar_speed = length(simulation_velocity_planar);
 
-        const float idle_exit_input_threshold = 0.14f;
-        const float idle_enter_speed_threshold = 0.15f;
-        const float idle_exit_speed_threshold = 0.25f;
+        // 3D magnitude of 20-frame future trajectory offset (matches MM feature vector)
+        const float trajectory_movement_threshold = 0.05f;
+        vec3 traj_future_offset = trajectory_positions(1) - simulation_position;
+        float future_trajectory_magnitude = length(traj_future_offset);
+        bool trajectory_has_movement = future_trajectory_magnitude > trajectory_movement_threshold;
 
         bool desired_idle = desired_idle_prev;
+        
+        // Timer resets only when BOTH input and trajectory signal active movement.
+        // Timer counts up when either is zero.
+        bool player_actively_moving =
+            trajectory_has_movement;
+
+        bool movement_detected =
+            player_actively_moving ||
+            (desired_crouch != desired_crouch_prev);
+            
+        if (movement_detected) {
+            idle_gait_timer = 0.0f;
+        } else {
+            idle_gait_timer += dt;
+        }
+
         bool idle_enter =
             !jump_active &&
-            simulation_planar_speed <= idle_enter_speed_threshold;
+            idle_gait_timer >= 0.2f;
+        
+        // Exit idle when trajectory signals movement (matches idle_enter logic)
         bool idle_exit =
             jump_active ||
-            desired_input_magnitude >= idle_exit_input_threshold ||
-            simulation_planar_speed >= idle_exit_speed_threshold;
+            trajectory_has_movement ||
+            (desired_crouch != desired_crouch_prev);
 
         if (desired_idle)
         {
@@ -3769,8 +3795,8 @@ int main(int argc, char** argv)
         terrain_anchor_trajectory(trajectory_positions);
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
-        const float uphill_horizontal_reduce_gain = 1.0f;
-        const float uphill_horizontal_reduce_max = 0.75f;
+        const float uphill_horizontal_reduce_gain = 1.1f;
+        const float uphill_horizontal_reduce_max = 0.85f;
         float min_trajectory_scale_xz = 1.0f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
@@ -4702,7 +4728,8 @@ int main(int argc, char** argv)
                     ik_unlock_radius,
                     foot_target_height,
                     ik_blending_halflife,
-                    dt);
+                    dt,
+                    !trajectory_has_movement); // unlock feet when no movement predicted
                 
                 // Smoothly ensure contact position never goes through floor
                 vec3 contact_position_clamp = contact_positions(i);
