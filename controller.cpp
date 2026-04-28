@@ -3554,8 +3554,8 @@ int main(int argc, char** argv)
         float simulation_planar_speed = length(simulation_velocity_planar);
 
         const float idle_exit_input_threshold = 0.14f;
-        const float idle_enter_speed_threshold = 0.02f;
-        const float idle_exit_speed_threshold = 0.08f;
+        const float idle_enter_speed_threshold = 0.15f;
+        const float idle_exit_speed_threshold = 0.25f;
 
         bool desired_idle = desired_idle_prev;
         bool idle_enter =
