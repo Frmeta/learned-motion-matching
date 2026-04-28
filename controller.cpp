@@ -4545,7 +4545,7 @@ int main(int argc, char** argv)
             // simulation_velocity.y = jump_vertical_velocity;
             // simulation_position.y += simulation_velocity.y * dt;
             simulation_velocity.y = bone_velocities(0).y;
-            simulation_position.y = bone_velocities(0).y;
+            simulation_position.y += simulation_velocity.y * dt;
             simulation_velocity.x = bone_velocities(0).x;
             simulation_velocity.z = bone_velocities(0).z;
             simulation_position.x = bone_positions(0).x;
