@@ -2771,7 +2771,7 @@ int main(int argc, char** argv)
     float ik_max_length_buffer = 0.015f;
     float ik_foot_height = 0.02f;
     float ik_toe_length = 0.15f;
-    float ik_unlock_radius = 0.02f;
+    float ik_unlock_radius = 0.005f;
     float ik_blending_halflife = 0.1f;
     
     // Contact and Foot Locking data

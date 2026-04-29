@@ -56,11 +56,11 @@ files = [
     ('resources/bvh/obstacles4_subject2.bvh',       6145, 7000, False, False, False, False), # might have hand on rail
     
     # Climb
-    ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False, False, False, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       1910, 1990, False, False, False, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       2270, 2720, False, False, False, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       3766, 4027, False, False, False, False),
-    ('resources/bvh/obstacles1_subject1.bvh',       4210, 4448, False, False, False, False),
+    # ('resources/bvh/obstacles1_subject1.bvh',       1030, 1700, False, False, False, False),
+    # ('resources/bvh/obstacles1_subject1.bvh',       1910, 1990, False, False, False, False),
+    # ('resources/bvh/obstacles1_subject1.bvh',       2270, 2720, False, False, False, False),
+    # ('resources/bvh/obstacles1_subject1.bvh',       3766, 4027, False, False, False, False),
+    # ('resources/bvh/obstacles1_subject1.bvh',       4210, 4448, False, False, False, False),
 
     # Jump
     ('resources/bvh/jumps1_subject1.bvh',       1490, 1600, False, False, True, False),

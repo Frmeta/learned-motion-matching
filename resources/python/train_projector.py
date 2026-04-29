@@ -27,9 +27,11 @@ from train_common import (
 
 # Networks
 
+HIDDEN_SIZE = 1024
+
 class Projector(nn.Module):
 
-    def __init__(self, input_size, output_size, hidden_size=512):
+    def __init__(self, input_size, output_size, hidden_size=HIDDEN_SIZE):
         super(Projector, self).__init__()
         
         self.linear0 = nn.Linear(input_size, hidden_size)
