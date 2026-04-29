@@ -75,6 +75,7 @@ if __name__ == '__main__':
     range_starts = database['range_starts']
     range_stops = database['range_stops']
     future_toe_positions = database['future_toe_positions']
+    cartwheel_states = database['cartwheel_states']
     
     X = load_features(bin_path('features.bin'))['features'].astype(np.float32)
     Ypos = database['bone_positions'].astype(np.float32)
@@ -230,6 +231,10 @@ if __name__ == '__main__':
     Yfuture_toe_xy = torch.as_tensor(Yfuture_toe_xy)
     
     X = torch.as_tensor(X)
+
+    frame_weights = np.ones(nframes, dtype=np.float32)
+    if cartwheel_states.shape[1] > 0:
+        frame_weights += 9.0 * cartwheel_states[:, 0].astype(np.float32)
     
     # Make networks
     
@@ -406,6 +411,12 @@ if __name__ == '__main__':
     for i in range(nframes - window):
         indices.append(np.arange(i, i + window))
     indices = torch.as_tensor(np.array(indices), dtype=torch.long)
+
+    window_weights = np.array([
+        frame_weights[i:i + window].sum()
+        for i in range(nframes - window)
+    ], dtype=np.float32)
+    window_probabilities = window_weights / window_weights.sum()
     
     # Train
     
@@ -430,7 +441,7 @@ if __name__ == '__main__':
         
         # Extract batch
         
-        batch = indices[torch.randint(0, len(indices), size=[batchsize])]
+        batch = indices[np.random.choice(len(indices), size=[batchsize], p=window_probabilities)]
         
         Xgnd = X[batch]
         

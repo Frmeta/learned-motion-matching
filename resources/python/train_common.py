@@ -95,6 +95,18 @@ def load_database(filename):
         # Read future toe positions (task-specific output o*)
         nframes, nfuture_toe = struct.unpack('II', f.read(8))
         future_toe_positions = np.frombuffer(f.read(nframes*nfuture_toe*4), dtype=np.float32, count=nframes*nfuture_toe).reshape([nframes, nfuture_toe])
+
+        nframes, ncrouch = struct.unpack('II', f.read(8))
+        crouch_states = np.frombuffer(f.read(nframes*ncrouch), dtype=np.uint8, count=nframes*ncrouch).reshape([nframes, ncrouch])
+
+        nframes, nidle = struct.unpack('II', f.read(8))
+        idle_states = np.frombuffer(f.read(nframes*nidle), dtype=np.uint8, count=nframes*nidle).reshape([nframes, nidle])
+
+        nframes, njump = struct.unpack('II', f.read(8))
+        jump_states = np.frombuffer(f.read(nframes*njump), dtype=np.uint8, count=nframes*njump).reshape([nframes, njump])
+
+        nframes, ncartwheel = struct.unpack('II', f.read(8))
+        cartwheel_states = np.frombuffer(f.read(nframes*ncartwheel), dtype=np.uint8, count=nframes*ncartwheel).reshape([nframes, ncartwheel])
         
     return {
         'bone_positions': bone_positions,
@@ -106,6 +118,10 @@ def load_database(filename):
         'range_stops': range_stops,
         'contact_states': contact_states,
         'future_toe_positions': future_toe_positions,
+        'crouch_states': crouch_states,
+        'idle_states': idle_states,
+        'jump_states': jump_states,
+        'cartwheel_states': cartwheel_states,
     }
         
 

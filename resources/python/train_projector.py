@@ -57,6 +57,7 @@ if __name__ == '__main__':
     range_starts = database['range_starts']
     range_stops = database['range_stops']
     future_toe_positions = database['future_toe_positions']
+    cartwheel_states = database['cartwheel_states']
     del database
     
     X = load_features(bin_path('features.bin'))['features'].copy().astype(np.float32)
@@ -87,9 +88,13 @@ if __name__ == '__main__':
     
     X_scale = X.std()
     X_noise_std = X.std(axis=0) + 1.0
+
+    frame_weights = np.ones(nframes, dtype=np.float32)
+    if cartwheel_states.shape[1] > 0:
+        frame_weights += 9.0 * cartwheel_states[:, 0].astype(np.float32)
+    frame_probabilities = frame_weights / frame_weights.sum()
     
     projector_mean_out = torch.as_tensor(np.hstack([
-        X.mean(axis=0).ravel(),
         Z.mean(axis=0).ravel(),
     ]).astype(np.float32))
     
@@ -200,7 +205,7 @@ if __name__ == '__main__':
         
         # Extract batch
         
-        samples = np.random.randint(0, nframes, size=[batchsize])
+        samples = np.random.choice(nframes, size=[batchsize], p=frame_probabilities)
         
         nsigma = np.random.uniform(size=[batchsize, 1]).astype(np.float32)
         noise = np.random.normal(size=[batchsize, nfeatures]).astype(np.float32)
