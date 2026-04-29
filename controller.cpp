@@ -2771,7 +2771,7 @@ int main(int argc, char** argv)
     float ik_max_length_buffer = 0.015f;
     float ik_foot_height = 0.02f;
     float ik_toe_length = 0.15f;
-    float ik_unlock_radius = 0.05f;
+    float ik_unlock_radius = 0.02f;
     float ik_blending_halflife = 0.1f;
     
     // Contact and Foot Locking data
@@ -4016,7 +4016,7 @@ int main(int argc, char** argv)
                 }
                 
                 // Store relative to hip height, but clamp to avoid extreme negatives while falling.
-                const float min_terrain_feature_height = -2.0f;
+                const float min_terrain_feature_height = -1.5f;
                 float left_relative_terrain_height = left_terrain_height - hip_height;
                 float right_relative_terrain_height = right_terrain_height - hip_height;
 

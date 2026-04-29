@@ -93,7 +93,7 @@ if __name__ == '__main__':
     seed = 1234
     batchsize = 32
     lr = 0.001
-    niter = 500000
+    niter = 10  # Reduced from 500000 for testing
     window = 2
     dt = 1.0 / 60.0
     
