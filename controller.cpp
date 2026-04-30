@@ -2357,36 +2357,35 @@ int main(int argc, char** argv)
     
     // Ground Plane
     
-    // Try to load .glb model first, fallback to procedural plane
+    // Always load the shader for studio light/checkerboard
+    Shader ground_plane_shader = LoadShader("./resources/shaders/checkerboard.vs", "./resources/shaders/checkerboard.fs");
+    
+    // Try to load .glb model
     const char* ground_glb_path = "resources/glb/11-skate.glb";
-    Model ground_plane_model;
-    Shader ground_plane_shader = { 0 };
-    bool using_glb_ground = false;
+    Model ground_plane_model = { 0 };
+    bool has_glb_ground = false;
     
     if (FileExists(ground_glb_path))
     {
         ground_plane_model = LoadModel(ground_glb_path);
         ground_grid.build(ground_plane_model, 1.0f);
-        using_glb_ground = true;
+        has_glb_ground = true;
 
-        // Generate a procedural checkerboard image
-        Image img = GenImageChecked(256, 256, 32, 32, LIGHTGRAY, WHITE);
-        Texture2D texture = LoadTextureFromImage(img);
-        UnloadImage(img); // Unload CPU image
-
-        // Assign to model material
-        for (int i = 0; i < ground_plane_model.materialCount; i++){
-            ground_plane_model.materials[i].maps[MATERIAL_MAP_DIFFUSE].texture = texture;
+        // Apply shader to GLB as well
+        for (int i = 0; i < ground_plane_model.materialCount; i++)
+        {
+            ground_plane_model.materials[i].shader = ground_plane_shader;
         }
     }
     else
     {
-        // Fallback to procedural ground plane with checkerboard shader
-        ground_plane_shader = LoadShader("./resources/shaders/checkerboard.vs", "./resources/shaders/checkerboard.fs");
+        // If no GLB, create a simple procedural plane but still call it ground_plane_model 
+        // to maintain compatibility with the rest of the code (collisions, etc.)
         Mesh ground_plane_mesh = GenMeshPlane(20.0f, 20.0f, 10, 10);
         ground_plane_model = LoadModelFromMesh(ground_plane_mesh);
         ground_plane_model.materials[0].shader = ground_plane_shader;
         ground_grid.build(ground_plane_model, 1.0f);
+        has_glb_ground = true; // We now have a ground, even if it's procedural
     }
     
     // Character
@@ -5125,10 +5124,13 @@ int main(int argc, char** argv)
         // Draw Ground Plane
 
         // Visual reference cube for scene scale (1.0f tall).
-        DrawCube((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, GRAY);
-        DrawCubeWires((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, DARKGRAY);
+        // DrawCube((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, GRAY);
+        // DrawCubeWires((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, DARKGRAY);
         
-        DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
+        if (has_glb_ground)
+        {
+            DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
+        }
         DrawGrid(20, 1.0f);
         draw_axis(vec3(), quat());
         
@@ -6384,15 +6386,11 @@ int main(int argc, char** argv)
         }
     }
 
-    // Unload stuff and finish
     UnloadModel(character_model);
-    UnloadModel(ground_plane_model);
+    if (has_glb_ground) UnloadModel(ground_plane_model);
     ground_grid.cleanup();
     UnloadShader(character_shader);
-    if (!using_glb_ground)
-    {
-        UnloadShader(ground_plane_shader);
-    }
+    UnloadShader(ground_plane_shader);
 
     CloseWindow();
 
