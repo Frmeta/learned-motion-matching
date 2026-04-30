@@ -6,6 +6,7 @@
 #endif
 
 #include "raylib.h"
+#include "rlgl.h"
 #include "raymath.h"
 #include "common.h"
 #include "vec.h"
@@ -2432,6 +2433,27 @@ int main(int argc, char** argv)
         std::cout << "features.bin is up to date. Skipping feature rebuild." << std::endl;
     }
     
+    // Shadow Mapping Setup
+    const int shadow_map_width = 2048;
+    const int shadow_map_height = 2048;
+    RenderTexture2D shadow_map = LoadRenderTexture(shadow_map_width, shadow_map_height);
+    Shader depth_shader = LoadShader("./resources/shaders/depth.vs", "./resources/shaders/depth.fs");
+    
+    Camera3D light_cam = { 0 };
+    light_cam.position = (Vector3){ 10.0f, 20.0f, 10.0f };
+    light_cam.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+    light_cam.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    light_cam.fovy = 30.0f; // Ortho size
+    light_cam.projection = CAMERA_ORTHOGRAPHIC;
+
+    int char_shadow_map_loc = GetShaderLocation(character_shader, "shadowMap");
+    int char_light_mat_loc = GetShaderLocation(character_shader, "lightMat");
+    
+    int ground_shadow_map_loc = GetShaderLocation(ground_plane_shader, "shadowMap");
+    int ground_light_mat_loc = GetShaderLocation(ground_plane_shader, "lightMat");
+    int ground_left_foot_loc = GetShaderLocation(ground_plane_shader, "leftFootPos");
+    int ground_right_foot_loc = GetShaderLocation(ground_plane_shader, "rightFootPos");
+
     float feature_weight_foot_position = 0.75f;
     float feature_weight_foot_velocity = 1.0f;
     float feature_weight_hip_velocity = 1.0f;
@@ -4933,10 +4955,46 @@ int main(int argc, char** argv)
             }
         #endif
             
-            BeginDrawing();
-            ClearBackground(RAYWHITE);
-            
-            BeginMode3D(camera);
+          // Update light camera to follow player for consistent shadow coverage
+        light_cam.target = to_Vector3(global_bone_positions(0));
+        light_cam.position = Vector3Add(light_cam.target, (Vector3){ 10.0f, 20.0f, 10.0f });
+
+        // 1. Shadow Pass
+        BeginTextureMode(shadow_map);
+        ClearBackground(WHITE);
+        BeginMode3D(light_cam);
+        
+        // Render character for shadow
+        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+        
+        EndMode3D();
+        EndTextureMode();
+
+        // 2. Main Render Pass
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+        BeginMode3D(camera);
+
+        // Update Shader Uniforms
+        Matrix lightView = GetCameraMatrix(light_cam);
+        Matrix lightProj = MatrixOrtho(-light_cam.fovy, light_cam.fovy, -light_cam.fovy, light_cam.fovy, 0.0f, 100.0f);
+        Matrix lightMat = MatrixMultiply(lightView, lightProj);
+
+        SetShaderValueMatrix(character_shader, char_light_mat_loc, lightMat);
+        // Note: raylib handles texture binding differently, we'll set the texture in the material
+        // but for depth textures we often need to bind it to a specific unit.
+        // For simplicity in this demo, we'll use SetShaderValueTexture if available.
+        SetShaderValueTexture(character_shader, char_shadow_map_loc, shadow_map.depth);
+        
+        SetShaderValueMatrix(ground_plane_shader, ground_light_mat_loc, lightMat);
+        SetShaderValueTexture(ground_plane_shader, ground_shadow_map_loc, shadow_map.depth);
+        
+        vec3 leftFoot = global_bone_positions(Bone_LeftToe);
+        vec3 rightFoot = global_bone_positions(Bone_RightToe);
+        SetShaderValue(ground_plane_shader, ground_left_foot_loc, &leftFoot, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ground_plane_shader, ground_right_foot_loc, &rightFoot, SHADER_UNIFORM_VEC3);
+
+        if (!show_stickman)
         
         // Draw Simulation Object
         
@@ -6391,6 +6449,8 @@ int main(int argc, char** argv)
     ground_grid.cleanup();
     UnloadShader(character_shader);
     UnloadShader(ground_plane_shader);
+    UnloadShader(depth_shader);
+    UnloadRenderTexture(shadow_map);
 
     CloseWindow();
 
