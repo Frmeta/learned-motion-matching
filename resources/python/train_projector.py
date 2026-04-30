@@ -95,6 +95,7 @@ if __name__ == '__main__':
     frame_probabilities = frame_weights / frame_weights.sum()
     
     projector_mean_out = torch.as_tensor(np.hstack([
+        X.mean(axis=0).ravel(),
         Z.mean(axis=0).ravel(),
     ]).astype(np.float32))
     
