@@ -220,6 +220,100 @@ void database_load_matching_features(database& db, const char* filename)
     fclose(f);
 }
 
+#include <vector>
+
+void database_filter_cartwheel(database& db)
+{
+    int total_frames = db.nframes();
+    if (total_frames == 0 || db.cartwheel_states.rows != total_frames) return;
+    
+    int cartwheel_count = 0;
+    for (int i = 0; i < total_frames; i++) {
+        if (db.cartwheel_states(i, 0)) cartwheel_count++;
+    }
+    
+    if (cartwheel_count == total_frames || cartwheel_count == 0) return;
+    
+    array2d<vec3> new_bone_positions(cartwheel_count, db.nbones());
+    array2d<vec3> new_bone_velocities(cartwheel_count, db.nbones());
+    array2d<quat> new_bone_rotations(cartwheel_count, db.nbones());
+    array2d<vec3> new_bone_angular_velocities(cartwheel_count, db.nbones());
+    
+    array2d<float> new_features(cartwheel_count, db.nfeatures());
+    array2d<bool> new_contact_states(cartwheel_count, db.ncontacts());
+    array2d<float> new_future_toe_positions(cartwheel_count, db.future_toe_positions.cols);
+    
+    array2d<bool> new_crouch_states(cartwheel_count, 1);
+    array2d<bool> new_idle_states(cartwheel_count, 1);
+    array2d<bool> new_jump_states(cartwheel_count, 1);
+    array2d<bool> new_cartwheel_states(cartwheel_count, 1);
+    
+    std::vector<int> new_starts;
+    std::vector<int> new_stops;
+    
+    int dst_idx = 0;
+    bool in_clip = false;
+    for (int i = 0; i < total_frames; i++)
+    {
+        if (db.cartwheel_states(i, 0))
+        {
+            if (!in_clip)
+            {
+                new_starts.push_back(dst_idx);
+                in_clip = true;
+            }
+            
+            for (int b = 0; b < db.nbones(); b++) {
+                new_bone_positions(dst_idx, b) = db.bone_positions(i, b);
+                new_bone_velocities(dst_idx, b) = db.bone_velocities(i, b);
+                new_bone_rotations(dst_idx, b) = db.bone_rotations(i, b);
+                new_bone_angular_velocities(dst_idx, b) = db.bone_angular_velocities(i, b);
+            }
+            for (int f = 0; f < db.nfeatures(); f++) new_features(dst_idx, f) = db.features(i, f);
+            for (int c = 0; c < db.ncontacts(); c++) new_contact_states(dst_idx, c) = db.contact_states(i, c);
+            for (int f = 0; f < db.future_toe_positions.cols; f++) new_future_toe_positions(dst_idx, f) = db.future_toe_positions(i, f);
+            
+            new_crouch_states(dst_idx, 0) = db.crouch_states(i, 0);
+            new_idle_states(dst_idx, 0) = db.idle_states(i, 0);
+            new_jump_states(dst_idx, 0) = db.jump_states(i, 0);
+            new_cartwheel_states(dst_idx, 0) = db.cartwheel_states(i, 0);
+            
+            dst_idx++;
+        }
+        else
+        {
+            if (in_clip)
+            {
+                new_stops.push_back(dst_idx);
+                in_clip = false;
+            }
+        }
+    }
+    if (in_clip)
+    {
+        new_stops.push_back(dst_idx);
+    }
+    
+    db.bone_positions = new_bone_positions;
+    db.bone_velocities = new_bone_velocities;
+    db.bone_rotations = new_bone_rotations;
+    db.bone_angular_velocities = new_bone_angular_velocities;
+    db.features = new_features;
+    db.contact_states = new_contact_states;
+    db.future_toe_positions = new_future_toe_positions;
+    db.crouch_states = new_crouch_states;
+    db.idle_states = new_idle_states;
+    db.jump_states = new_jump_states;
+    db.cartwheel_states = new_cartwheel_states;
+    
+    db.range_starts.resize(new_starts.size());
+    db.range_stops.resize(new_stops.size());
+    for (int i = 0; i < (int)new_starts.size(); i++) {
+        db.range_starts(i) = new_starts[i];
+        db.range_stops(i) = new_stops[i];
+    }
+}
+
 // When we add an offset to a frame in the database there is a chance
 // it will go out of the relevant range so here we can clamp it to 
 // the last frame of that range.

@@ -2237,6 +2237,8 @@ int main(int argc, char** argv)
     try
     {
         bool start_with_lmm_enabled = false;
+        bool force_mm_mode = false;
+        bool force_lmm_mode = false;
         enum app_mode
         {
             APP_MODE_WINDOW,
@@ -2250,9 +2252,15 @@ int main(int argc, char** argv)
         bool force_rebuild_features = false;
         for (int argi = 1; argi < argc; argi++)
         {
-            if (strcmp(argv[argi], "--learned") == 0)
+            if (strcmp(argv[argi], "--mm") == 0)
+            {
+                start_with_lmm_enabled = false;
+                force_mm_mode = true;
+            }
+            else if (strcmp(argv[argi], "--lmm") == 0)
             {
                 start_with_lmm_enabled = true;
+                force_lmm_mode = true;
             }
             else if (strcmp(argv[argi], "--rebuild-features") == 0)
             {
@@ -2522,6 +2530,13 @@ int main(int argc, char** argv)
         }
     }
     
+    if (start_with_lmm_enabled)
+    {
+        std::cout << "LMM mode enabled. Filtering database for cartwheel frames to save memory..." << std::endl;
+        database_filter_cartwheel(db);
+        database_build_bounds(db); // Rebuild bounds for the filtered database
+    }
+
     int frame_index = db.range_starts(0);
     int mm_last_best_with_history = frame_index;
     int mm_last_best_without_history = frame_index;
@@ -2834,15 +2849,18 @@ int main(int argc, char** argv)
     
     bool lmm_enabled = start_with_lmm_enabled;
     
-    if (debug) std::cout << "Loading neural networks..." << std::endl;
-    
     nnet decompressor, stepper, projector;    
-    if (debug) std::cout << "Loading decompressor..." << std::endl;
-    nnet_load(decompressor, "./resources/bin/decompressor.bin");
-    if (debug) std::cout << "Loading stepper..." << std::endl;
-    nnet_load(stepper, "./resources/bin/stepper.bin");
-    if (debug) std::cout << "Loading projector..." << std::endl;
-    nnet_load(projector, "./resources/bin/projector.bin");
+    if (lmm_enabled)
+    {
+        if (debug) std::cout << "Loading neural networks..." << std::endl;
+        
+        if (debug) std::cout << "Loading decompressor..." << std::endl;
+        nnet_load(decompressor, "./resources/bin/decompressor.bin");
+        if (debug) std::cout << "Loading stepper..." << std::endl;
+        nnet_load(stepper, "./resources/bin/stepper.bin");
+        if (debug) std::cout << "Loading projector..." << std::endl;
+        nnet_load(projector, "./resources/bin/projector.bin");
+    }
 
     const int lmm_latent_size = 32;
     const int expected_features = db.nfeatures();
@@ -2894,9 +2912,12 @@ int main(int argc, char** argv)
     if (debug) std::cout << "Setting up evaluations..." << std::endl;
 
     nnet_evaluation decompressor_evaluation, stepper_evaluation, projector_evaluation;
-    decompressor_evaluation.resize(decompressor);
-    stepper_evaluation.resize(stepper);
-    projector_evaluation.resize(projector);
+    if (lmm_enabled)
+    {
+        decompressor_evaluation.resize(decompressor);
+        stepper_evaluation.resize(stepper);
+        projector_evaluation.resize(projector);
+    }
     
     if (debug) std::cout << "Initializing features..." << std::endl;
     array1d<float> features_proj = db.features(frame_index);
@@ -4195,19 +4216,15 @@ int main(int argc, char** argv)
         // Do we need to search?
         if (debug) std::cout << "Do we?" << std::endl;
         bool search_requested = force_search || search_timer <= 0.0f || end_of_anim;
-        bool force_projector_on_cartwheel_freeze_start =
-            lmm_runtime_enabled && cartwheel_search_freeze_started;
-        bool force_mm_search_on_cartwheel_freeze_start =
-            !lmm_runtime_enabled && cartwheel_search_freeze_started;
-        bool allow_mm_search =
-            !cartwheel_search_freeze_active || force_mm_search_on_cartwheel_freeze_start;
-        bool allow_lmm_projector =
-            !cartwheel_search_freeze_active || force_projector_on_cartwheel_freeze_start;
+        bool force_mm_search_on_cartwheel_freeze_start = cartwheel_search_freeze_started;
+        bool use_lmm_path = lmm_runtime_enabled && !cartwheel_search_freeze_active;
+        bool allow_mm_search = (!lmm_runtime_enabled && !cartwheel_search_freeze_active) || force_mm_search_on_cartwheel_freeze_start;
+        bool allow_lmm_projector = use_lmm_path;
         bool ran_search_or_projector = false;
 
-        if (search_requested || force_projector_on_cartwheel_freeze_start)
+        if (search_requested || force_mm_search_on_cartwheel_freeze_start)
         {
-            if (lmm_runtime_enabled)
+            if (use_lmm_path)
             {
                 if (allow_lmm_projector)
                 {
@@ -4430,7 +4447,7 @@ int main(int argc, char** argv)
         search_timer -= dt;
         if (debug) std::cout << "test4" << std::endl;
 
-        if (lmm_runtime_enabled)
+        if (use_lmm_path)
         {
             // Update features and latents
             stepper_evaluate(
@@ -5294,12 +5311,15 @@ int main(int argc, char** argv)
         
         float ui_lmm_hei = 380;
         
-        GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
-        
-        GuiCheckBox(
-            (Rectangle){ ui_right_panel_x + 30, ui_lmm_hei + 10, 20, 20 }, 
-            "enabled",
-            &lmm_enabled);
+        if (!force_mm_mode && !force_lmm_mode)
+        {
+            GuiGroupBox((Rectangle){ ui_right_panel_x, ui_lmm_hei, 290, 40 }, "learned motion matching");
+            
+            GuiCheckBox(
+                (Rectangle){ ui_right_panel_x + 30, ui_lmm_hei + 10, 20, 20 }, 
+                "enabled",
+                &lmm_enabled);
+        }
         
         //---------
         
