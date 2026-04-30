@@ -16,6 +16,7 @@
 #include "database.h"
 #include "nnet.h"
 #include "lmm.h"
+#include "terrain_grid.h"
 
 #include <initializer_list>
 #include <functional>
@@ -47,6 +48,7 @@
 #endif
 
 static constexpr bool debug = false;
+static TerrainGrid ground_grid;
 
 #if defined(_WIN32)
 struct runtime_metrics
@@ -1187,16 +1189,9 @@ static bool sample_terrain_height(
 {
     bool hit = false;
     float highest = 0.0f;
-    Ray ray = { to_Vector3(position + vec3(0.0f, 20.0f, 0.0f)), {0.0f, -1.0f, 0.0f} };
-
-    for (int i = 0; i < ground_plane_model.meshCount; i++)
+    if (ground_grid.get_height(to_Vector3(position), highest))
     {
-        RayCollision collision = GetRayCollisionMesh(ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-        if (collision.hit && (!hit || collision.point.y > highest))
-        {
-            highest = collision.point.y;
-            hit = true;
-        }
+        hit = true;
     }
 
     if (hit)
@@ -2363,7 +2358,7 @@ int main(int argc, char** argv)
     // Ground Plane
     
     // Try to load .glb model first, fallback to procedural plane
-    const char* ground_glb_path = "resources/glb/10-Playground6.glb";
+    const char* ground_glb_path = "resources/glb/11-skate.glb";
     Model ground_plane_model;
     Shader ground_plane_shader = { 0 };
     bool using_glb_ground = false;
@@ -2371,6 +2366,7 @@ int main(int argc, char** argv)
     if (FileExists(ground_glb_path))
     {
         ground_plane_model = LoadModel(ground_glb_path);
+        ground_grid.build(ground_plane_model, 1.0f);
         using_glb_ground = true;
 
         // Generate a procedural checkerboard image
@@ -2390,6 +2386,7 @@ int main(int argc, char** argv)
         Mesh ground_plane_mesh = GenMeshPlane(20.0f, 20.0f, 10, 10);
         ground_plane_model = LoadModelFromMesh(ground_plane_mesh);
         ground_plane_model.materials[0].shader = ground_plane_shader;
+        ground_grid.build(ground_plane_model, 1.0f);
     }
     
     // Character
@@ -3909,15 +3906,9 @@ int main(int argc, char** argv)
         float traj_ground_height = 0.0f;
         bool traj_hit = false;
         int nearest_future_idx = trajectory_positions.size > 1 ? 1 : 0;
-        Ray traj_ray = { to_Vector3(trajectory_positions(nearest_future_idx) + vec3(0, 10, 0)), {0, -1, 0} };
-        for (int i = 0; i < ground_plane_model.meshCount; i++)
+        if (ground_grid.get_height(to_Vector3(trajectory_positions(nearest_future_idx)), traj_ground_height))
         {
-            RayCollision traj_collision = GetRayCollisionMesh(traj_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-            if (traj_collision.hit && (!traj_hit || traj_collision.point.y > traj_ground_height))
-            {
-                traj_ground_height = traj_collision.point.y;
-                traj_hit = true;
-            }
+            traj_hit = true;
         }
 
         if (!jump_active)
@@ -4017,24 +4008,8 @@ int main(int argc, char** argv)
                 float right_terrain_height = 0.0f;
                 
                 // Cast rays from 10 units above down to 10 units below
-                Ray left_ray = { to_Vector3(left_toe_pos + vec3(0, 10, 0)), {0, -1, 0} };
-                Ray right_ray = { to_Vector3(right_toe_pos + vec3(0, 10, 0)), {0, -1, 0} };
-                
-                // Check collision with ground plane meshes
-                for (int i = 0; i < ground_plane_model.meshCount; i++)
-                {
-                    RayCollision left_collision = GetRayCollisionMesh(left_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-                    if (left_collision.hit && (left_terrain_height == 0.0f || left_collision.point.y > left_terrain_height))
-                    {
-                        left_terrain_height = left_collision.point.y;
-                    }
-                    
-                    RayCollision right_collision = GetRayCollisionMesh(right_ray, ground_plane_model.meshes[i], ground_plane_model.transform);
-                    if (right_collision.hit && (right_terrain_height == 0.0f || right_collision.point.y > right_terrain_height))
-                    {
-                        right_terrain_height = right_collision.point.y;
-                    }
-                }
+                ground_grid.get_height(to_Vector3(left_toe_pos), left_terrain_height);
+                ground_grid.get_height(to_Vector3(right_toe_pos), right_terrain_height);
                 
                 // Store relative to hip height, but clamp to avoid extreme negatives while falling.
                 const float min_terrain_feature_height = -1.5f;
@@ -4757,15 +4732,7 @@ int main(int argc, char** argv)
                 
                 // Raycast to find terrain height under this foot
                 float terrain_height = 0.0f;
-                Ray foot_ray = { to_Vector3(global_bone_positions(toe_bone) + vec3(0, 10, 0)), {0, -1, 0} };
-                for (int mesh_idx = 0; mesh_idx < ground_plane_model.meshCount; mesh_idx++)
-                {
-                    RayCollision collision = GetRayCollisionMesh(foot_ray, ground_plane_model.meshes[mesh_idx], ground_plane_model.transform);
-                    if (collision.hit && (terrain_height == 0.0f || collision.point.y > terrain_height))
-                    {
-                        terrain_height = collision.point.y;
-                    }
-                }
+                ground_grid.get_height(to_Vector3(global_bone_positions(toe_bone)), terrain_height);
                 float foot_target_height = terrain_height + ik_foot_height;
                 
                 // Update the contact state
@@ -6420,6 +6387,7 @@ int main(int argc, char** argv)
     // Unload stuff and finish
     UnloadModel(character_model);
     UnloadModel(ground_plane_model);
+    ground_grid.cleanup();
     UnloadShader(character_shader);
     if (!using_glb_ground)
     {
