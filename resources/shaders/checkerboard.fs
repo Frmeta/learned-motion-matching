@@ -45,8 +45,8 @@ void main()
                   floor(fragPosition.z * 2.0f);
                   
     vec3 checkColor = mod(total, 2.0f) == 0.0f ? 
-        vec3(0.5f, 0.5f, 0.5f) : 
-        vec3(0.85f, 0.85f, 0.85f);
+        vec3(0.3f, 0.7f, 0.3f) : 
+        vec3(0.4f, 0.9f, 0.4f);
 
     // Studio lighting (3-point light simulation)
     vec3 normal = normalize(fragNormal);
@@ -64,10 +64,11 @@ void main()
                        fill * vec3(0.8f, 0.85f, 1.0f) * 0.4f + 
                        back * vec3(1.0f, 1.0f, 1.0f) * 0.3f;
     
-    studioLight += vec3(0.2f);
+    // studioLight *= 0.4f;
+    studioLight += vec3(0.0f);
     
     // Final RGB with studio light blend
-    vec3 finalRGB = mix(checkColor, studioLight, 0.2f);
+    vec3 finalRGB = mix(checkColor, studioLight, 0.5f);
     
     // --- New: Shadows and Contact AO ---
     
@@ -86,7 +87,7 @@ void main()
     float contactAO = max(blobL, blobR);
     
     // Apply AO: darken ground by up to 60% directly under feet
-    finalRGB *= (1.0 - contactAO * 0.1);
+    finalRGB *= (1.0 - contactAO * 0.2);
     
     finalColor = vec4(finalRGB, 1.0f);
 }
