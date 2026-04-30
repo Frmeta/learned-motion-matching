@@ -4539,24 +4539,26 @@ int main(int argc, char** argv)
         
         vec3 simulation_position_prev = simulation_position;
 
-        // Move by raw matched root velocity (no spring damping/smoothing).
-        if (jump_active)
-        {
-            // simulation_velocity.y = jump_vertical_velocity;
-            // simulation_position.y += simulation_velocity.y * dt;
-            simulation_velocity.y = bone_velocities(0).y;
-            simulation_position.y += simulation_velocity.y * dt;
-            simulation_velocity.x = bone_velocities(0).x;
-            simulation_velocity.z = bone_velocities(0).z;
-            simulation_position.x = bone_positions(0).x;
-            simulation_position.z = bone_positions(0).z;
-        }
-        else
+        simulation_positions_update(
+            simulation_position, 
+            simulation_velocity, 
+            simulation_acceleration, 
+            desired_velocity, 
+            simulation_velocity_halflife, 
+            dt,
+            ground_plane_model);
+
+        if (cartwheel_auto_active)
         {
             simulation_velocity = bone_velocities(0);
             simulation_position = bone_positions(0);
         }
-        simulation_acceleration = vec3();
+
+        if (jump_active)
+        {
+            simulation_velocity.y = jump_vertical_velocity;
+            simulation_position.y += simulation_velocity.y * dt;
+        }
 
         if (jump_active)
         {
@@ -5352,6 +5354,8 @@ int main(int argc, char** argv)
                 joystick_recording_time = 0.0f;
                 std::string output_path = joystick_recording_make_output_path(joystick_recording_folder);
                 snprintf(joystick_recording_output_file, sizeof(joystick_recording_output_file), "%s", output_path.c_str());
+                joystick_recording_start_position = vec3(0.0f, spawn_height_offset, 0.0f);
+                joystick_recording_start_rotation = quat();
                 reset_motion_to_recording_start();
             }
             else
@@ -5412,6 +5416,8 @@ int main(int argc, char** argv)
                     joystick_recording_enabled = false;
                     joystick_playback_enabled = true;
                     joystick_playback_index = 0;
+                    joystick_recording_start_position = vec3(0.0f, spawn_height_offset, 0.0f);
+                    joystick_recording_start_rotation = quat();
                     reset_motion_to_recording_start();
                 }
                 else
