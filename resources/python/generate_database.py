@@ -248,9 +248,9 @@ for entry in files:
         
         contact_velocity_threshold = 0.15
         
-        contact_velocity = np.sqrt(np.sum(np.square(global_velocities[:,np.array([
+        contact_velocity = np.sqrt(np.sum(global_velocities[:,np.array([
             bone_names.index("LeftToe"), 
-            bone_names.index("RightToe")])]**2, axis=-1)))
+            bone_names.index("RightToe")])]**2, axis=-1))
         
         # Contacts are given for when contact bones are below velocity threshold
         contacts = contact_velocity < contact_velocity_threshold
