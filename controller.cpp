@@ -2867,8 +2867,13 @@ int main(int argc, char** argv)
     
     bool lmm_enabled = start_with_lmm_enabled;
     
-    nnet decompressor, stepper, projector;    
-    if (lmm_enabled)
+    nnet decompressor, stepper, projector;
+    bool networks_exist = 
+        FileExists("./resources/bin/decompressor.bin") &&
+        FileExists("./resources/bin/stepper.bin") &&
+        FileExists("./resources/bin/projector.bin");
+
+    if (networks_exist && !force_mm_mode)
     {
         if (debug) std::cout << "Loading neural networks..." << std::endl;
         
@@ -2930,7 +2935,7 @@ int main(int argc, char** argv)
     if (debug) std::cout << "Setting up evaluations..." << std::endl;
 
     nnet_evaluation decompressor_evaluation, stepper_evaluation, projector_evaluation;
-    if (lmm_enabled)
+    if (lmm_networks_compatible)
     {
         decompressor_evaluation.resize(decompressor);
         stepper_evaluation.resize(stepper);
