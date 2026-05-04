@@ -13,7 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 INPUT_FOLDER = ROOT_DIR / "resources" / "input-recording"
 SCORE_DIR = ROOT_DIR / "score"
 
-files = [
+test_files = [
     # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
     ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
     ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
