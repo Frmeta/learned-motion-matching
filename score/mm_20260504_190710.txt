@@ -1,0 +1,15 @@
+MM analysis
+input folder: ./resources/input-recording
+generated: 20260504_190710
+
+joystick_recording_20260430_140209.csv | MM_MPJPE=3.555650e+00 | frames=212 | joints=23 | time_ms=67.977 | mem_delta_mb=0.508 | mem_peak_mb=337.188 | mem_avg_mb=336.984
+joystick_recording_20260430_140220.csv | MM_MPJPE=5.605266e+00 | frames=326 | joints=23 | time_ms=56.159 | mem_delta_mb=0.223 | mem_peak_mb=337.473 | mem_avg_mb=337.298
+joystick_recording_20260430_140252.csv | MM_MPJPE=9.374639e+00 | frames=426 | joints=23 | time_ms=61.594 | mem_delta_mb=0.137 | mem_peak_mb=337.625 | mem_avg_mb=337.512
+joystick_recording_20260430_140659.csv | MM_MPJPE=7.248156e+00 | frames=418 | joints=23 | time_ms=61.444 | mem_delta_mb=0.000 | mem_peak_mb=337.625 | mem_avg_mb=337.625
+
+Average MM MPJPE: 6.445928e+00 (across 4 files)
+Average Time (ms): MM=61.793
+Total Time (ms): MM=247.173
+Average Memory Delta (MB): MM=0.217
+Average Memory Peak (MB): MM=337.478
+Average Memory Usage (MB): MM=337.355

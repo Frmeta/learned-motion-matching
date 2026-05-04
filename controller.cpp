@@ -2273,10 +2273,12 @@ int main(int argc, char** argv)
             else if (strcmp(argv[argi], "--analyze-mm") == 0)
             {
                 mode = APP_MODE_ANALYZE_MM;
+                force_mm_mode = true;
             }
             else if (strcmp(argv[argi], "--analyze-lmm") == 0)
             {
                 mode = APP_MODE_ANALYZE_LMM;
+                start_with_lmm_enabled = true;
             }
             else if (strncmp(argv[argi], "--mode=", 7) == 0)
             {
@@ -2292,10 +2294,12 @@ int main(int argc, char** argv)
                 else if (strcmp(mode_name, "analyze-mm") == 0)
                 {
                     mode = APP_MODE_ANALYZE_MM;
+                    force_mm_mode = true;
                 }
                 else if (strcmp(mode_name, "analyze-lmm") == 0)
                 {
                     mode = APP_MODE_ANALYZE_LMM;
+                    start_with_lmm_enabled = true;
                 }
                 else
                 {
@@ -5912,6 +5916,12 @@ int main(int argc, char** argv)
 #else
     if (mode != APP_MODE_WINDOW)
     {
+        char cwd[1024];
+        if (GetCurrentDirectoryA(sizeof(cwd), cwd))
+        {
+            std::cout << "Analyze: Working Directory: " << cwd << std::endl;
+        }
+
         std::vector<std::string> analysis_files;
         if (analyze_input_is_file)
         {
@@ -6105,6 +6115,11 @@ int main(int argc, char** argv)
             return error_sum / (double)sample_count;
         };
 
+        if (db.nbones() == 0)
+        {
+            std::cout << "Analyze: database not loaded or empty bones. Bone positions comparison will fail." << std::endl;
+        }
+        
         std::vector<analyze_result> results;
         for (const std::string& name : analysis_files)
         {
@@ -6116,9 +6131,14 @@ int main(int argc, char** argv)
             if (!load_joystick_recording_csv(input_path.c_str(), samples) || samples.empty())
             {
                 res.ok = false;
-                res.note = "failed to load or empty";
+                res.note = samples.empty() ? "empty or invalid format" : "failed to load";
+                std::cout << "Analyze " << name << " -> FAILED: " << res.note << std::endl;
                 results.push_back(res);
                 continue;
+            }
+            else
+            {
+                std::cout << "Analyze " << name << " -> Loaded " << samples.size() << " samples." << std::endl;
             }
 
             std::vector<array1d<vec3>> mm_capture;
@@ -6151,7 +6171,8 @@ int main(int argc, char** argv)
             if ((need_mm && !mm_ok) || (need_lmm && !lmm_ok))
             {
                 res.ok = false;
-                res.note = "failed capture";
+                res.note = "failed capture (no frames recorded)";
+                std::cout << "Analyze " << name << " -> FAILED: " << res.note << std::endl;
                 results.push_back(res);
                 continue;
             }
