@@ -1,0 +1,13 @@
+LMM analysis
+input file: ./resources/bin/database_test.bin
+generated: 20260504_214753
+
+database_test.bin | LMM_World=4.046181e+00 | LMM_Pose=2.109750e-01 | frames=43565 | joints=23 | time_ms=25978.848 | mem_delta_mb=1.422 | mem_peak_mb=217.137 | mem_avg_mb=211.997
+
+Average LMM MPJPE (World): 4.046181e+00 (across 1 files)
+Average LMM MPJPE (Pose): 2.109750e-01
+Average Time (ms): LMM=25978.848
+Total Time (ms): LMM=25978.848
+Average Memory Delta (MB): LMM=1.422
+Average Memory Peak (MB): LMM=217.137
+Average Memory Usage (MB): LMM=211.997

@@ -2245,7 +2245,13 @@ int main(int argc, char** argv)
         app_mode mode = APP_MODE_WINDOW;
         char analyze_input_path[512] = "./resources/input-recording";
         bool analyze_input_is_file = false;
+        bool analyze_input_is_database = false;
         bool force_rebuild_features = false;
+
+        database test_db;
+        std::vector<array1d<vec3>> database_test_reference_poses;
+        bool database_playback_enabled = false;
+        int database_playback_index = 0;
         for (int argi = 1; argi < argc; argi++)
         {
             if (strcmp(argv[argi], "--mm") == 0)
@@ -2320,6 +2326,13 @@ int main(int argc, char** argv)
             {
                 snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi]);
                 analyze_input_is_file = true;
+                
+                // Check if it's a database file
+                size_t len = strlen(analyze_input_path);
+                if (len > 4 && strcmp(analyze_input_path + len - 4, ".bin") == 0)
+                {
+                    analyze_input_is_database = true;
+                }
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
@@ -4267,6 +4280,37 @@ int main(int argc, char** argv)
         if (debug) std::cout << "Done Query" << std::endl;
         assert(offset == db.nfeatures());
         if (debug) std::cout << "Done assert" << std::endl;
+        
+        // --- Database-Driven Analysis Override ---
+        if (database_playback_enabled)
+        {
+            if (database_playback_index % 1000 == 0) std::cout << "Analyze: Step " << database_playback_index << "/" << test_db.nframes() << std::endl;
+            
+            // Extract feature vector from test database for current frame
+            int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
+            if (test_frame < test_db.features.rows && test_db.features.cols >= 45)
+            {
+                slice1d<float> test_features = test_db.features(test_frame);
+                
+                auto copy_test_feature = [&](int start, int count) {
+                    for (int j = 0; j < count; j++) {
+                        int idx = start + j;
+                        if (idx < test_db.features.cols && idx < query.size)
+                        {
+                            float normalized = test_features(idx);
+                            float raw = (normalized * test_db.features_scale(idx)) + test_db.features_offset(idx);
+                            query(idx) = raw;
+                        }
+                    }
+                };
+                
+                copy_test_feature(15, 18); // Trajectory Positions & Directions
+                copy_test_feature(33, 8);  // Terrain Heights
+                copy_test_feature(41, 4);  // Gait Flags
+            }
+        }
+        // ------------------------------------------
+
         // Check if we reached the end of the current anim
         bool end_of_anim = database_index_clamp(db, frame_index, 1) == frame_index;
         
@@ -5923,7 +5967,42 @@ int main(int argc, char** argv)
         }
 
         std::vector<std::string> analysis_files;
-        if (analyze_input_is_file)
+        if (analyze_input_is_database)
+        {
+            std::cout << "Analyze: Loading test database: " << analyze_input_path << std::endl;
+            database_load(test_db, analyze_input_path);
+            if (test_db.nbones() != db.nbones())
+            {
+                std::cout << "Analyze: ERROR - Test database bone count mismatch (" << test_db.nbones() << " vs " << db.nbones() << ")" << std::endl;
+                return -1;
+            }
+            if (test_db.nfeatures() < 45)
+            {
+                std::cout << "Analyze: WARNING - Test database has fewer than 45 features (" << test_db.nfeatures() << "). Trajectory/Gait signals may be missing." << std::endl;
+            }
+            
+            std::cout << "Analyze: Pre-computing reference poses..." << std::endl;
+            database_test_reference_poses.clear();
+            database_test_reference_poses.reserve(test_db.nframes());
+            for (int i = 0; i < test_db.nframes(); i++)
+            {
+                array1d<vec3> pose(test_db.nbones());
+                array1d<quat> rot(test_db.nbones());
+                forward_kinematics_full(
+                    pose,
+                    rot,
+                    test_db.bone_positions(i),
+                    test_db.bone_rotations(i),
+                    test_db.bone_parents);
+                database_test_reference_poses.push_back(pose);
+            }
+            std::cout << "Analyze: Reference poses computed: " << database_test_reference_poses.size() << std::endl;
+            
+            // Set up search for the whole database
+            analysis_files.clear();
+            analysis_files.push_back(GetFileName(analyze_input_path));
+        }
+        else if (analyze_input_is_file)
         {
             if (FileExists(analyze_input_path))
             {
@@ -5955,6 +6034,8 @@ int main(int argc, char** argv)
             double mpjpe = -1.0;
             double mm_mpjpe = -1.0;
             double lmm_mpjpe = -1.0;
+            double mm_pose_mpjpe = -1.0;
+            double lmm_pose_mpjpe = -1.0;
             double mm_time_ms = -1.0;
             double lmm_time_ms = -1.0;
             float mm_mem_delta_mb = -1.0f;
@@ -5982,8 +6063,10 @@ int main(int argc, char** argv)
         {
             reset_runtime_for_analysis();
             lmm_enabled = use_lmm;
+            database_playback_enabled = analyze_input_is_database;
+            database_playback_index = 0;
             joystick_playback_samples = samples;
-            joystick_playback_enabled = true;
+            joystick_playback_enabled = !analyze_input_is_database;
             joystick_playback_index = 0;
             analysis_capture_bone_positions.clear();
             analysis_capture_enabled = true;
@@ -6001,10 +6084,17 @@ int main(int argc, char** argv)
             }
 #endif
 
-            const int max_steps = (int)samples.size() + 8;
-            for (int i = 0; i < max_steps && joystick_playback_enabled; i++)
+            const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
+            for (int i = 0; i < max_steps; i++)
             {
+                if (!analyze_input_is_database && !joystick_playback_enabled) break;
+                
                 update_func();
+                
+                if (analyze_input_is_database)
+                {
+                    database_playback_index++;
+                }
 #if defined(_WIN32)
                 float mem_now = get_process_memory_mb();
                 if (mem_now >= 0.0f)
@@ -6030,18 +6120,22 @@ int main(int argc, char** argv)
 #endif
 
             analysis_capture_enabled = false;
+            database_playback_enabled = false;
             output = analysis_capture_bone_positions;
             return !output.empty();
         };
 
-        auto compute_mpjpe = [](const std::vector<array1d<vec3>>& mm,
-                    const std::vector<array1d<vec3>>& lmm,
+        auto compute_mpjpe = [](const std::vector<array1d<vec3>>& ref_capture,
+                                const std::vector<array1d<vec3>>& test_capture,
                                 int& used_frames,
-                                int& used_joints) -> double
+                                int& used_joints,
+                                bool root_relative = false) -> double
         {
-            used_frames = std::min((int)mm.size(), (int)lmm.size());
+            int n_ref = (int)ref_capture.size();
+            int n_test = (int)test_capture.size();
+            used_frames = n_test;
             used_joints = 0;
-            if (used_frames <= 0)
+            if (used_frames <= 0 || n_ref <= 0)
             {
                 return -1.0;
             }
@@ -6051,16 +6145,30 @@ int main(int argc, char** argv)
 
             for (int f = 0; f < used_frames; f++)
             {
-                int joint_count = std::min(mm[f].size, lmm[f].size);
+                int ref_f = std::min(f, n_ref - 1);
+                int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
                 if (joint_count <= 0)
                 {
                     continue;
                 }
+
                 used_joints = joint_count;
+
+                vec3 ref_root = ref_capture[ref_f](0);
+                vec3 test_root = test_capture[f](0);
 
                 for (int j = 0; j < joint_count; j++)
                 {
-                    vec3 d = mm[f](j) - lmm[f](j);
+                    vec3 p_ref = ref_capture[ref_f](j);
+                    vec3 p_test = test_capture[f](j);
+
+                    if (root_relative)
+                    {
+                        p_ref = p_ref - ref_root;
+                        p_test = p_test - test_root;
+                    }
+
+                    vec3 d = p_ref - p_test;
                     error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
                     sample_count++;
                 }
@@ -6074,45 +6182,13 @@ int main(int argc, char** argv)
             return error_sum / (double)sample_count;
         };
 
-        auto compute_reference_mpjpe = [](const array1d<vec3>& reference,
-                                          const std::vector<array1d<vec3>>& capture,
-                                          int& used_frames,
-                                          int& used_joints) -> double
+        auto compute_reference_mpjpe = [&](const std::vector<array1d<vec3>>& reference,
+                                           const std::vector<array1d<vec3>>& capture,
+                                           int& used_frames,
+                                           int& used_joints,
+                                           bool root_relative = false) -> double
         {
-            used_frames = (int)capture.size();
-            used_joints = reference.size;
-            if (used_frames <= 0 || used_joints <= 0)
-            {
-                return -1.0;
-            }
-
-            double error_sum = 0.0;
-            long long sample_count = 0;
-
-            for (int f = 0; f < used_frames; f++)
-            {
-                int joint_count = std::min(reference.size, capture[f].size);
-                if (joint_count <= 0)
-                {
-                    continue;
-                }
-
-                used_joints = joint_count;
-
-                for (int j = 0; j < joint_count; j++)
-                {
-                    vec3 d = reference(j) - capture[f](j);
-                    error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
-                    sample_count++;
-                }
-            }
-
-            if (sample_count == 0)
-            {
-                return -1.0;
-            }
-
-            return error_sum / (double)sample_count;
+            return compute_mpjpe(reference, capture, used_frames, used_joints, root_relative);
         };
 
         if (db.nbones() == 0)
@@ -6128,17 +6204,24 @@ int main(int argc, char** argv)
 
             std::vector<joystick_record_sample> samples;
             std::string input_path = analyze_input_is_file ? std::string(analyze_input_path) : (std::string(analyze_input_path) + "/" + name);
-            if (!load_joystick_recording_csv(input_path.c_str(), samples) || samples.empty())
+            if (!analyze_input_is_database)
             {
-                res.ok = false;
-                res.note = samples.empty() ? "empty or invalid format" : "failed to load";
-                std::cout << "Analyze " << name << " -> FAILED: " << res.note << std::endl;
-                results.push_back(res);
-                continue;
+                if (!load_joystick_recording_csv(input_path.c_str(), samples) || samples.empty())
+                {
+                    res.ok = false;
+                    res.note = samples.empty() ? "empty or invalid format" : "failed to load";
+                    std::cout << "Analyze " << name << " -> FAILED: " << res.note << std::endl;
+                    results.push_back(res);
+                    continue;
+                }
+                else
+                {
+                    std::cout << "Analyze " << name << " -> Loaded " << samples.size() << " samples." << std::endl;
+                }
             }
             else
             {
-                std::cout << "Analyze " << name << " -> Loaded " << samples.size() << " samples." << std::endl;
+                std::cout << "Analyze " << name << " -> Database playback mode." << std::endl;
             }
 
             std::vector<array1d<vec3>> mm_capture;
@@ -6179,44 +6262,68 @@ int main(int argc, char** argv)
 
             int used_frames = 0;
             int used_joints = 0;
+            if (analyze_input_is_database)
+            {
+                if (need_mm)
+                {
+                    res.mm_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, false); // World
+                    res.mm_pose_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, true); // Root-relative
+                    res.frame_count = used_frames;
+                    res.joint_count = used_joints;
+                }
+                if (need_lmm)
+                {
+                    res.lmm_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, false); // World
+                    res.lmm_pose_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, true); // Root-relative
+                    if (!need_mm)
+                    {
+                        res.frame_count = used_frames;
+                        res.joint_count = used_joints;
+                    }
+                }
+                
+                res.ok = (res.mm_mpjpe >= 0.0 || res.lmm_mpjpe >= 0.0);
+
+                if (need_mm) std::cout << "Analyze " << name << " -> MM World Error=" << res.mm_mpjpe << " (Pose=" << res.mm_pose_mpjpe << ")" << std::endl;
+                if (need_lmm) std::cout << "Analyze " << name << " -> LMM World Error=" << res.lmm_mpjpe << " (Pose=" << res.lmm_pose_mpjpe << ")" << std::endl;
+            }
+            else
+            {
+                if (mode == APP_MODE_ANALYZE_BOTH || mode == APP_MODE_ANALYZE_MM)
+                {
+                    res.mm_mpjpe = compute_reference_mpjpe(std::vector<array1d<vec3>>(1, base_bone_positions), mm_capture, used_frames, used_joints);
+                }
+                if (mode == APP_MODE_ANALYZE_BOTH || mode == APP_MODE_ANALYZE_LMM)
+                {
+                    res.lmm_mpjpe = compute_reference_mpjpe(std::vector<array1d<vec3>>(1, base_bone_positions), lmm_capture, used_frames, used_joints);
+                }
+                
+                res.frame_count = used_frames;
+                res.joint_count = used_joints;
+                res.ok = (mode == APP_MODE_ANALYZE_MM) ? (res.mm_mpjpe >= 0.0) : 
+                         (mode == APP_MODE_ANALYZE_LMM) ? (res.lmm_mpjpe >= 0.0) :
+                         (res.mm_mpjpe >= 0.0 && res.lmm_mpjpe >= 0.0);
+
+                if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    std::cout << "Analyze " << name << " -> MM MPJPE=" << res.mm_mpjpe;
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    std::cout << "Analyze " << name << " -> LMM MPJPE=" << res.lmm_mpjpe;
+                }
+            }
+
             if (mode == APP_MODE_ANALYZE_BOTH)
             {
                 res.mpjpe = compute_mpjpe(mm_capture, lmm_capture, used_frames, used_joints);
-                res.frame_count = used_frames;
-                res.joint_count = used_joints;
-                res.ok = res.mpjpe >= 0.0;
-                if (!res.ok)
-                {
-                    res.note = "invalid score";
-                }
-                std::cout << "Analyze " << name << " -> MPJPE=" << res.mpjpe
-                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
+                res.ok = res.ok && (res.mpjpe >= 0.0);
+                std::cout << "Analyze " << name << " -> Both: MPJPE (LMM vs MM)=" << res.mpjpe;
             }
-            else if (mode == APP_MODE_ANALYZE_MM)
+
+            if (!res.ok)
             {
-                res.mm_mpjpe = compute_reference_mpjpe(base_bone_positions, mm_capture, used_frames, used_joints);
-                res.frame_count = used_frames;
-                res.joint_count = used_joints;
-                res.ok = res.mm_mpjpe >= 0.0;
-                if (!res.ok)
-                {
-                    res.note = "invalid score";
-                }
-                std::cout << "Analyze " << name << " -> MM MPJPE=" << res.mm_mpjpe
-                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
-            }
-            else if (mode == APP_MODE_ANALYZE_LMM)
-            {
-                res.lmm_mpjpe = compute_reference_mpjpe(base_bone_positions, lmm_capture, used_frames, used_joints);
-                res.frame_count = used_frames;
-                res.joint_count = used_joints;
-                res.ok = res.lmm_mpjpe >= 0.0;
-                if (!res.ok)
-                {
-                    res.note = "invalid score";
-                }
-                std::cout << "Analyze " << name << " -> LMM MPJPE=" << res.lmm_mpjpe
-                          << " (frames=" << res.frame_count << ", joints=" << res.joint_count << ")";
+                res.note = "invalid score";
             }
 
             if (need_mm)
@@ -6297,8 +6404,16 @@ int main(int argc, char** argv)
                     }
                     else if (mode == APP_MODE_ANALYZE_MM)
                     {
-                        fprintf(report, "%s | MM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                            r.file.c_str(), r.mm_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
+                        if (analyze_input_is_database)
+                        {
+                            fprintf(report, "%s | MM_World=%.6e | MM_Pose=%.6e | frames=%d | joints=%d | time_ms=%.3f",
+                                r.file.c_str(), r.mm_mpjpe, r.mm_pose_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
+                        }
+                        else
+                        {
+                            fprintf(report, "%s | MM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
+                                r.file.c_str(), r.mm_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
+                        }
 #if defined(_WIN32)
                         fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
                             r.mm_mem_delta_mb, r.mm_mem_peak_mb);
@@ -6309,8 +6424,16 @@ int main(int argc, char** argv)
                     }
                     else if (mode == APP_MODE_ANALYZE_LMM)
                     {
-                        fprintf(report, "%s | LMM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                            r.file.c_str(), r.lmm_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
+                        if (analyze_input_is_database)
+                        {
+                            fprintf(report, "%s | LMM_World=%.6e | LMM_Pose=%.6e | frames=%d | joints=%d | time_ms=%.3f",
+                                r.file.c_str(), r.lmm_mpjpe, r.lmm_pose_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
+                        }
+                        else
+                        {
+                            fprintf(report, "%s | LMM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
+                                r.file.c_str(), r.lmm_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
+                        }
 #if defined(_WIN32)
                         fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
                             r.lmm_mem_delta_mb, r.lmm_mem_peak_mb);
@@ -6392,11 +6515,23 @@ int main(int argc, char** argv)
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
-                    fprintf(report, "\nAverage MM MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "\nAverage MM MPJPE (World): %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    if (analyze_input_is_database)
+                    {
+                        double pose_sum = 0.0;
+                        for (const auto& r : results) if (r.ok) pose_sum += r.mm_pose_mpjpe;
+                        fprintf(report, "Average MM MPJPE (Pose): %.6e\n", pose_sum / (double)avg_count);
+                    }
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
-                    fprintf(report, "\nAverage LMM MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "\nAverage LMM MPJPE (World): %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    if (analyze_input_is_database)
+                    {
+                        double pose_sum = 0.0;
+                        for (const auto& r : results) if (r.ok) pose_sum += r.lmm_pose_mpjpe;
+                        fprintf(report, "Average LMM MPJPE (Pose): %.6e\n", pose_sum / (double)avg_count);
+                    }
                 }
             }
             else

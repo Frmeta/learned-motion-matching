@@ -1,0 +1,12 @@
+MM vs LMM analysis (MPJPE)
+input file: ./resources/bin/database_test.bin
+generated: 20260504_214938
+
+database_test.bin | MPJPE=2.694080e-01 | frames=43565 | joints=23 | time_ms MM=20451.861 LMM=25199.505 | mem_delta_mb MM=1.246 LMM=8.988 | mem_peak_mb MM=432.145 LMM=434.293 | mem_avg_mb MM=426.211 LMM=428.738
+
+Average MPJPE: 2.694080e-01 (across 1 files)
+Average Time (ms): MM=20451.861 LMM=25199.505
+Total Time (ms): MM=20451.861 LMM=25199.505
+Average Memory Delta (MB): MM=1.246 LMM=8.988
+Average Memory Peak (MB): MM=432.145 LMM=434.293
+Average Memory Usage (MB): MM=426.211 LMM=428.738
