@@ -2550,8 +2550,8 @@ int main(int argc, char** argv)
     
     if (start_with_lmm_enabled)
     {
-        std::cout << "LMM mode enabled. Filtering database for cartwheel frames to save memory..." << std::endl;
-        database_filter_cartwheel(db);
+        std::cout << "LMM mode enabled. Filtering database for special motion frames (cartwheel/jump) to save memory..." << std::endl;
+        database_filter_special_motions(db);
         database_build_bounds(db); // Rebuild bounds for the filtered database
     }
 
@@ -2713,10 +2713,15 @@ int main(int argc, char** argv)
     float cartwheel_auto_timer = 0.0f;
     const float cartwheel_auto_duration = 1.0f;
     bool cartwheel_search_freeze_prev = false;
+    bool jump_search_freeze_prev = false;
     bool cartwheel_query_lock_prev = false;
+    bool jump_query_lock_prev = false;
     vec3 cartwheel_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
+    vec3 jump_query_lock_forward = vec3(0.0f, 0.0f, 1.0f);
     float cartwheel_query_lock_step_distance = 0.0f;
+    float jump_query_lock_step_distance = 0.0f;
     float cartwheel_first_search_step_distance = 0.0f;
+    float jump_first_search_step_distance = 0.0f;
     
     vec3 simulation_position;
     vec3 simulation_velocity;
@@ -2749,7 +2754,7 @@ int main(int argc, char** argv)
     float simulation_crouch_side_speed = 1.5f;
     float simulation_crouch_back_speed = 1.25f;
     float cartwheel_speed_boost = 1.2f;
-    float jump_speed_boost = 3.0f;
+    float jump_speed_boost = 1.2f;
 
     float climbing_min_speed_factor = 0.1f;
     float climbing_probe_distance = 0.6f;
@@ -2768,7 +2773,7 @@ int main(int argc, char** argv)
     float jump_buffer_timer = 0.0f;
     float jump_coyote_timer = 0.0f;
     float jump_gait_timer = 0.0f;
-    const float jump_gait_hold_time = 0.7f;
+    const float jump_gait_hold_time = 0.9f;
     
     array1d<vec3> trajectory_desired_velocities(4);
     array1d<quat> trajectory_desired_rotations(4);
@@ -3202,10 +3207,15 @@ int main(int argc, char** argv)
     const bool base_desired_jump_prev = desired_jump_prev;
     const float base_cartwheel_auto_timer = cartwheel_auto_timer;
     const bool base_cartwheel_search_freeze_prev = cartwheel_search_freeze_prev;
+    const bool base_jump_search_freeze_prev = jump_search_freeze_prev;
     const bool base_cartwheel_query_lock_prev = cartwheel_query_lock_prev;
+    const bool base_jump_query_lock_prev = jump_query_lock_prev;
     const vec3 base_cartwheel_query_lock_forward = cartwheel_query_lock_forward;
+    const vec3 base_jump_query_lock_forward = jump_query_lock_forward;
     const float base_cartwheel_query_lock_step_distance = cartwheel_query_lock_step_distance;
+    const float base_jump_query_lock_step_distance = jump_query_lock_step_distance;
     const float base_cartwheel_first_search_step_distance = cartwheel_first_search_step_distance;
+    const float base_jump_first_search_step_distance = jump_first_search_step_distance;
     const vec3 base_simulation_position = simulation_position;
     const vec3 base_simulation_velocity = simulation_velocity;
     const vec3 base_simulation_acceleration = simulation_acceleration;
@@ -3284,10 +3294,15 @@ int main(int argc, char** argv)
         desired_jump_prev = base_desired_jump_prev;
         cartwheel_auto_timer = base_cartwheel_auto_timer;
         cartwheel_search_freeze_prev = base_cartwheel_search_freeze_prev;
+        jump_search_freeze_prev = base_jump_search_freeze_prev;
         cartwheel_query_lock_prev = base_cartwheel_query_lock_prev;
+        jump_query_lock_prev = base_jump_query_lock_prev;
         cartwheel_query_lock_forward = base_cartwheel_query_lock_forward;
+        jump_query_lock_forward = base_jump_query_lock_forward;
         cartwheel_query_lock_step_distance = base_cartwheel_query_lock_step_distance;
+        jump_query_lock_step_distance = base_jump_query_lock_step_distance;
         cartwheel_first_search_step_distance = base_cartwheel_first_search_step_distance;
+        jump_first_search_step_distance = base_jump_first_search_step_distance;
         simulation_position = base_simulation_position;
         simulation_velocity = base_simulation_velocity;
         simulation_acceleration = base_simulation_acceleration;
@@ -3452,15 +3467,7 @@ int main(int argc, char** argv)
         }
 
         cartwheel_query_lock_active = desired_cartwheel;
-
-        bool cartwheel_search_freeze_active = cartwheel_auto_active;
-        bool cartwheel_search_freeze_started =
-            cartwheel_search_freeze_active && !cartwheel_search_freeze_prev;
-        cartwheel_search_freeze_prev = cartwheel_search_freeze_active;
-        if (cartwheel_search_freeze_started)
-        {
-            cartwheel_first_search_step_distance = simulation_run_fwrd_speed * (20.0f * dt);
-        }
+        bool jump_query_lock_active = jump_active;
 
         if (cartwheel_auto_active)
         {
@@ -3499,8 +3506,8 @@ int main(int argc, char** argv)
         }
 
         float climbing_speed_scale = 1.0f;
-        vec3 move_input_world = cartwheel_query_lock_active
-            ? cartwheel_query_lock_forward
+        vec3 move_input_world = (cartwheel_query_lock_active || jump_query_lock_active)
+            ? (cartwheel_query_lock_active ? cartwheel_query_lock_forward : jump_query_lock_forward)
             : quat_mul_vec3(
                 quat_from_angle_axis(camera_azimuth, vec3(0, 1, 0)),
                 gamepadstick_left);
@@ -3532,9 +3539,9 @@ int main(int argc, char** argv)
         simulation_side_speed *= climbing_speed_scale;
         simulation_back_speed *= climbing_speed_scale;
 
-        if (cartwheel_query_lock_active)
+        if (cartwheel_query_lock_active || jump_query_lock_active)
         {
-            if (!cartwheel_query_lock_prev)
+            if (cartwheel_query_lock_active && !cartwheel_query_lock_prev)
             {
                 vec3 lock_forward = quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f));
                 lock_forward.y = 0.0f;
@@ -3545,13 +3552,27 @@ int main(int argc, char** argv)
                 }
 
                 cartwheel_query_lock_step_distance = simulation_fwrd_speed * (20.0f * dt);
+                cartwheel_query_lock_prev = true;
             }
+            
+            if (jump_query_lock_active && !jump_query_lock_prev)
+            {
+                vec3 lock_forward = quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f));
+                lock_forward.y = 0.0f;
 
-            cartwheel_query_lock_prev = true;
+                if (length(lock_forward) > 0.001f)
+                {
+                    jump_query_lock_forward = normalize(lock_forward);
+                }
+
+                jump_query_lock_step_distance = simulation_fwrd_speed * (20.0f * dt);
+                jump_query_lock_prev = true;
+            }
         }
         else
         {
             cartwheel_query_lock_prev = false;
+            jump_query_lock_prev = false;
         }
         
         // Get the desired velocity
@@ -3598,6 +3619,25 @@ int main(int argc, char** argv)
             jump_vertical_velocity = jump_initial_vertical_speed;
             jump_buffer_timer = 0.0f;
             jump_coyote_timer = 0.0f;
+        }
+
+        bool cartwheel_search_freeze_active = cartwheel_auto_active;
+        bool cartwheel_search_freeze_started =
+            cartwheel_search_freeze_active && !cartwheel_search_freeze_prev;
+        cartwheel_search_freeze_prev = cartwheel_search_freeze_active;
+
+        bool jump_search_freeze_active = jump_active;
+        bool jump_search_freeze_started =
+            jump_search_freeze_active && !jump_search_freeze_prev;
+        jump_search_freeze_prev = jump_search_freeze_active;
+
+        if (cartwheel_search_freeze_started)
+        {
+            cartwheel_first_search_step_distance = simulation_run_fwrd_speed * (20.0f * dt);
+        }
+        if (jump_search_freeze_started)
+        {
+            jump_first_search_step_distance = simulation_run_fwrd_speed * (20.0f * dt);
         }
 
         // Tick jump_gait_timer down unconditionally every frame
@@ -3906,9 +3946,10 @@ int main(int argc, char** argv)
         array1d<vec3> query_trajectory_positions = trajectory_positions;
         array1d<quat> query_trajectory_rotations = trajectory_rotations;
 
-        if (cartwheel_query_lock_active)
+        if (cartwheel_query_lock_active || jump_query_lock_active)
         {
-            float lock_yaw = atan2f(cartwheel_query_lock_forward.x, cartwheel_query_lock_forward.z);
+            vec3 lock_forward = cartwheel_query_lock_active ? cartwheel_query_lock_forward : jump_query_lock_forward;
+            float lock_yaw = atan2f(lock_forward.x, lock_forward.z);
             quat lock_rotation = quat_from_angle_axis(lock_yaw - 0.5f * PIf, vec3(0.0f, 1.0f, 0.0f));
             vec3 base_position = bone_positions(0);
 
@@ -3917,11 +3958,22 @@ int main(int argc, char** argv)
 
             for (int i = 1; i < query_trajectory_positions.size; i++)
             {
-                float step_distance = cartwheel_search_freeze_started
-                    ? cartwheel_first_search_step_distance
-                    : cartwheel_query_lock_step_distance;
+                float step_distance = 0.0f;
+                if (cartwheel_query_lock_active)
+                {
+                    step_distance = cartwheel_search_freeze_started
+                        ? cartwheel_first_search_step_distance
+                        : cartwheel_query_lock_step_distance;
+                }
+                else
+                {
+                    step_distance = jump_search_freeze_started
+                        ? jump_first_search_step_distance
+                        : jump_query_lock_step_distance;
+                }
+
                 float distance = step_distance * (float)i;
-                query_trajectory_positions(i) = base_position + cartwheel_query_lock_forward * distance;
+                query_trajectory_positions(i) = base_position + lock_forward * distance;
                 query_trajectory_rotations(i) = lock_rotation;
             }
         }
@@ -4217,13 +4269,14 @@ int main(int argc, char** argv)
         // Do we need to search?
         if (debug) std::cout << "Do we?" << std::endl;
         bool search_requested = force_search || search_timer <= 0.0f || end_of_anim;
-        bool force_mm_search_on_cartwheel_freeze_start = cartwheel_search_freeze_started;
-        bool use_lmm_path = lmm_runtime_enabled && !cartwheel_search_freeze_active;
-        bool allow_mm_search = (!lmm_runtime_enabled && !cartwheel_search_freeze_active) || force_mm_search_on_cartwheel_freeze_start;
+        bool force_mm_search_on_freeze_start = cartwheel_search_freeze_started || jump_search_freeze_started;
+        bool use_lmm_path = lmm_runtime_enabled && !cartwheel_search_freeze_active && !jump_search_freeze_active;
+        bool allow_mm_search = (!lmm_runtime_enabled && !cartwheel_search_freeze_active && !jump_search_freeze_active) || 
+            force_mm_search_on_freeze_start;
         bool allow_lmm_projector = use_lmm_path;
         bool ran_search_or_projector = false;
 
-        if (search_requested || force_mm_search_on_cartwheel_freeze_start)
+        if (search_requested || force_mm_search_on_freeze_start)
         {
             if (use_lmm_path)
             {
@@ -4566,16 +4619,10 @@ int main(int argc, char** argv)
             dt,
             ground_plane_model);
 
-        if (cartwheel_auto_active)
+        if (cartwheel_auto_active || jump_active)
         {
             simulation_velocity = bone_velocities(0);
             simulation_position = bone_positions(0);
-        }
-
-        if (jump_active)
-        {
-            simulation_velocity.y = jump_vertical_velocity;
-            simulation_position.y += simulation_velocity.y * dt;
         }
 
         if (jump_active)

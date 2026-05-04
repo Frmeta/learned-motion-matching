@@ -222,31 +222,37 @@ void database_load_matching_features(database& db, const char* filename)
 
 #include <vector>
 
-void database_filter_cartwheel(database& db)
+void database_filter_special_motions(database& db)
 {
     int total_frames = db.nframes();
-    if (total_frames == 0 || db.cartwheel_states.rows != total_frames) return;
+    if (total_frames == 0) return;
     
-    int cartwheel_count = 0;
+    // Check if state arrays are valid for filtering
+    bool has_cartwheel = db.cartwheel_states.rows == total_frames;
+    bool has_jump = db.jump_states.rows == total_frames;
+    
+    int special_count = 0;
     for (int i = 0; i < total_frames; i++) {
-        if (db.cartwheel_states(i, 0)) cartwheel_count++;
+        bool is_special = (has_cartwheel && db.cartwheel_states(i, 0)) || 
+                         (has_jump && db.jump_states(i, 0));
+        if (is_special) special_count++;
     }
     
-    if (cartwheel_count == total_frames || cartwheel_count == 0) return;
+    if (special_count == total_frames || special_count == 0) return;
     
-    array2d<vec3> new_bone_positions(cartwheel_count, db.nbones());
-    array2d<vec3> new_bone_velocities(cartwheel_count, db.nbones());
-    array2d<quat> new_bone_rotations(cartwheel_count, db.nbones());
-    array2d<vec3> new_bone_angular_velocities(cartwheel_count, db.nbones());
+    array2d<vec3> new_bone_positions(special_count, db.nbones());
+    array2d<vec3> new_bone_velocities(special_count, db.nbones());
+    array2d<quat> new_bone_rotations(special_count, db.nbones());
+    array2d<vec3> new_bone_angular_velocities(special_count, db.nbones());
     
-    array2d<float> new_features(cartwheel_count, db.nfeatures());
-    array2d<bool> new_contact_states(cartwheel_count, db.ncontacts());
-    array2d<float> new_future_toe_positions(cartwheel_count, db.future_toe_positions.cols);
+    array2d<float> new_features(special_count, db.nfeatures());
+    array2d<bool> new_contact_states(special_count, db.ncontacts());
+    array2d<float> new_future_toe_positions(special_count, db.future_toe_positions.cols);
     
-    array2d<bool> new_crouch_states(cartwheel_count, 1);
-    array2d<bool> new_idle_states(cartwheel_count, 1);
-    array2d<bool> new_jump_states(cartwheel_count, 1);
-    array2d<bool> new_cartwheel_states(cartwheel_count, 1);
+    array2d<bool> new_crouch_states(special_count, 1);
+    array2d<bool> new_idle_states(special_count, 1);
+    array2d<bool> new_jump_states(special_count, 1);
+    array2d<bool> new_cartwheel_states(special_count, 1);
     
     std::vector<int> new_starts;
     std::vector<int> new_stops;
@@ -255,7 +261,9 @@ void database_filter_cartwheel(database& db)
     bool in_clip = false;
     for (int i = 0; i < total_frames; i++)
     {
-        if (db.cartwheel_states(i, 0))
+        bool is_special = (has_cartwheel && db.cartwheel_states(i, 0)) || 
+                         (has_jump && db.jump_states(i, 0));
+        if (is_special)
         {
             if (!in_clip)
             {
