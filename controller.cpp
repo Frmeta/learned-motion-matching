@@ -1666,10 +1666,9 @@ void contact_update(
     
     // If the contact point is too far from the current input position 
     // then we need to unlock the contact
-    // Disabled as per user request to force foot sticking:
-    // bool unlock_contact = contact_lock && (
-    //    length(contact_point - input_contact_position) > unlock_radius);
-    bool unlock_contact = contact_lock && force_unlock;
+    bool unlock_contact = contact_lock && (
+        length(contact_point - input_contact_position) > unlock_radius || 
+        force_unlock);
     
     // If the contact was previously inactive but is now active we 
     // need to transition to the locked contact state
@@ -2826,7 +2825,7 @@ int main(int argc, char** argv)
     float ik_max_length_buffer = 0.015f;
     float ik_foot_height = 0.02f;
     float ik_toe_length = 0.15f;
-    float ik_unlock_radius = 0.005f;
+    float ik_unlock_radius = 0.1f;
     float ik_blending_halflife = 0.1f;
     
     // Contact and Foot Locking data
@@ -4961,7 +4960,7 @@ int main(int argc, char** argv)
                     global_bone_positions(toe_bone);
                     
                 vec3 toe_end_targ = toe_end_curr;
-                toe_end_targ.y = maxf(toe_end_targ.y, ik_foot_height);
+                toe_end_targ.y = maxf(toe_end_targ.y, foot_target_height);
                 
                 ik_look_at(
                     adjusted_bone_rotations(toe_bone),
