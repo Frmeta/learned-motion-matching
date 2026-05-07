@@ -2249,8 +2249,10 @@ int main(int argc, char** argv)
 
         database test_db;
         std::vector<array1d<vec3>> database_test_reference_poses;
+        std::vector<array1d<quat>> database_test_reference_rotations;
         bool database_playback_enabled = false;
         int database_playback_index = 0;
+        bool playback_video = false;
         for (int argi = 1; argi < argc; argi++)
         {
             if (strcmp(argv[argi], "--mm") == 0)
@@ -2321,6 +2323,10 @@ int main(int argc, char** argv)
                 snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi] + 6);
                 analyze_input_is_file = true;
             }
+            else if (strcmp(argv[argi], "--playback") == 0)
+            {
+                playback_video = true;
+            }
             else if (argv[argi][0] != '-')
             {
                 snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi]);
@@ -2335,8 +2341,8 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--input=<csv>]\n", argv[0]);
-                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> --input=<csv>\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--playback] [--input=<csv>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback] --input=<csv>\n", argv[0]);
                 return 0;
             }
             else
@@ -2382,7 +2388,7 @@ int main(int argc, char** argv)
     Model ground_plane_model = { 0 };
     bool has_glb_ground = false;
     
-    if (FileExists(ground_glb_path))
+    if (FileExists(ground_glb_path) && mode == APP_MODE_WINDOW)
     {
         ground_plane_model = LoadModel(ground_glb_path);
         ground_grid.build(ground_plane_model, 1.0f);
@@ -3379,6 +3385,7 @@ int main(int argc, char** argv)
 
     bool analysis_capture_enabled = false;
     std::vector<array1d<vec3>> analysis_capture_bone_positions;
+    std::vector<array1d<quat>> analysis_capture_bone_rotations;
 
 #if defined(_WIN32)
     _mkdir(joystick_recording_folder);
@@ -3831,8 +3838,40 @@ int main(int argc, char** argv)
                 cartwheel_auto_timer = maxf(0.0f, cartwheel_auto_timer - dt);
             }
         
-        // Predict Future Trajectory
-        
+        if (database_playback_enabled)
+        {
+            int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
+            if (test_frame < test_db.features.rows && test_db.features.cols >= 45)
+            {
+                auto get_raw_feature = [&](int idx) {
+                    return test_db.features(test_frame, idx) * test_db.features_scale(idx) + test_db.features_offset(idx);
+                };
+
+                // Extract trajectory position at +20 frames (indices 15, 16, 17)
+                vec3 local_target = vec3(get_raw_feature(15), get_raw_feature(16), get_raw_feature(17));
+                desired_velocity_curr = quat_mul_vec3(simulation_rotation, local_target) / (20.0f * dt);
+                desired_velocity = desired_velocity_curr;
+
+                // Extract trajectory direction at +20 frames (indices 24, 25, 26)
+                vec3 local_dir = normalize(vec3(get_raw_feature(24), get_raw_feature(25), get_raw_feature(26)));
+                vec3 world_dir = quat_mul_vec3(simulation_rotation, local_dir);
+                float yaw = atan2f(world_dir.x, world_dir.z);
+                
+                desired_rotation_curr = quat_from_angle_axis(yaw, vec3(0.0f, 1.0f, 0.0f));
+                desired_rotation = desired_rotation_curr;
+
+                // Apply Gaits
+                desired_crouch = get_raw_feature(42) > 0.5f;
+                desired_jump = get_raw_feature(43) > 0.5f;
+                desired_cartwheel = get_raw_feature(44) > 0.5f;
+                
+                // Disable Idle
+                idle_gait_timer = 0.0f;
+                desired_idle = false;
+            }
+        }
+
+        // Predict Future Trajectory        
         trajectory_desired_rotations_predict(
           trajectory_desired_rotations,
           trajectory_desired_velocities,
@@ -4284,29 +4323,6 @@ int main(int argc, char** argv)
         if (database_playback_enabled)
         {
             if (database_playback_index % 1000 == 0) std::cout << "Analyze: Step " << database_playback_index << "/" << test_db.nframes() << std::endl;
-            
-            // Extract feature vector from test database for current frame
-            int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
-            if (test_frame < test_db.features.rows && test_db.features.cols >= 45)
-            {
-                slice1d<float> test_features = test_db.features(test_frame);
-                
-                auto copy_test_feature = [&](int start, int count) {
-                    for (int j = 0; j < count; j++) {
-                        int idx = start + j;
-                        if (idx < test_db.features.cols && idx < query.size)
-                        {
-                            float normalized = test_features(idx);
-                            float raw = (normalized * test_db.features_scale(idx)) + test_db.features_offset(idx);
-                            query(idx) = raw;
-                        }
-                    }
-                };
-                
-                copy_test_feature(15, 18); // Trajectory Positions & Directions
-                copy_test_feature(33, 8);  // Terrain Heights
-                copy_test_feature(41, 4);  // Gait Flags
-            }
         }
         // ------------------------------------------
 
@@ -4988,6 +5004,7 @@ int main(int argc, char** argv)
         if (analysis_capture_enabled)
         {
             analysis_capture_bone_positions.push_back(global_bone_positions);
+            analysis_capture_bone_rotations.push_back(global_bone_rotations);
         }
         
         // Update camera
@@ -5975,14 +5992,46 @@ int main(int argc, char** argv)
                 std::cout << "Analyze: ERROR - Test database bone count mismatch (" << test_db.nbones() << " vs " << db.nbones() << ")" << std::endl;
                 return -1;
             }
-            if (test_db.nfeatures() < 45)
+            std::string test_features_path = analyze_input_path;
+            size_t dot = test_features_path.find_last_of(".");
+            if (dot != std::string::npos) test_features_path.insert(dot, "_features");
+            else test_features_path += "_features.bin";
+            
+            database_load_matching_features(test_db, test_features_path.c_str());
+            if (test_db.nfeatures() != expected_feature_count)
             {
-                std::cout << "Analyze: WARNING - Test database has fewer than 45 features (" << test_db.nfeatures() << "). Trajectory/Gait signals may be missing." << std::endl;
+                std::cout << "Analyze: Building features for test database... (this may take a moment)" << std::endl;
+                database_build_matching_features(
+                    test_db,
+                    feature_weight_foot_position,
+                    feature_weight_foot_velocity,
+                    feature_weight_hip_velocity,
+                    feature_weight_trajectory_positions,
+                    feature_weight_trajectory_directions,
+                    feature_weight_terrain_heights,
+                    feature_weight_idle,
+                    feature_weight_crouch,
+                    feature_weight_jump,
+                    feature_weight_cartwheel,
+                    feature_weight_history_foot_position,
+                    feature_weight_history_foot_velocity,
+                    feature_weight_history_hip_velocity,
+                    feature_weight_history_trajectory_positions,
+                    feature_weight_history_trajectory_directions,
+                    feature_weight_history_terrain_heights);
+                database_save_matching_features(test_db, test_features_path.c_str(), false);
+                std::cout << "Analyze: Test database features built and saved." << std::endl;
+            }
+            else
+            {
+                std::cout << "Analyze: Loaded existing features for test database." << std::endl;
             }
             
             std::cout << "Analyze: Pre-computing reference poses..." << std::endl;
             database_test_reference_poses.clear();
             database_test_reference_poses.reserve(test_db.nframes());
+            database_test_reference_rotations.clear();
+            database_test_reference_rotations.reserve(test_db.nframes());
             for (int i = 0; i < test_db.nframes(); i++)
             {
                 array1d<vec3> pose(test_db.nbones());
@@ -5994,6 +6043,7 @@ int main(int argc, char** argv)
                     test_db.bone_rotations(i),
                     test_db.bone_parents);
                 database_test_reference_poses.push_back(pose);
+                database_test_reference_rotations.push_back(rot);
             }
             std::cout << "Analyze: Reference poses computed: " << database_test_reference_poses.size() << std::endl;
             
@@ -6057,7 +6107,8 @@ int main(int argc, char** argv)
 
         auto run_capture_for_mode = [&](const std::vector<joystick_record_sample>& samples,
                                         bool use_lmm,
-                                        std::vector<array1d<vec3>>& output,
+                                        std::vector<array1d<vec3>>& output_positions,
+                                        std::vector<array1d<quat>>& output_rotations,
                                         capture_stats& stats) -> bool
         {
             reset_runtime_for_analysis();
@@ -6068,6 +6119,7 @@ int main(int argc, char** argv)
             joystick_playback_enabled = !analyze_input_is_database;
             joystick_playback_index = 0;
             analysis_capture_bone_positions.clear();
+            analysis_capture_bone_rotations.clear();
             analysis_capture_enabled = true;
 
             auto start = std::chrono::high_resolution_clock::now();
@@ -6120,8 +6172,9 @@ int main(int argc, char** argv)
 
             analysis_capture_enabled = false;
             database_playback_enabled = false;
-            output = analysis_capture_bone_positions;
-            return !output.empty();
+            output_positions = analysis_capture_bone_positions;
+            output_rotations = analysis_capture_bone_rotations;
+            return !output_positions.empty();
         };
 
         auto compute_mpjpe = [](const std::vector<array1d<vec3>>& ref_capture,
@@ -6190,6 +6243,122 @@ int main(int argc, char** argv)
             return compute_mpjpe(reference, capture, used_frames, used_joints, root_relative);
         };
 
+        auto render_video_comparison = [&](const char* output_filename,
+                                           int mode,
+                                           const std::vector<array1d<vec3>>& gt_poses,
+                                           const std::vector<array1d<quat>>& gt_rotations,
+                                           const std::vector<array1d<vec3>>& mm_poses,
+                                           const std::vector<array1d<quat>>& mm_rotations,
+                                           const std::vector<array1d<vec3>>& lmm_poses,
+                                           const std::vector<array1d<quat>>& lmm_rotations,
+                                           int num_frames)
+        {
+            if (num_frames <= 0) return;
+
+            char command[1024];
+            snprintf(command, sizeof(command), "ffmpeg -y -f rawvideo -vcodec rawvideo -s %dx%d -pix_fmt rgba -r 60 -i - -c:v libx264 -preset fast -pix_fmt yuv420p \"%s\"", screen_width, screen_height, output_filename);
+            
+            FILE* ffmpeg = _popen(command, "wb");
+            if (!ffmpeg)
+            {
+                std::cout << "Failed to open FFmpeg pipe for: " << output_filename << std::endl;
+                return;
+            }
+
+            RenderTexture2D render_target = LoadRenderTexture(screen_width, screen_height);
+            
+            int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 3 : 2;
+            int part_width = screen_width / parts;
+
+            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label)
+            {
+                Camera3D cam = camera;
+                if (pose.size > 0)
+                {
+                    Vector3 root = to_Vector3(pose(0));
+                    Vector3 offset = Vector3Subtract(camera.position, camera.target);
+                    cam.target = root;
+                    cam.position = Vector3Add(root, offset);
+                }
+
+                BeginMode3D(cam);
+                rlViewport(part_idx * part_width, 0, part_width, screen_height);
+                
+                rlMatrixMode(RL_PROJECTION);
+                rlLoadIdentity();
+                float aspect = (float)part_width / (float)screen_height;
+                double top = 0.01 * tan(cam.fovy * 0.5 * DEG2RAD);
+                double right = top * aspect;
+                rlFrustum(-right, right, -top, top, 0.01, 1000.0);
+                rlMatrixMode(RL_MODELVIEW);
+
+                if (has_glb_ground)
+                    DrawModel(ground_plane_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                else
+                    DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
+
+                DrawGrid(20, 1.0f);
+
+                if (pose.size > 0 && rot.size > 0)
+                {
+                    if (show_stickman)
+                    {
+                        draw_stickman(pose, db.bone_parents, ORANGE);
+                    }
+                    else
+                    {
+                        deform_character_mesh(character_mesh, character_data, pose, rot, db.bone_parents);
+                        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                    }
+                }
+                EndMode3D();
+
+                DrawRectangle(part_idx * part_width + 15, 15, MeasureText(label, 20) + 10, 30, Fade(WHITE, 0.7f));
+                DrawText(label, part_idx * part_width + 20, 20, 20, BLACK);
+            };
+
+            SetTraceLogLevel(LOG_WARNING); // Suppress "Pixel data retrieved successfully" spam
+            for (int i = 0; i < num_frames; i++)
+            {
+                BeginTextureMode(render_target);
+                ClearBackground(RAYWHITE);
+                
+                if (mode == APP_MODE_ANALYZE_BOTH)
+                {
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching");
+                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching");
+                }
+                else if (mode == APP_MODE_ANALYZE_MM)
+                {
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching");
+                }
+                else if (mode == APP_MODE_ANALYZE_LMM)
+                {
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
+                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching");
+                }
+                
+                for (int p = 1; p < parts; p++)
+                {
+                    DrawLine(p * part_width, 0, p * part_width, screen_height, DARKGRAY);
+                }
+                
+                EndTextureMode();
+                
+                Image img = LoadImageFromTexture(render_target.texture);
+                ImageFlipVertical(&img);
+                fwrite(img.data, 1, screen_width * screen_height * 4, ffmpeg);
+                UnloadImage(img);
+            }
+            SetTraceLogLevel(LOG_INFO); // Restore logging
+            
+            UnloadRenderTexture(render_target);
+            _pclose(ffmpeg);
+            std::cout << "Analyze: Video playback saved to " << output_filename << std::endl;
+        };
+
         if (db.nbones() == 0)
         {
             std::cout << "Analyze: database not loaded or empty bones. Bone positions comparison will fail." << std::endl;
@@ -6224,7 +6393,9 @@ int main(int argc, char** argv)
             }
 
             std::vector<array1d<vec3>> mm_capture;
+            std::vector<array1d<quat>> mm_capture_rotations;
             std::vector<array1d<vec3>> lmm_capture;
+            std::vector<array1d<quat>> lmm_capture_rotations;
             capture_stats mm_stats;
             capture_stats lmm_stats;
 
@@ -6235,7 +6406,7 @@ int main(int argc, char** argv)
             bool lmm_ok = true;
             if (need_mm)
             {
-                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_stats);
+                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_stats);
                 res.mm_time_ms = mm_stats.elapsed_ms;
                 res.mm_mem_delta_mb = mm_stats.mem_delta_mb;
                 res.mm_mem_peak_mb = mm_stats.mem_peak_mb;
@@ -6243,7 +6414,7 @@ int main(int argc, char** argv)
             }
             if (need_lmm)
             {
-                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_stats);
+                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_stats);
                 res.lmm_time_ms = lmm_stats.elapsed_ms;
                 res.lmm_mem_delta_mb = lmm_stats.mem_delta_mb;
                 res.lmm_mem_peak_mb = lmm_stats.mem_peak_mb;
@@ -6344,6 +6515,26 @@ int main(int argc, char** argv)
 #endif
             }
             std::cout << std::endl;
+            
+            if (playback_video)
+            {
+                std::string video_path = std::string("./score/") + 
+                    ((mode == APP_MODE_ANALYZE_MM) ? "mm_" :
+                     (mode == APP_MODE_ANALYZE_LMM) ? "lmm_" : "both_") + 
+                     GetFileNameWithoutExt(name.c_str()) + ".mp4";
+                render_video_comparison(
+                    video_path.c_str(),
+                    mode,
+                    analyze_input_is_database ? database_test_reference_poses : std::vector<array1d<vec3>>(1, base_bone_positions),
+                    analyze_input_is_database ? database_test_reference_rotations : std::vector<array1d<quat>>(1, base_bone_rotations),
+                    mm_capture,
+                    mm_capture_rotations,
+                    lmm_capture,
+                    lmm_capture_rotations,
+                    res.frame_count
+                );
+            }
+
             results.push_back(res);
         }
 
