@@ -75,3 +75,15 @@ What it does:
 - Finds every `.csv` file in the input folder.
 - Calls `controller.exe --analyze-both --input=<csv>` for each file.
 - Collects the reports and writes a combined summary to `score/combined_<timestamp>.txt`.
+
+Analyze
+```
+./controller.exe --analyze-mm ./resources/bin/database_test.bin
+./controller.exe --analyze-lmm ./resources/bin/database_test.bin
+./controller.exe --analyze-both ./resources/bin/database_test.bin
+```
+
+Convert character fbx to bin
+```
+Start-Process "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe" --background --python resources/python/export_character.py -- --input resources/fbx/character.fbx --output resources/bin/character2.bin                                         
+```
