@@ -384,10 +384,24 @@ void normalize_feature(
         std += sqrtf(vars(j)) / size;
     }
     
-    // Features with no variation can have zero std which is
-    // almost always a bug.
-    assert(std > 0.0);
-    
+    // If std is zero all values are identical (e.g. a flag that is always 0 in the
+    // test database).  Use scale = 1 so normalised values become 0 rather than NaN,
+    // and mark it so callers can detect degenerate dimensions.
+    if (std <= 0.0f)
+    {
+        for (int j = 0; j < size; j++)
+        {
+            features_scale(offset + j) = 1.0f;
+            // features[i][offset+j] already equals the (constant) mean; subtracting
+            // it gives 0, which is already correct – leave the data as-is.
+            for (int i = 0; i < features.rows; i++)
+            {
+                features(i, offset + j) = 0.0f;
+            }
+        }
+        return;
+    }
+
     // The scale of a feature is just the std divided by the weight
     for (int j = 0; j < size; j++)
     {
@@ -819,8 +833,8 @@ void build_terrain_height_map(
     // First pass: count total contact points
     for (int i = 0; i < db.nframes(); i++)
     {
-        if (db.contact_states(i, 0)) contact_count++; // Left foot
-        if (db.contact_states(i, 1)) contact_count++; // Right foot
+        if (db.ncontacts() > 0 && db.contact_states(i, 0)) contact_count++; // Left foot
+        if (db.ncontacts() > 1 && db.contact_states(i, 1)) contact_count++; // Right foot
     }
     
     // Allocate storage
@@ -844,7 +858,7 @@ void build_terrain_height_map(
             Bone_Hips);
         
         // Extract left foot contact points
-        if (db.contact_states(frame, 0))
+        if (db.ncontacts() > 0 && db.contact_states(frame, 0))
         {
             vec3 foot_position;
             quat foot_rotation;
@@ -863,7 +877,7 @@ void build_terrain_height_map(
         }
         
         // Extract right foot contact points
-        if (db.contact_states(frame, 1))
+        if (db.ncontacts() > 1 && db.contact_states(frame, 1))
         {
             vec3 foot_position;
             quat foot_rotation;
@@ -1503,12 +1517,6 @@ void database_build_matching_features(
         feature_weight_history_hip_velocity,
         feature_weight_history_trajectory_positions,
         feature_weight_history_trajectory_directions);
-    compute_history_trajectory_feature_block(
-        db,
-        offset,
-        -20,
-        feature_weight_history_trajectory_positions,
-        feature_weight_history_trajectory_directions);
     compute_history_terrain_feature(
         db,
         offset,
@@ -1518,6 +1526,60 @@ void database_build_matching_features(
     assert(offset == nfeatures);
     
     database_build_bounds(db);
+}
+
+// Re-normalize test_db features using the training database's normalization
+// statistics (features_offset / features_scale).  This is necessary because:
+//   1. Both databases must share the same feature space for MPJPE comparison.
+//   2. Test databases may have constant-zero flag columns (e.g. all cartwheel=0)
+//      which produce std=0 and can't be self-normalised.
+// Call this immediately after database_build_matching_features(test_db, ...) and
+// before database_save_matching_features.
+void database_apply_reference_normalization(database& test_db, const database& ref_db)
+{
+    assert(test_db.nfeatures() == ref_db.nfeatures());
+
+    const int nf     = test_db.nfeatures();
+    const int nframes = test_db.nframes();
+
+    // Step 1: denormalize test features back to raw values using test_db's own stats.
+    for (int i = 0; i < nframes; i++)
+    {
+        for (int j = 0; j < nf; j++)
+        {
+            test_db.features(i, j) =
+                test_db.features(i, j) * test_db.features_scale(j)
+                + test_db.features_offset(j);
+        }
+    }
+
+    // Step 2: adopt the reference (training) normalization statistics.
+    for (int j = 0; j < nf; j++)
+    {
+        test_db.features_offset(j) = ref_db.features_offset(j);
+        test_db.features_scale(j)  = ref_db.features_scale(j);
+    }
+
+    // Step 3: renormalize test features using the reference stats.
+    for (int i = 0; i < nframes; i++)
+    {
+        for (int j = 0; j < nf; j++)
+        {
+            const float scale = test_db.features_scale(j);
+            if (fabsf(scale) < 1e-8f || !std::isfinite(scale))
+            {
+                test_db.features(i, j) = 0.0f;
+            }
+            else
+            {
+                test_db.features(i, j) =
+                    (test_db.features(i, j) - test_db.features_offset(j)) / scale;
+            }
+        }
+    }
+
+    // Rebuild bounds so the search acceleration structure reflects the new normalization.
+    database_build_bounds(test_db);
 }
 
 // Motion Matching search function essentially consists

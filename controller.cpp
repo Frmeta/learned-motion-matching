@@ -3146,7 +3146,7 @@ int main(int argc, char** argv)
     int joystick_recording_csv_selected_index = 0;
     bool joystick_recording_csv_dropdown_edit = false;
     char joystick_recording_csv_dropdown_text[4096] = "<no csv files>";
-    const float spawn_height_offset = 5.0f;
+    const float spawn_height_offset = 2.0f;
     vec3 joystick_recording_start_position = bone_positions(0) + vec3(0.0f, spawn_height_offset, 0.0f);
     quat joystick_recording_start_rotation = bone_rotations(0);
     Camera3D joystick_recording_start_camera = camera;
@@ -3969,7 +3969,7 @@ int main(int argc, char** argv)
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
         const float uphill_horizontal_reduce_gain = 1.1f;
-        const float uphill_horizontal_reduce_max = 0.85f;
+        const float uphill_horizontal_reduce_max = 0.5f;
         float min_trajectory_scale_xz = 1.0f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
@@ -5997,8 +5997,28 @@ int main(int argc, char** argv)
             if (dot != std::string::npos) test_features_path.insert(dot, "_features");
             else test_features_path += "_features.bin";
             
-            database_load_matching_features(test_db, test_features_path.c_str());
-            if (test_db.nfeatures() != expected_feature_count)
+            bool rebuild_test_features =
+                should_rebuild_features(analyze_input_path, test_features_path.c_str());
+
+            if (!rebuild_test_features)
+            {
+                database_load_matching_features(test_db, test_features_path.c_str());
+                if (test_db.nfeatures() != expected_feature_count)
+                {
+                    std::cout << "Analyze: Test features feature count mismatch. Rebuilding..." << std::endl;
+                    rebuild_test_features = true;
+                }
+                else
+                {
+                    std::cout << "Analyze: Loaded existing features for test database." << std::endl;
+                }
+            }
+            else
+            {
+                std::cout << "Analyze: database_test.bin is newer than features. Rebuilding..." << std::endl;
+            }
+
+            if (rebuild_test_features)
             {
                 std::cout << "Analyze: Building features for test database... (this may take a moment)" << std::endl;
                 database_build_matching_features(
@@ -6019,12 +6039,14 @@ int main(int argc, char** argv)
                     feature_weight_history_trajectory_positions,
                     feature_weight_history_trajectory_directions,
                     feature_weight_history_terrain_heights);
+                // Re-normalize using the training db's offset/scale so both databases
+                // share the same feature space. This also handles constant-zero flag
+                // columns (e.g. no cartwheel/jump/idle in test data) which would have
+                // std=0 and be unusable if self-normalized.
+                std::cout << "Analyze: Applying reference normalization from training database..." << std::endl;
+                database_apply_reference_normalization(test_db, db);
                 database_save_matching_features(test_db, test_features_path.c_str(), false);
                 std::cout << "Analyze: Test database features built and saved." << std::endl;
-            }
-            else
-            {
-                std::cout << "Analyze: Loaded existing features for test database." << std::endl;
             }
             
             std::cout << "Analyze: Pre-computing reference poses..." << std::endl;

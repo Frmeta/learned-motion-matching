@@ -86,6 +86,10 @@ Analyze
 ./controller.exe --analyze-mm ./resources/bin/database_test.bin
 ./controller.exe --analyze-lmm ./resources/bin/database_test.bin
 ./controller.exe --analyze-both ./resources/bin/database_test.bin
+
+./controller.exe --analyze-mm ./resources/bin/database_test.bin --playback
+./controller.exe --analyze-lmm ./resources/bin/database_test.bin --playback
+./controller.exe --analyze-both ./resources/bin/database_test.bin --playback
 ```
 
 Convert character fbx to bin
