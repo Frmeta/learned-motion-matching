@@ -248,6 +248,30 @@ struct joystick_record_sample
     vec3 player_position;
 };
 
+// Per-frame snapshot of all data needed to replay draw_features() for one frame.
+struct playback_feature_snapshot
+{
+    array1d<float> features;            // denormalized feature vector
+    vec3           root_pos;            // global_bone_positions(0)
+    quat           root_rot;            // global_bone_rotations(0)
+    vec3           hip_pos;             // global_bone_positions(Bone_Hips)
+    array1d<vec3>  bone_positions;      // full global_bone_positions copy
+
+    array1d<vec2>  future_toe_position;    // 6 vec2 (3 future frames x 2 toes)
+    array1d<vec2>  future_terrain_heights; // 4 vec2
+
+    // Rolling history buffers as-of this frame (typically <=30 elements each)
+    std::vector<vec3> root_history_positions;
+    std::vector<quat> root_history_rotations;
+    std::vector<vec3> history_left_foot_positions;
+    std::vector<vec3> history_right_foot_positions;
+    std::vector<vec3> history_left_foot_velocities;
+    std::vector<vec3> history_right_foot_velocities;
+    std::vector<vec3> history_hip_positions;
+    std::vector<vec3> history_hip_velocities;
+    std::vector<vec2> history_terrain_heights;
+};
+
 struct range_metadata_entry
 {
     int range_index = -1;
@@ -3139,7 +3163,14 @@ int main(int argc, char** argv)
     std::vector<array1d<quat>> playback_mm_bone_rotations;
     std::vector<array1d<vec3>> playback_lmm_bone_positions;
     std::vector<array1d<quat>> playback_lmm_bone_rotations;
-    
+
+    // Per-frame feature snapshots for playback feature visualization
+    std::vector<playback_feature_snapshot> playback_mm_feature_snapshots;
+    std::vector<playback_feature_snapshot> playback_lmm_feature_snapshots;
+
+    // Safety toggle: set to false to skip all playback feature drawing
+    bool show_playback_features = true;
+
     bool show_stickman = false;
     int joystick_playback_index = 0;
     std::vector<std::string> joystick_recording_csv_files;
@@ -3379,13 +3410,20 @@ int main(int argc, char** argv)
         playback_mm_bone_rotations.clear();
         playback_lmm_bone_positions.clear();
         playback_lmm_bone_rotations.clear();
+        playback_mm_feature_snapshots.clear();
+        playback_lmm_feature_snapshots.clear();
 
         reset_motion_to_recording_start();
     };
 
-    bool analysis_capture_enabled = false;
+    bool analysis_capture_enabled = false; // set to true if in analyze mode
     std::vector<array1d<vec3>> analysis_capture_bone_positions;
     std::vector<array1d<quat>> analysis_capture_bone_rotations;
+
+    // Parallel feature snapshot capture for video comparison rendering
+    bool analysis_capture_features_enabled = false;
+    std::vector<playback_feature_snapshot> analysis_capture_mm_feature_snaps;
+    std::vector<playback_feature_snapshot> analysis_capture_lmm_feature_snaps;
 
 #if defined(_WIN32)
     _mkdir(joystick_recording_folder);
@@ -3428,6 +3466,8 @@ int main(int argc, char** argv)
             playback_mm_bone_rotations.clear();
             playback_lmm_bone_positions.clear();
             playback_lmm_bone_rotations.clear();
+            playback_mm_feature_snapshots.clear();
+            playback_lmm_feature_snapshots.clear();
         }
 
         if (joystick_recording_enabled)
@@ -3730,7 +3770,7 @@ int main(int argc, char** argv)
 
         bool idle_enter =
             !jump_active &&
-            idle_gait_timer >= 0.2f;
+            idle_gait_timer >= 0.4f;
         
         // Exit idle when trajectory signals movement (matches idle_enter logic)
         bool idle_exit =
@@ -5020,31 +5060,86 @@ int main(int argc, char** argv)
             desired_strafe,
             dt);
         
+        // Helper: capture all per-frame data needed to replay draw_features().
+        auto capture_feature_snapshot = [&]() -> playback_feature_snapshot
+        {
+            playback_feature_snapshot snap;
+
+            // Denormalized feature vector
+            array1d<float> feat_copy = lmm_runtime_enabled
+                ? slice1d<float>(features_curr)
+                : db.features(frame_index);
+            denormalize_features(feat_copy, db.features_offset, db.features_scale);
+            snap.features = feat_copy;
+
+            // Root pose and hip
+            snap.root_pos = global_bone_positions(0);
+            snap.root_rot = global_bone_rotations(0);
+            snap.hip_pos  = global_bone_positions(Bone_Hips);
+
+            // Full bone positions (for contact bone XZ lookups inside draw_features)
+            snap.bone_positions.resize(db.nbones());
+            for (int bi = 0; bi < db.nbones(); bi++)
+                snap.bone_positions(bi) = global_bone_positions(bi);
+
+            // Future toe / terrain helpers
+            snap.future_toe_position    = future_toe_position;
+            snap.future_terrain_heights = future_terrain_heights;
+
+            // Rolling history buffers (copy entire vectors, typically <=30 items)
+            snap.root_history_positions       = root_history_positions;
+            snap.root_history_rotations       = root_history_rotations;
+            snap.history_left_foot_positions  = history_left_foot_positions;
+            snap.history_right_foot_positions = history_right_foot_positions;
+            snap.history_left_foot_velocities = history_left_foot_velocities;
+            snap.history_right_foot_velocities= history_right_foot_velocities;
+            snap.history_hip_positions        = history_hip_positions;
+            snap.history_hip_velocities       = history_hip_velocities;
+            snap.history_terrain_heights      = history_terrain_heights;
+
+            return snap;
+        };
+
+        // Store feature snapshot for analysis video rendering, this flag is true if in analyze mode
+        if (analysis_capture_features_enabled)
+        {
+            playback_feature_snapshot snap = capture_feature_snapshot();
+            if (lmm_runtime_enabled)
+                analysis_capture_lmm_feature_snaps.push_back(snap);
+            else
+                analysis_capture_mm_feature_snaps.push_back(snap);
+        }
+
         // Store playback visualization from the already inertialized runtime
         // pose. This keeps transitions smooth instead of jumping on search hits.
         if (joystick_playback_enabled)
         {
             bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
+            playback_feature_snapshot snap = capture_feature_snapshot();
 
             if (lmm_runtime_enabled)
             {
                 playback_lmm_bone_positions.push_back(global_bone_positions);
                 playback_lmm_bone_rotations.push_back(global_bone_rotations);
+                playback_lmm_feature_snapshots.push_back(snap);
 
                 // Keep MM history length aligned so indexing remains valid.
                 // Use the current runtime pose instead of freezing at the first frame.
                 playback_mm_bone_positions.push_back(global_bone_positions);
                 playback_mm_bone_rotations.push_back(global_bone_rotations);
+                playback_mm_feature_snapshots.push_back(snap);
             }
             else
             {
                 playback_mm_bone_positions.push_back(global_bone_positions);
                 playback_mm_bone_rotations.push_back(global_bone_rotations);
+                playback_mm_feature_snapshots.push_back(snap);
 
                 // Keep LMM history length aligned so indexing remains valid.
                 // Use the current runtime pose instead of freezing at the first frame.
                 playback_lmm_bone_positions.push_back(global_bone_positions);
                 playback_lmm_bone_rotations.push_back(global_bone_rotations);
+                playback_lmm_feature_snapshots.push_back(snap);
             }
         }
 
@@ -5225,6 +5320,30 @@ int main(int argc, char** argv)
                         playback_lmm_bone_rotations[current_frame],
                         db.bone_parents);
                     DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RED);
+                }
+            }
+            
+            // Draw feature debug visuals for the currently displayed playback frame
+            if (show_playback_features)
+            {
+                const auto& snaps = playback_use_lmm ? playback_lmm_feature_snapshots : playback_mm_feature_snapshots;
+                if (current_frame >= 0 && current_frame < (int)snaps.size())
+                {
+                    const playback_feature_snapshot& s = snaps[current_frame];
+                    draw_features(
+                        s.features,
+                        s.root_pos, s.root_rot,
+                        playback_use_lmm ? RED : GREEN,
+                        s.future_toe_position,
+                        s.future_terrain_heights,
+                        s.hip_pos,
+                        s.bone_positions,
+                        contact_bones,
+                        s.root_history_positions, s.root_history_rotations,
+                        s.history_left_foot_positions, s.history_right_foot_positions,
+                        s.history_left_foot_velocities, s.history_right_foot_velocities,
+                        s.history_hip_positions, s.history_hip_velocities,
+                        s.history_terrain_heights);
                 }
             }
         }
@@ -6131,8 +6250,10 @@ int main(int argc, char** argv)
                                         bool use_lmm,
                                         std::vector<array1d<vec3>>& output_positions,
                                         std::vector<array1d<quat>>& output_rotations,
+                                        std::vector<playback_feature_snapshot>& output_feature_snaps,
                                         capture_stats& stats) -> bool
         {
+            // Run & capture MM/LMM generated animation
             reset_runtime_for_analysis();
             lmm_enabled = use_lmm;
             database_playback_enabled = analyze_input_is_database;
@@ -6142,7 +6263,10 @@ int main(int argc, char** argv)
             joystick_playback_index = 0;
             analysis_capture_bone_positions.clear();
             analysis_capture_bone_rotations.clear();
+            analysis_capture_mm_feature_snaps.clear();
+            analysis_capture_lmm_feature_snaps.clear();
             analysis_capture_enabled = true;
+            analysis_capture_features_enabled = true; // set this flag to true, so that simulation will be captured
 
             auto start = std::chrono::high_resolution_clock::now();
 #if defined(_WIN32)
@@ -6157,11 +6281,13 @@ int main(int argc, char** argv)
             }
 #endif
 
+            // Simulate MM/LMM for each frames in test
             const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
             for (int i = 0; i < max_steps; i++)
             {
                 if (!analyze_input_is_database && !joystick_playback_enabled) break;
                 
+                // Simulate MM/LMM
                 update_func();
                 
                 if (analyze_input_is_database)
@@ -6169,6 +6295,7 @@ int main(int argc, char** argv)
                     database_playback_index++;
                 }
 #if defined(_WIN32)
+                // Capture memory stats
                 float mem_now = get_process_memory_mb();
                 if (mem_now >= 0.0f)
                 {
@@ -6186,16 +6313,19 @@ int main(int argc, char** argv)
             stats.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
 
 #if defined(_WIN32)
+            // Memory delta, peak, & avg
             float mem_end = get_process_memory_mb();
             stats.mem_delta_mb = (mem_start >= 0.0f && mem_end >= 0.0f) ? (mem_end - mem_start) : -1.0f;
             stats.mem_peak_mb = mem_peak;
             stats.mem_avg_mb = (mem_samples > 0) ? (float)(mem_sum / (double)mem_samples) : -1.0f;
 #endif
-
+            
             analysis_capture_enabled = false;
+            analysis_capture_features_enabled = false;
             database_playback_enabled = false;
             output_positions = analysis_capture_bone_positions;
             output_rotations = analysis_capture_bone_rotations;
+            output_feature_snaps = use_lmm ? analysis_capture_lmm_feature_snaps : analysis_capture_mm_feature_snaps;
             return !output_positions.empty();
         };
 
@@ -6273,6 +6403,8 @@ int main(int argc, char** argv)
                                            const std::vector<array1d<quat>>& mm_rotations,
                                            const std::vector<array1d<vec3>>& lmm_poses,
                                            const std::vector<array1d<quat>>& lmm_rotations,
+                                           const std::vector<playback_feature_snapshot>& mm_feature_snaps,
+                                           const std::vector<playback_feature_snapshot>& lmm_feature_snaps,
                                            int num_frames)
         {
             if (num_frames <= 0) return;
@@ -6292,7 +6424,7 @@ int main(int argc, char** argv)
             int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 3 : 2;
             int part_width = screen_width / parts;
 
-            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label)
+            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<playback_feature_snapshot>& feat_snaps, int frame_idx)
             {
                 Camera3D cam = camera;
                 if (pose.size > 0)
@@ -6332,6 +6464,25 @@ int main(int argc, char** argv)
                         deform_character_mesh(character_mesh, character_data, pose, rot, db.bone_parents);
                         DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
                     }
+
+                    if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feat_snaps.size())
+                    {
+                        const playback_feature_snapshot& s = feat_snaps[frame_idx];
+                        draw_features(
+                            s.features,
+                            s.root_pos, s.root_rot,
+                            MAROON,
+                            s.future_toe_position,
+                            s.future_terrain_heights,
+                            s.hip_pos,
+                            s.bone_positions,
+                            contact_bones,
+                            s.root_history_positions, s.root_history_rotations,
+                            s.history_left_foot_positions, s.history_right_foot_positions,
+                            s.history_left_foot_velocities, s.history_right_foot_velocities,
+                            s.history_hip_positions, s.history_hip_velocities,
+                            s.history_terrain_heights);
+                    }
                 }
                 EndMode3D();
 
@@ -6347,19 +6498,19 @@ int main(int argc, char** argv)
                 
                 if (mode == APP_MODE_ANALYZE_BOTH)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching");
-                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching");
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_snaps, i);
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_snaps, i);
+                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_snaps, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching");
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_snaps, i);
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_snaps, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth");
-                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching");
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_snaps, i);
+                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_snaps, i);
                 }
                 
                 for (int p = 1; p < parts; p++)
@@ -6416,8 +6567,10 @@ int main(int argc, char** argv)
 
             std::vector<array1d<vec3>> mm_capture;
             std::vector<array1d<quat>> mm_capture_rotations;
+            std::vector<playback_feature_snapshot> mm_feature_snaps;
             std::vector<array1d<vec3>> lmm_capture;
             std::vector<array1d<quat>> lmm_capture_rotations;
+            std::vector<playback_feature_snapshot> lmm_feature_snaps;
             capture_stats mm_stats;
             capture_stats lmm_stats;
 
@@ -6428,7 +6581,7 @@ int main(int argc, char** argv)
             bool lmm_ok = true;
             if (need_mm)
             {
-                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_stats);
+                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_feature_snaps, mm_stats);
                 res.mm_time_ms = mm_stats.elapsed_ms;
                 res.mm_mem_delta_mb = mm_stats.mem_delta_mb;
                 res.mm_mem_peak_mb = mm_stats.mem_peak_mb;
@@ -6436,7 +6589,7 @@ int main(int argc, char** argv)
             }
             if (need_lmm)
             {
-                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_stats);
+                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_feature_snaps, lmm_stats);
                 res.lmm_time_ms = lmm_stats.elapsed_ms;
                 res.lmm_mem_delta_mb = lmm_stats.mem_delta_mb;
                 res.lmm_mem_peak_mb = lmm_stats.mem_peak_mb;
@@ -6553,6 +6706,8 @@ int main(int argc, char** argv)
                     mm_capture_rotations,
                     lmm_capture,
                     lmm_capture_rotations,
+                    mm_feature_snaps,
+                    lmm_feature_snaps,
                     res.frame_count
                 );
             }
