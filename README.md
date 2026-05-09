@@ -76,8 +76,9 @@ What it does:
 - Calls `controller.exe --analyze-both --input=<csv>` for each file.
 - Collects the reports and writes a combined summary to `score/combined_<timestamp>.txt`.
 
-Test Database
+Database generation
 ```
+python resources/python/generate_database.py
 python resources/python/generate_database.py test
 ```
 

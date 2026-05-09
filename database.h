@@ -1472,7 +1472,7 @@ void database_build_matching_features(
         3 + // Hip Velocity
         9 + // Trajectory Positions 3D
         9 + // Trajectory Directions 3D
-        8 + // Terrain Heights
+        8 + // Terrain Heights (0, +15, +30, +45)
 
         // Flag:
         1 + // Idle Flag

@@ -155,6 +155,16 @@ if __name__ == '__main__':
     Yextra_scale = Yextra.std()
     Yfuture_toe_xy_scale = Yfuture_toe_xy.std()
     
+    # Decompressor output layout per frame:
+    #   positions              = 3 * (nbones - 1)
+    #   two-column transforms  = 6 * (nbones - 1)
+    #   velocities             = 3 * (nbones - 1)
+    #   angular velocities     = 3 * (nbones - 1)
+    #   root linear velocity   = 3
+    #   root angular velocity  = 3
+    #   contact states         = nextra = 2?
+    #   future toe positions   = 12
+    # For nbones = 23, the total output width is 15 * 22 + 20 = 350.
     decompressor_mean_out = torch.as_tensor(np.hstack([
         Ypos[:,1:].mean(axis=0).ravel(),
         Ytxy[:,1:].mean(axis=0).ravel(),

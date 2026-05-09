@@ -248,14 +248,15 @@ struct joystick_record_sample
     vec3 player_position;
 };
 
-// Per-frame snapshot of all data needed to replay draw_features() for one frame.
-struct playback_feature_snapshot
+// Consolidated data needed to draw features for one frame.
+struct feature_draw_data
 {
     array1d<float> features;            // denormalized feature vector
     vec3           root_pos;            // global_bone_positions(0)
     quat           root_rot;            // global_bone_rotations(0)
     vec3           hip_pos;             // global_bone_positions(Bone_Hips)
     array1d<vec3>  bone_positions;      // full global_bone_positions copy
+    array1d<int>   contact_bones;       // indices of bones used for contact-plane visuals
 
     array1d<vec2>  future_toe_position;    // 6 vec2 (3 future frames x 2 toes)
     array1d<vec2>  future_terrain_heights; // 4 vec2
@@ -1829,26 +1830,10 @@ void draw_axis(const vec3 pos, const quat rot, const float scale = 1.0f)
     DrawLine3D(to_Vector3(pos), to_Vector3(axis2), BLUE);
 }
 
-void draw_features(
-    const slice1d<float> features, 
-    const vec3 pos, 
-    const quat rot, 
-    const Color color,
-    const slice1d<vec2> future_toe_position,
-    const slice1d<vec2> future_terrain_heights,
-    const vec3 hip_global_position,
-    const slice1d<vec3> global_bone_positions,
-    const slice1d<int> contact_bones,
-    const std::vector<vec3>& root_history_positions,
-    const std::vector<quat>& root_history_rotations,
-    const std::vector<vec3>& history_left_foot_positions,
-    const std::vector<vec3>& history_right_foot_positions,
-    const std::vector<vec3>& history_left_foot_velocities,
-    const std::vector<vec3>& history_right_foot_velocities,
-    const std::vector<vec3>& history_hip_positions,
-    const std::vector<vec3>& history_hip_velocities,
-    const std::vector<vec2>& history_terrain_heights)
+void draw_features(const feature_draw_data& f, const vec3 pos, const quat rot)
 {
+    const slice1d<float> features = f.features;
+
     vec3 lfoot_pos = quat_mul_vec3(rot, vec3(features( 0), features( 1), features( 2))) + pos;
     vec3 rfoot_pos = quat_mul_vec3(rot, vec3(features( 3), features( 4), features( 5))) + pos;
     vec3 lfoot_vel = quat_mul_vec3(rot, vec3(features( 6), features( 7), features( 8)));
@@ -1861,96 +1846,89 @@ void draw_features(
     vec3 traj1_dir = quat_mul_vec3(rot, vec3(features(27), features(28), features(29)));
     vec3 traj2_dir = quat_mul_vec3(rot, vec3(features(30), features(31), features(32)));
     
-    DrawSphereWires(to_Vector3(lfoot_pos), 0.05f, 4, 10, color);
-    DrawSphereWires(to_Vector3(rfoot_pos), 0.05f, 4, 10, color);
-    DrawSphereWires(to_Vector3(traj0_pos), 0.05f, 4, 10, color);
-    DrawSphereWires(to_Vector3(traj1_pos), 0.05f, 4, 10, color);
-    DrawSphereWires(to_Vector3(traj2_pos), 0.05f, 4, 10, color);
+    // Draw matched feature: current foot pos (still weird)
+    DrawSphereWires(to_Vector3(lfoot_pos), 0.1f, 4, 10, DARKBROWN);
+    DrawSphereWires(to_Vector3(rfoot_pos), 0.1f, 4, 10, DARKBROWN);
+
+    // Draw matched feature: trajectory pos
+    DrawSphereWires(to_Vector3(traj0_pos), 0.05f, 4, 10, ORANGE);
+    DrawSphereWires(to_Vector3(traj1_pos), 0.05f, 4, 10, ORANGE);
+    DrawSphereWires(to_Vector3(traj2_pos), 0.05f, 4, 10, ORANGE);
     
-    DrawLine3D(to_Vector3(lfoot_pos), to_Vector3(lfoot_pos + 0.1f * lfoot_vel), color);
-    DrawLine3D(to_Vector3(rfoot_pos), to_Vector3(rfoot_pos + 0.1f * rfoot_vel), color);
+    // Draw matched feature: foot velocity
+    DrawLine3D(to_Vector3(lfoot_pos), to_Vector3(lfoot_pos + 0.1f * lfoot_vel), RED);
+    DrawLine3D(to_Vector3(rfoot_pos), to_Vector3(rfoot_pos + 0.1f * rfoot_vel), RED);
     
-    DrawLine3D(to_Vector3(traj0_pos), to_Vector3(traj0_pos + 0.25f * traj0_dir), color);
-    DrawLine3D(to_Vector3(traj1_pos), to_Vector3(traj1_pos + 0.25f * traj1_dir), color);
-    DrawLine3D(to_Vector3(traj2_pos), to_Vector3(traj2_pos + 0.25f * traj2_dir), color);
+    // Draw matched feature: trajectory direction
+    DrawLine3D(to_Vector3(traj0_pos), to_Vector3(traj0_pos + 0.25f * traj0_dir), GOLD);
+    DrawLine3D(to_Vector3(traj1_pos), to_Vector3(traj1_pos + 0.25f * traj1_dir), GOLD);
+    DrawLine3D(to_Vector3(traj2_pos), to_Vector3(traj2_pos + 0.25f * traj2_dir), GOLD);
     
-    // Draw terrain height features (8 values: 4 time samples x 2 toes)
-    // Features 33-36: left toe terrain heights at t0, t1, t2, t3
-    // Features 37-40: right toe terrain heights at t0, t1, t2, t3
+    // Draw terrain height features (4 time samples x 2 toes)
     Color terrain_colors[4] = {
-        ColorAlpha(color, 1.0f),    // Current frame - full opacity
-        ColorAlpha(color, 0.8f),   // +15 frames
-        ColorAlpha(color, 0.6f),    // +30 frames
-        ColorAlpha(color, 0.4f)    // +45 frames
+        ColorAlpha(BLUE, 1.0f),    // Current frame - full opacity
+        ColorAlpha(BLUE, 0.6f),    // +30 frames
+        ColorAlpha(BLUE, 0.4f),    // +45 frames
+        ColorAlpha(BLUE, 0.8f),   // +15 frames
     };
     
     for (int i = 0; i < 4; i++)
     {
-        // Use actual terrain heights computed from raycasting
-        float left_terrain_height = future_terrain_heights(i).x;
-        float right_terrain_height = future_terrain_heights(i).y;
+        float left_terrain_height = f.future_terrain_heights(i).x;
+        float right_terrain_height = f.future_terrain_heights(i).y;
         
         vec3 left_toe_xz;
         vec3 right_toe_xz;
         
         if (i == 0)
         {
-            // Current frame: use actual global toe positions
-            left_toe_xz = vec3(global_bone_positions(contact_bones(0)).x, 0, global_bone_positions(contact_bones(0)).z);
-            right_toe_xz = vec3(global_bone_positions(contact_bones(1)).x, 0, global_bone_positions(contact_bones(1)).z);
+            left_toe_xz = vec3(f.bone_positions(f.contact_bones(0)).x, 0, f.bone_positions(f.contact_bones(0)).z);
+            right_toe_xz = vec3(f.bone_positions(f.contact_bones(1)).x, 0, f.bone_positions(f.contact_bones(1)).z);
         }
         else
         {
-            // Future frames: transform future_toe_position from local to world space
-            // future_toe_position stores positions in character-local space
             int future_idx = i - 1;
-            
-            // Convert 2D local positions to 3D
-            left_toe_xz = vec3(future_toe_position(future_idx * 2 + 0).x, 0, future_toe_position(future_idx * 2 + 0).y);
-            right_toe_xz = vec3(future_toe_position(future_idx * 2 + 1).x, 0, future_toe_position(future_idx * 2 + 1).y);
-
-            // Relative to root
+            left_toe_xz = vec3(f.future_toe_position(future_idx * 2 + 0).x, 0, f.future_toe_position(future_idx * 2 + 0).y);
+            right_toe_xz = vec3(f.future_toe_position(future_idx * 2 + 1).x, 0, f.future_toe_position(future_idx * 2 + 1).y);
             left_toe_xz = quat_mul_vec3(rot, left_toe_xz) + pos;
             right_toe_xz = quat_mul_vec3(rot, right_toe_xz) + pos;
-            
         }
 
+        vec3 left_terrain_pos = vec3(left_toe_xz.x, f.hip_pos.y + left_terrain_height + 0.01f, left_toe_xz.z);
+        vec3 right_terrain_pos = vec3(right_toe_xz.x, f.hip_pos.y + right_terrain_height + 0.01f, right_toe_xz.z);
         
-        
-        // Position spheres at toe XZ position with Y = terrain_height + hip_height
-        vec3 left_terrain_pos = vec3(left_toe_xz.x, hip_global_position.y + left_terrain_height + 0.01f, left_toe_xz.z);
-        vec3 right_terrain_pos = vec3(right_toe_xz.x, hip_global_position.y + right_terrain_height + 0.01f, right_toe_xz.z);
-        
-        // Draw small spheres at terrain height positions
+        // Draw feature: foot pos (0, +15, +30, +40 frames)
         DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, terrain_colors[i]);
         DrawSphereWires(to_Vector3(right_terrain_pos), 0.03f, 4, 6, terrain_colors[i]);
         
-        // Draw vertical lines from toe XZ position at hip height down to terrain
-        vec3 left_hip_level = vec3(left_toe_xz.x, hip_global_position.y, left_toe_xz.z);
-        vec3 right_hip_level = vec3(right_toe_xz.x, hip_global_position.y, right_toe_xz.z);
+        vec3 left_hip_level = vec3(left_toe_xz.x, f.hip_pos.y, left_toe_xz.z);
+        vec3 right_hip_level = vec3(right_toe_xz.x, f.hip_pos.y, right_toe_xz.z);
         
+        // Draw feature: terrain height foot to hips
         DrawLine3D(to_Vector3(left_hip_level), to_Vector3(left_terrain_pos), terrain_colors[i]);
         DrawLine3D(to_Vector3(right_hip_level), to_Vector3(right_terrain_pos), terrain_colors[i]);
     }
 
+    // Helper function definitions for drawing history features
     auto sample_runtime_history_idx = [&](int relative_offset)
     {
-        if (root_history_positions.empty()) return 0;
-        int last = (int)root_history_positions.size() - 1;
+        if (f.root_history_positions.empty()) return 0;
+        int last = (int)f.root_history_positions.size() - 1;
         return clamp(last + relative_offset, 0, last);
     };
 
     auto draw_history_traj_sphere = [&](int history_offset, Color c)
     {
-        if (root_history_positions.empty() || root_history_rotations.empty()) return;
+        if (f.root_history_positions.empty() || f.root_history_rotations.empty()) return;
 
         int anchor_idx = sample_runtime_history_idx(history_offset);
         int traj_idx = sample_runtime_history_idx(history_offset + 20);
 
-        vec3 root_pos_history = root_history_positions[anchor_idx];
-        quat root_rot_history = root_history_rotations[anchor_idx];
-        vec3 htraj_pos = root_history_positions[traj_idx];
+        vec3 root_pos_history = f.root_history_positions[anchor_idx];
+        quat root_rot_history = f.root_history_rotations[anchor_idx];
+        vec3 htraj_pos = f.root_history_positions[traj_idx];
 
+        // Draw feature: future trajectory
         Color c_faint = ColorAlpha(c, 0.55f);
         DrawSphereWires(to_Vector3(root_pos_history), 0.03f, 4, 6, c_faint);
         DrawLine3D(to_Vector3(root_pos_history), to_Vector3(htraj_pos), c_faint);
@@ -1959,7 +1937,7 @@ void draw_features(
         vec3 history_traj_local = quat_inv_mul_vec3(root_rot_history, htraj_pos - root_pos_history);
         vec3 history_traj_dir = quat_inv_mul_vec3(
             root_rot_history,
-            quat_mul_vec3(root_history_rotations[traj_idx], vec3(0.0f, 0.0f, 1.0f)));
+            quat_mul_vec3(f.root_history_rotations[traj_idx], vec3(0.0f, 0.0f, 1.0f)));
 
         const float eps = 1e-4f;
         float h = length(vec3(history_traj_local.x, 0.0f, history_traj_local.z));
@@ -1972,83 +1950,87 @@ void draw_features(
 
     auto draw_history_bone_position_sphere = [&](const std::vector<vec3>& history_positions, int history_offset, Color c, float radius = 0.05f)
     {
-        if (root_history_positions.empty() || root_history_rotations.empty() || history_positions.empty()) return;
+        if (f.root_history_positions.empty() || history_positions.empty()) return;
 
         int idx = sample_runtime_history_idx(history_offset);
-        vec3 root_pos_history = root_history_positions[idx];
-        quat root_rot_history = root_history_rotations[idx];
+        vec3 root_pos_history = f.root_history_positions[idx];
 
-        vec3 local_feature = history_positions[idx];
-        vec3 feature_world = quat_mul_vec3(root_rot_history, local_feature) + root_pos_history;
+        // History positions are already in global coordinates
+        vec3 feature_world = history_positions[idx];
 
         Color c_faint = ColorAlpha(c, 0.45f);
         DrawLine3D(to_Vector3(root_pos_history), to_Vector3(feature_world), c_faint);
+        // Draw feature: history pos (can be any bone)
         DrawSphereWires(to_Vector3(feature_world), radius, 4, 10, c);
     };
 
     auto draw_history_velocity_sphere = [&](const std::vector<vec3>& history_positions, const std::vector<vec3>& history_velocities, int history_offset, Color c)
     {
-        if (root_history_positions.empty() || root_history_rotations.empty() || history_velocities.empty()) return;
+        if (f.root_history_positions.empty() || history_velocities.empty()) return;
 
         int idx = sample_runtime_history_idx(history_offset);
-        vec3 root_pos_history = root_history_positions[idx];
-        quat root_rot_history = root_history_rotations[idx];
 
-        vec3 feature_pos_local = vec3();
-        if (!history_positions.empty())
-        {
-            feature_pos_local = history_positions[idx];
-        }
-
-        vec3 feature_vel_local = history_velocities[idx];
-
-        vec3 feature_pos_world = quat_mul_vec3(root_rot_history, feature_pos_local) + root_pos_history;
-        vec3 feature_vel_world = quat_mul_vec3(root_rot_history, feature_vel_local);
-        vec3 feature_vel_end = feature_pos_world + 0.1f * feature_vel_world;
+        // History positions and velocities are already in global coordinates
+        vec3 pos_world = history_positions[idx];
+        vec3 vel_world = history_velocities[idx];
 
         Color c_faint = ColorAlpha(c, 0.45f);
-        DrawLine3D(to_Vector3(feature_pos_world), to_Vector3(feature_vel_end), c_faint);
-        DrawSphereWires(to_Vector3(feature_vel_end), 0.045f, 4, 10, c);
+        DrawLine3D(to_Vector3(pos_world), to_Vector3(pos_world + 0.1f * vel_world), c_faint);
+        // Draw feature: history direction (trajectory direction)
+        DrawSphereWires(to_Vector3(pos_world + 0.1f * vel_world), 0.03f, 4, 6, c);
     };
 
-    auto draw_history_terrain_spheres = [&](int history_offset, Color c)
+    auto draw_history_terrain_sphere = [&](const std::vector<vec2>& h_terrain, int history_offset, Color c)
     {
-        if (root_history_positions.empty() || root_history_rotations.empty()) return;
-        if (history_terrain_heights.empty() || history_left_foot_positions.empty() || history_right_foot_positions.empty()) return;
+        if (f.root_history_positions.empty() || h_terrain.empty()) return;
 
         int idx = sample_runtime_history_idx(history_offset);
-        vec3 root_pos_history = root_history_positions[idx];
-        quat root_rot_history = root_history_rotations[idx];
 
-        vec3 left_toe_world = quat_mul_vec3(root_rot_history, history_left_foot_positions[idx]) + root_pos_history;
-        vec3 right_toe_world = quat_mul_vec3(root_rot_history, history_right_foot_positions[idx]) + root_pos_history;
+        // History positions are already in global coordinates
+        vec3 l_pos_world = f.history_left_foot_positions[idx];
+        vec3 r_pos_world = f.history_right_foot_positions[idx];
+        vec3 h_pos_world = f.history_hip_positions[idx];
+        float l_terrain_h = h_terrain[idx].x;
+        float r_terrain_h = h_terrain[idx].y;
 
-        float left_terrain_height = history_terrain_heights[idx].x;
-        float right_terrain_height = history_terrain_heights[idx].y;
-
-        float hip_y = root_pos_history.y;
-        if (!history_hip_positions.empty())
-        {
-            hip_y = history_hip_positions[idx].y;
-        }
-
-        vec3 left_terrain_pos = vec3(left_toe_world.x, hip_y + left_terrain_height + 0.01f, left_toe_world.z);
-        vec3 right_terrain_pos = vec3(right_toe_world.x, hip_y + right_terrain_height + 0.01f, right_toe_world.z);
+        vec3 l_terrain_pos = vec3(l_pos_world.x, h_pos_world.y + l_terrain_h + 0.01f, l_pos_world.z);
+        vec3 r_terrain_pos = vec3(r_pos_world.x, h_pos_world.y + r_terrain_h + 0.01f, r_pos_world.z);
 
         Color c_faint = ColorAlpha(c, 0.45f);
-        DrawLine3D(to_Vector3(vec3(left_toe_world.x, hip_y, left_toe_world.z)), to_Vector3(left_terrain_pos), c_faint);
-        DrawLine3D(to_Vector3(vec3(right_toe_world.x, hip_y, right_toe_world.z)), to_Vector3(right_terrain_pos), c_faint);
-        DrawSphereWires(to_Vector3(left_terrain_pos), 0.03f, 4, 6, c);
-        DrawSphereWires(to_Vector3(right_terrain_pos), 0.03f, 4, 6, c);
+        // Draw feature: history foot position
+        DrawSphereWires(to_Vector3(l_terrain_pos), 0.02f, 4, 6, c);
+        DrawSphereWires(to_Vector3(r_terrain_pos), 0.02f, 4, 6, c);
+        DrawLine3D(to_Vector3(vec3(l_pos_world.x, h_pos_world.y, l_pos_world.z)), to_Vector3(l_terrain_pos), c_faint);
+        DrawLine3D(to_Vector3(vec3(r_pos_world.x, h_pos_world.y, r_pos_world.z)), to_Vector3(r_terrain_pos), c_faint);
     };
 
-    draw_history_bone_position_sphere(history_left_foot_positions, -20, SKYBLUE);
-    draw_history_bone_position_sphere(history_right_foot_positions, -20, SKYBLUE);
-    draw_history_velocity_sphere(history_left_foot_positions, history_left_foot_velocities, -20, VIOLET);
-    draw_history_velocity_sphere(history_right_foot_positions, history_right_foot_velocities, -20, MAGENTA);
-    draw_history_velocity_sphere(history_hip_positions, history_hip_velocities, -20, LIME);
-    draw_history_traj_sphere(-20, YELLOW);
-    draw_history_terrain_spheres(-15, GREEN);
+    // Function call draw history features
+    
+    // int history_offsets[3] = { -20, -10, -5 };
+    int history_offsets[1] = { -20 };
+
+    Color hc = ColorAlpha(GREEN, 0.4f);
+
+    // Draw feature: history tarjectory pos
+    draw_history_traj_sphere(-20, hc);
+    
+    // Draw feature: history foot pos
+    draw_history_bone_position_sphere(f.history_left_foot_positions, -20, hc, 0.04f);
+    draw_history_bone_position_sphere(f.history_right_foot_positions, -20, hc, 0.06f);
+    
+    // Draw feature: history foot vel
+    draw_history_velocity_sphere(f.history_left_foot_positions, f.history_left_foot_velocities, -20, hc);
+    draw_history_velocity_sphere(f.history_right_foot_positions, f.history_right_foot_velocities, -20, hc);
+    
+    // Draw feature: history hip pos
+    draw_history_bone_position_sphere(f.history_hip_positions, -20, hc, 0.03f);
+    
+    // Draw feature: history hip vel
+    draw_history_velocity_sphere(f.history_hip_positions, f.history_hip_velocities, -20, hc);
+    
+    // Draw feature: history terrain heights
+    draw_history_terrain_sphere(f.history_terrain_heights, -15, hc);
+    
 }
 
 void draw_trajectory(
@@ -2058,6 +2040,7 @@ void draw_trajectory(
 {
     for (int i = 1; i < trajectory_positions.size; i++)
     {
+        // Draw feature: future trajectory position
         DrawSphereWires(to_Vector3(trajectory_positions(i)), 0.05f, 4, 10, color);
         DrawLine3D(to_Vector3(trajectory_positions(i)), to_Vector3(
             trajectory_positions(i) + 0.6f * quat_mul_vec3(trajectory_rotations(i), vec3(0, 0, 1.0f))), color);
@@ -3100,13 +3083,6 @@ int main(int argc, char** argv)
             db.bone_parents,
             Bone_Hips);
 
-        quat inv_root_rot = quat_inv(bone_rotations(0));
-        vec3 left_pos_local = quat_mul_vec3(inv_root_rot, left_foot_pos - bone_positions(0));
-        vec3 right_pos_local = quat_mul_vec3(inv_root_rot, right_foot_pos - bone_positions(0));
-        vec3 left_vel_local = quat_mul_vec3(inv_root_rot, left_foot_vel);
-        vec3 right_vel_local = quat_mul_vec3(inv_root_rot, right_foot_vel);
-        vec3 hip_vel_local = quat_mul_vec3(inv_root_rot, hip_vel);
-
         float left_terrain_height = 0.0f;
         float right_terrain_height = 0.0f;
         bool has_left_terrain = sample_terrain_height(ground_plane_model, left_foot_pos, left_terrain_height);
@@ -3117,12 +3093,13 @@ int main(int argc, char** argv)
 
         root_history_positions.push_back(bone_positions(0));
         root_history_rotations.push_back(bone_rotations(0));
-        history_left_foot_positions.push_back(left_pos_local);
-        history_right_foot_positions.push_back(right_pos_local);
-        history_left_foot_velocities.push_back(left_vel_local);
-        history_right_foot_velocities.push_back(right_vel_local);
+        // Store all history as global coordinates
+        history_left_foot_positions.push_back(left_foot_pos);
+        history_right_foot_positions.push_back(right_foot_pos);
+        history_left_foot_velocities.push_back(left_foot_vel);
+        history_right_foot_velocities.push_back(right_foot_vel);
         history_hip_positions.push_back(hip_pos);
-        history_hip_velocities.push_back(hip_vel_local);
+        history_hip_velocities.push_back(hip_vel);
         history_terrain_heights.push_back(terrain_pair);
 
         trim_runtime_history();
@@ -3164,9 +3141,9 @@ int main(int argc, char** argv)
     std::vector<array1d<vec3>> playback_lmm_bone_positions;
     std::vector<array1d<quat>> playback_lmm_bone_rotations;
 
-    // Per-frame feature snapshots for playback feature visualization
-    std::vector<playback_feature_snapshot> playback_mm_feature_snapshots;
-    std::vector<playback_feature_snapshot> playback_lmm_feature_snapshots;
+    // Per-frame feature data for playback visualization
+    std::vector<feature_draw_data> playback_mm_feature_data;
+    std::vector<feature_draw_data> playback_lmm_feature_data;
 
     // Safety toggle: set to false to skip all playback feature drawing
     bool show_playback_features = true;
@@ -3410,8 +3387,8 @@ int main(int argc, char** argv)
         playback_mm_bone_rotations.clear();
         playback_lmm_bone_positions.clear();
         playback_lmm_bone_rotations.clear();
-        playback_mm_feature_snapshots.clear();
-        playback_lmm_feature_snapshots.clear();
+        playback_mm_feature_data.clear();
+        playback_lmm_feature_data.clear();
 
         reset_motion_to_recording_start();
     };
@@ -3420,10 +3397,10 @@ int main(int argc, char** argv)
     std::vector<array1d<vec3>> analysis_capture_bone_positions;
     std::vector<array1d<quat>> analysis_capture_bone_rotations;
 
-    // Parallel feature snapshot capture for video comparison rendering
+    // Parallel feature data capture for video comparison rendering
     bool analysis_capture_features_enabled = false;
-    std::vector<playback_feature_snapshot> analysis_capture_mm_feature_snaps;
-    std::vector<playback_feature_snapshot> analysis_capture_lmm_feature_snaps;
+    std::vector<feature_draw_data> analysis_capture_mm_feature_data;
+    std::vector<feature_draw_data> analysis_capture_lmm_feature_data;
 
 #if defined(_WIN32)
     _mkdir(joystick_recording_folder);
@@ -3466,8 +3443,8 @@ int main(int argc, char** argv)
             playback_mm_bone_rotations.clear();
             playback_lmm_bone_positions.clear();
             playback_lmm_bone_rotations.clear();
-            playback_mm_feature_snapshots.clear();
-            playback_lmm_feature_snapshots.clear();
+            playback_mm_feature_data.clear();
+            playback_lmm_feature_data.clear();
         }
 
         if (joystick_recording_enabled)
@@ -4041,6 +4018,49 @@ int main(int argc, char** argv)
         array1d<vec3> query_trajectory_positions = trajectory_positions;
         array1d<quat> query_trajectory_rotations = trajectory_rotations;
 
+        // If in database playback mode, use the exact trajectory from the test database
+        if (database_playback_enabled)
+        {
+            int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
+            if (test_frame < test_db.features.rows && test_db.features.cols >= 33)
+            {
+                auto get_raw_feature = [&](int idx) {
+                    return test_db.features(test_frame, idx) * test_db.features_scale(idx) + test_db.features_offset(idx);
+                };
+
+                // Extract trajectory positions and directions from test database features
+                // Indices 15-17: traj0_pos (local), 18-20: traj1_pos (local), 21-23: traj2_pos (local)
+                // Indices 24-26: traj0_dir (local), 27-29: traj1_dir (local), 30-32: traj2_dir (local)
+                
+                vec3 root_pos = bone_positions(0);
+                quat root_rot = bone_rotations(0);
+                
+                // Convert local trajectory positions to world coordinates
+                for (int i = 0; i < 3; i++)
+                {
+                    vec3 local_pos = vec3(
+                        get_raw_feature(15 + i * 3 + 0),
+                        get_raw_feature(15 + i * 3 + 1),
+                        get_raw_feature(15 + i * 3 + 2));
+                    
+                    query_trajectory_positions(i + 1) = quat_mul_vec3(root_rot, local_pos) + root_pos;
+                }
+                
+                // Convert local trajectory directions to world directions and extract yaw
+                for (int i = 0; i < 3; i++)
+                {
+                    vec3 local_dir = normalize(vec3(
+                        get_raw_feature(24 + i * 3 + 0),
+                        get_raw_feature(24 + i * 3 + 1),
+                        get_raw_feature(24 + i * 3 + 2)));
+                    
+                    vec3 world_dir = quat_mul_vec3(root_rot, local_dir);
+                    float yaw = atan2f(world_dir.x, world_dir.z);
+                    query_trajectory_rotations(i + 1) = quat_from_angle_axis(yaw, vec3(0.0f, 1.0f, 0.0f));
+                }
+            }
+        }
+
         if (cartwheel_query_lock_active || jump_query_lock_active)
         {
             vec3 lock_forward = cartwheel_query_lock_active ? cartwheel_query_lock_forward : jump_query_lock_forward;
@@ -4287,18 +4307,43 @@ int main(int argc, char** argv)
             else
             {
                 int idx = sample_runtime_history_idx(relative_offset);
-                query(offset + 0) = history[idx].x;
-                query(offset + 1) = history[idx].y;
-                query(offset + 2) = history[idx].z;
+                // History is stored in global coordinates, convert to local relative to current root
+                quat inv_root_rot = quat_inv(bone_rotations(0));
+                vec3 local_vec = quat_mul_vec3(inv_root_rot, history[idx] - bone_positions(0));
+                query(offset + 0) = local_vec.x;
+                query(offset + 1) = local_vec.y;
+                query(offset + 2) = local_vec.z;
+            }
+            offset += 3;
+        };
+
+        // Write history positions and velocities, converting from global to local coordinates
+        auto query_write_runtime_history_vec3_velocity = [&](const std::vector<vec3>& history, int relative_offset)
+        {
+            if (history.empty())
+            {
+                query(offset + 0) = 0.0f;
+                query(offset + 1) = 0.0f;
+                query(offset + 2) = 0.0f;
+            }
+            else
+            {
+                int idx = sample_runtime_history_idx(relative_offset);
+                // Velocities are stored in global coordinates, convert to local
+                quat inv_root_rot = quat_inv(bone_rotations(0));
+                vec3 local_vel = quat_mul_vec3(inv_root_rot, history[idx]);
+                query(offset + 0) = local_vel.x;
+                query(offset + 1) = local_vel.y;
+                query(offset + 2) = local_vel.z;
             }
             offset += 3;
         };
 
         query_write_runtime_history_vec3(history_left_foot_positions, -20);
         query_write_runtime_history_vec3(history_right_foot_positions, -20);
-        query_write_runtime_history_vec3(history_left_foot_velocities, -20);
-        query_write_runtime_history_vec3(history_right_foot_velocities, -20);
-        query_write_runtime_history_vec3(history_hip_velocities, -20);
+        query_write_runtime_history_vec3_velocity(history_left_foot_velocities, -20);
+        query_write_runtime_history_vec3_velocity(history_right_foot_velocities, -20);
+        query_write_runtime_history_vec3_velocity(history_hip_velocities, -20);
 
         auto sample_runtime_history_root = [&](int relative_offset, vec3& out_pos, quat& out_rot)
         {
@@ -4653,14 +4698,19 @@ int main(int argc, char** argv)
             curr_bone_rotations_without_history = db.bone_rotations(mm_last_best_without_history);
             curr_bone_angular_velocities_without_history = db.bone_angular_velocities(mm_last_best_without_history);
             
-            // Retrieve precomputed future_toe_position from database
+            // Retrieve precomputed future_toe_position from the active playback source.
+            int playback_frame = database_playback_enabled
+                ? clamp(database_playback_index, 0, test_db.nframes() - 1)
+                : frame_index;
+
             // Database stores 12 floats per frame: [L15_x, L15_z, R15_x, R15_z, L30_x, L30_z, R30_x, R30_z, L45_x, L45_z, R45_x, R45_z]
             // Convert to 6 vec2 values: [left0, right0, left1, right1, left2, right2]
+            const database& trajectory_db = database_playback_enabled ? test_db : db;
             for (int i = 0; i < 6; i++)
             {
                 future_toe_position(i) = vec2(
-                    db.future_toe_positions(frame_index, i * 2 + 0),
-                    db.future_toe_positions(frame_index, i * 2 + 1));
+                    trajectory_db.future_toe_positions(playback_frame, i * 2 + 0),
+                    trajectory_db.future_toe_positions(playback_frame, i * 2 + 1));
             }
         }
         
@@ -5059,88 +5109,72 @@ int main(int argc, char** argv)
             gamepadstick_right,
             desired_strafe,
             dt);
-        
-        // Helper: capture all per-frame data needed to replay draw_features().
-        auto capture_feature_snapshot = [&]() -> playback_feature_snapshot
+                // Helper: capture all per-frame data needed to draw features.
+        auto capture_feature_draw_data = [&]() -> feature_draw_data
         {
-            playback_feature_snapshot snap;
+            feature_draw_data f;
+
+            const database& feature_db = database_playback_enabled ? test_db : db;
+            const int feature_frame = database_playback_enabled
+                ? clamp(database_playback_index, 0, test_db.nframes() - 1)
+                : frame_index;
 
             // Denormalized feature vector
-            array1d<float> feat_copy = lmm_runtime_enabled
+            array1d<float> feat_copy = lmm_runtime_enabled && !database_playback_enabled
                 ? slice1d<float>(features_curr)
-                : db.features(frame_index);
-            denormalize_features(feat_copy, db.features_offset, db.features_scale);
-            snap.features = feat_copy;
+                : feature_db.features(feature_frame);
+            denormalize_features(feat_copy, feature_db.features_offset, feature_db.features_scale);
+            f.features = feat_copy;
 
-            // Root pose and hip
-            snap.root_pos = global_bone_positions(0);
-            snap.root_rot = global_bone_rotations(0);
-            snap.hip_pos  = global_bone_positions(Bone_Hips);
+            if (database_playback_enabled)
+            {
+                f.root_pos = feature_db.bone_positions(feature_frame)(0);
+                f.root_rot = feature_db.bone_rotations(feature_frame)(0);
+                f.hip_pos = feature_db.bone_positions(feature_frame)(Bone_Hips);
+                f.bone_positions = feature_db.bone_positions(feature_frame);
+            }
+            else
+            {
+                f.root_pos = global_bone_positions(0);
+                f.root_rot = global_bone_rotations(0);
+                f.hip_pos = global_bone_positions(Bone_Hips);
+                f.bone_positions = global_bone_positions;
+            }
+            f.contact_bones = contact_bones;
 
-            // Full bone positions (for contact bone XZ lookups inside draw_features)
-            snap.bone_positions.resize(db.nbones());
-            for (int bi = 0; bi < db.nbones(); bi++)
-                snap.bone_positions(bi) = global_bone_positions(bi);
+            f.future_toe_position = future_toe_position;
+            f.future_terrain_heights = future_terrain_heights;
 
-            // Future toe / terrain helpers
-            snap.future_toe_position    = future_toe_position;
-            snap.future_terrain_heights = future_terrain_heights;
+            f.root_history_positions = root_history_positions;
+            f.root_history_rotations = root_history_rotations;
+            f.history_left_foot_positions = history_left_foot_positions;
+            f.history_right_foot_positions = history_right_foot_positions;
+            f.history_left_foot_velocities = history_left_foot_velocities;
+            f.history_right_foot_velocities = history_right_foot_velocities;
+            f.history_hip_positions = history_hip_positions;
+            f.history_hip_velocities = history_hip_velocities;
+            f.history_terrain_heights = history_terrain_heights;
 
-            // Rolling history buffers (copy entire vectors, typically <=30 items)
-            snap.root_history_positions       = root_history_positions;
-            snap.root_history_rotations       = root_history_rotations;
-            snap.history_left_foot_positions  = history_left_foot_positions;
-            snap.history_right_foot_positions = history_right_foot_positions;
-            snap.history_left_foot_velocities = history_left_foot_velocities;
-            snap.history_right_foot_velocities= history_right_foot_velocities;
-            snap.history_hip_positions        = history_hip_positions;
-            snap.history_hip_velocities       = history_hip_velocities;
-            snap.history_terrain_heights      = history_terrain_heights;
-
-            return snap;
+            return f;
         };
 
-        // Store feature snapshot for analysis video rendering, this flag is true if in analyze mode
-        if (analysis_capture_features_enabled)
+        // Record for playback
+        if (joystick_recording_enabled)
         {
-            playback_feature_snapshot snap = capture_feature_snapshot();
             if (lmm_runtime_enabled)
-                analysis_capture_lmm_feature_snaps.push_back(snap);
+                playback_lmm_feature_data.push_back(capture_feature_draw_data());
             else
-                analysis_capture_mm_feature_snaps.push_back(snap);
+                playback_mm_feature_data.push_back(capture_feature_draw_data());
         }
 
-        // Store playback visualization from the already inertialized runtime
-        // pose. This keeps transitions smooth instead of jumping on search hits.
-        if (joystick_playback_enabled)
+        // Store feature data for analysis video rendering
+        if (analysis_capture_features_enabled)
         {
-            bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
-            playback_feature_snapshot snap = capture_feature_snapshot();
-
+            feature_draw_data f = capture_feature_draw_data();
             if (lmm_runtime_enabled)
-            {
-                playback_lmm_bone_positions.push_back(global_bone_positions);
-                playback_lmm_bone_rotations.push_back(global_bone_rotations);
-                playback_lmm_feature_snapshots.push_back(snap);
-
-                // Keep MM history length aligned so indexing remains valid.
-                // Use the current runtime pose instead of freezing at the first frame.
-                playback_mm_bone_positions.push_back(global_bone_positions);
-                playback_mm_bone_rotations.push_back(global_bone_rotations);
-                playback_mm_feature_snapshots.push_back(snap);
-            }
+                analysis_capture_lmm_feature_data.push_back(f);
             else
-            {
-                playback_mm_bone_positions.push_back(global_bone_positions);
-                playback_mm_bone_rotations.push_back(global_bone_rotations);
-                playback_mm_feature_snapshots.push_back(snap);
-
-                // Keep LMM history length aligned so indexing remains valid.
-                // Use the current runtime pose instead of freezing at the first frame.
-                playback_lmm_bone_positions.push_back(global_bone_positions);
-                playback_lmm_bone_rotations.push_back(global_bone_rotations);
-                playback_lmm_feature_snapshots.push_back(snap);
-            }
+                analysis_capture_mm_feature_data.push_back(f);
         }
 
         if (mode == APP_MODE_WINDOW)
@@ -5278,17 +5312,16 @@ int main(int argc, char** argv)
         
         // Draw playback pose during recording playback using the
         // learned-motion-matching toggle as mode selector.
-        if (joystick_playback_enabled && !playback_mm_bone_positions.empty())
+        if (joystick_playback_enabled)
         {
-            int current_frame = std::min((int)playback_mm_bone_positions.size() - 1, joystick_playback_index - 1);
             bool playback_use_lmm = lmm_enabled;
             
             // Draw MM (Motion Matching) from database when LMM mode is off.
-            if (!playback_use_lmm && current_frame >= 0 && current_frame < (int)playback_mm_bone_positions.size())
+            if (!playback_use_lmm && joystick_playback_index < (int)playback_mm_bone_positions.size())
             {
                 if (show_stickman)
                 {
-                    draw_stickman(playback_mm_bone_positions[current_frame], db.bone_parents, GREEN);
+                    draw_stickman(playback_mm_bone_positions[joystick_playback_index], db.bone_parents, GREEN);
                 }
                 else
                 {
@@ -5296,19 +5329,19 @@ int main(int argc, char** argv)
                     deform_character_mesh(
                         character_mesh,
                         character_data,
-                        playback_mm_bone_positions[current_frame],
-                        playback_mm_bone_rotations[current_frame],
+                        playback_mm_bone_positions[joystick_playback_index],
+                        playback_mm_bone_rotations[joystick_playback_index],
                         db.bone_parents);
                     DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, GREEN);
                 }
             }
             
             // Draw LMM (Learned Motion Matching) when LMM mode is on.
-            if (playback_use_lmm && current_frame >= 0 && current_frame < (int)playback_lmm_bone_positions.size())
+            if (playback_use_lmm && joystick_playback_index < (int)playback_lmm_bone_positions.size())
             {
                 if (show_stickman)
                 {
-                    draw_stickman(playback_lmm_bone_positions[current_frame], db.bone_parents, RED);
+                    draw_stickman(playback_lmm_bone_positions[joystick_playback_index], db.bone_parents, RED);
                 }
                 else
                 {
@@ -5316,8 +5349,8 @@ int main(int argc, char** argv)
                     deform_character_mesh(
                         character_mesh,
                         character_data,
-                        playback_lmm_bone_positions[current_frame],
-                        playback_lmm_bone_rotations[current_frame],
+                        playback_lmm_bone_positions[joystick_playback_index],
+                        playback_lmm_bone_rotations[joystick_playback_index],
                         db.bone_parents);
                     DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, RED);
                 }
@@ -5326,39 +5359,23 @@ int main(int argc, char** argv)
             // Draw feature debug visuals for the currently displayed playback frame
             if (show_playback_features)
             {
-                const auto& snaps = playback_use_lmm ? playback_lmm_feature_snapshots : playback_mm_feature_snapshots;
-                if (current_frame >= 0 && current_frame < (int)snaps.size())
+                const std::vector<feature_draw_data>& snaps = playback_use_lmm ? playback_lmm_feature_data : playback_mm_feature_data;
+                if (joystick_playback_index < (int)snaps.size())
                 {
-                    const playback_feature_snapshot& s = snaps[current_frame];
-                    draw_features(
-                        s.features,
-                        s.root_pos, s.root_rot,
-                        playback_use_lmm ? RED : GREEN,
-                        s.future_toe_position,
-                        s.future_terrain_heights,
-                        s.hip_pos,
-                        s.bone_positions,
-                        contact_bones,
-                        s.root_history_positions, s.root_history_rotations,
-                        s.history_left_foot_positions, s.history_right_foot_positions,
-                        s.history_left_foot_velocities, s.history_right_foot_velocities,
-                        s.history_hip_positions, s.history_hip_velocities,
-                        s.history_terrain_heights);
+                    const feature_draw_data& s = snaps[joystick_playback_index];
+                    draw_features(s, s.root_pos, s.root_rot);
                 }
             }
         }
         
         // Draw matched features
         
-        array1d<float> current_features = lmm_runtime_enabled ? slice1d<float>(features_curr) : db.features(frame_index);
-        denormalize_features(current_features, db.features_offset, db.features_scale);        
-        draw_features(current_features, global_bone_positions(0), global_bone_rotations(0), MAROON,
-            future_toe_position, future_terrain_heights, global_bone_positions(Bone_Hips), global_bone_positions, contact_bones,
-            root_history_positions, root_history_rotations,
-            history_left_foot_positions, history_right_foot_positions,
-            history_left_foot_velocities, history_right_foot_velocities,
-            history_hip_positions, history_hip_velocities,
-            history_terrain_heights);
+        if (show_playback_features)
+        {
+            // Draw features during 
+            feature_draw_data f = capture_feature_draw_data();
+            draw_features(f, global_bone_positions(0), global_bone_rotations(0));
+        }
 
         if (!lmm_runtime_enabled && mm_history_mode == MM_HISTORY_SEARCH_BOTH)
         {
@@ -6250,7 +6267,7 @@ int main(int argc, char** argv)
                                         bool use_lmm,
                                         std::vector<array1d<vec3>>& output_positions,
                                         std::vector<array1d<quat>>& output_rotations,
-                                        std::vector<playback_feature_snapshot>& output_feature_snaps,
+                                        std::vector<feature_draw_data>& output_feature_data,
                                         capture_stats& stats) -> bool
         {
             // Run & capture MM/LMM generated animation
@@ -6263,8 +6280,8 @@ int main(int argc, char** argv)
             joystick_playback_index = 0;
             analysis_capture_bone_positions.clear();
             analysis_capture_bone_rotations.clear();
-            analysis_capture_mm_feature_snaps.clear();
-            analysis_capture_lmm_feature_snaps.clear();
+            analysis_capture_mm_feature_data.clear();
+            analysis_capture_lmm_feature_data.clear();
             analysis_capture_enabled = true;
             analysis_capture_features_enabled = true; // set this flag to true, so that simulation will be captured
 
@@ -6325,7 +6342,7 @@ int main(int argc, char** argv)
             database_playback_enabled = false;
             output_positions = analysis_capture_bone_positions;
             output_rotations = analysis_capture_bone_rotations;
-            output_feature_snaps = use_lmm ? analysis_capture_lmm_feature_snaps : analysis_capture_mm_feature_snaps;
+            output_feature_data = use_lmm ? analysis_capture_lmm_feature_data : analysis_capture_mm_feature_data;
             return !output_positions.empty();
         };
 
@@ -6403,8 +6420,8 @@ int main(int argc, char** argv)
                                            const std::vector<array1d<quat>>& mm_rotations,
                                            const std::vector<array1d<vec3>>& lmm_poses,
                                            const std::vector<array1d<quat>>& lmm_rotations,
-                                           const std::vector<playback_feature_snapshot>& mm_feature_snaps,
-                                           const std::vector<playback_feature_snapshot>& lmm_feature_snaps,
+                                           const std::vector<feature_draw_data>& mm_feature_data,
+                                           const std::vector<feature_draw_data>& lmm_feature_data,
                                            int num_frames)
         {
             if (num_frames <= 0) return;
@@ -6424,7 +6441,7 @@ int main(int argc, char** argv)
             int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 3 : 2;
             int part_width = screen_width / parts;
 
-            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<playback_feature_snapshot>& feat_snaps, int frame_idx)
+            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<feature_draw_data>& feature_data, int frame_idx)
             {
                 Camera3D cam = camera;
                 if (pose.size > 0)
@@ -6465,23 +6482,10 @@ int main(int argc, char** argv)
                         DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
                     }
 
-                    if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feat_snaps.size())
+                    if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feature_data.size())
                     {
-                        const playback_feature_snapshot& s = feat_snaps[frame_idx];
-                        draw_features(
-                            s.features,
-                            s.root_pos, s.root_rot,
-                            MAROON,
-                            s.future_toe_position,
-                            s.future_terrain_heights,
-                            s.hip_pos,
-                            s.bone_positions,
-                            contact_bones,
-                            s.root_history_positions, s.root_history_rotations,
-                            s.history_left_foot_positions, s.history_right_foot_positions,
-                            s.history_left_foot_velocities, s.history_right_foot_velocities,
-                            s.history_hip_positions, s.history_hip_velocities,
-                            s.history_terrain_heights);
+                        // Draw features during recording video
+                        draw_features(feature_data[frame_idx], pose(0), rot(0));
                     }
                 }
                 EndMode3D();
@@ -6498,19 +6502,19 @@ int main(int argc, char** argv)
                 
                 if (mode == APP_MODE_ANALYZE_BOTH)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_snaps, i);
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_snaps, i);
-                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_snaps, i);
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
+                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_snaps, i);
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_snaps, i);
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
+                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_snaps, i);
-                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_snaps, i);
+                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_data, i);
+                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
                 }
                 
                 for (int p = 1; p < parts; p++)
@@ -6567,10 +6571,10 @@ int main(int argc, char** argv)
 
             std::vector<array1d<vec3>> mm_capture;
             std::vector<array1d<quat>> mm_capture_rotations;
-            std::vector<playback_feature_snapshot> mm_feature_snaps;
+            std::vector<feature_draw_data> mm_feature_data;
             std::vector<array1d<vec3>> lmm_capture;
             std::vector<array1d<quat>> lmm_capture_rotations;
-            std::vector<playback_feature_snapshot> lmm_feature_snaps;
+            std::vector<feature_draw_data> lmm_feature_data;
             capture_stats mm_stats;
             capture_stats lmm_stats;
 
@@ -6581,7 +6585,7 @@ int main(int argc, char** argv)
             bool lmm_ok = true;
             if (need_mm)
             {
-                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_feature_snaps, mm_stats);
+                mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_feature_data, mm_stats);
                 res.mm_time_ms = mm_stats.elapsed_ms;
                 res.mm_mem_delta_mb = mm_stats.mem_delta_mb;
                 res.mm_mem_peak_mb = mm_stats.mem_peak_mb;
@@ -6589,7 +6593,7 @@ int main(int argc, char** argv)
             }
             if (need_lmm)
             {
-                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_feature_snaps, lmm_stats);
+                lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_feature_data, lmm_stats);
                 res.lmm_time_ms = lmm_stats.elapsed_ms;
                 res.lmm_mem_delta_mb = lmm_stats.mem_delta_mb;
                 res.lmm_mem_peak_mb = lmm_stats.mem_peak_mb;
@@ -6706,8 +6710,8 @@ int main(int argc, char** argv)
                     mm_capture_rotations,
                     lmm_capture,
                     lmm_capture_rotations,
-                    mm_feature_snaps,
-                    lmm_feature_snaps,
+                    mm_feature_data,
+                    lmm_feature_data,
                     res.frame_count
                 );
             }

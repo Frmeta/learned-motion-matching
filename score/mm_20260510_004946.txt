@@ -1,0 +1,13 @@
+MM analysis
+input file: ./resources/bin/database_test.bin
+generated: 20260510_004946
+
+database_test.bin | MM_World=1.077156e+01 | MM_Pose=2.362051e-01 | frames=3599 | joints=23 | time_ms=325.629 | mem_delta_mb=19.617 | mem_peak_mb=363.320 | mem_avg_mb=355.586
+
+Average MM MPJPE (World): 1.077156e+01 (across 1 files)
+Average MM MPJPE (Pose): 2.362051e-01
+Average Time (ms): MM=325.629
+Total Time (ms): MM=325.629
+Average Memory Delta (MB): MM=19.617
+Average Memory Peak (MB): MM=363.320
+Average Memory Usage (MB): MM=355.586
