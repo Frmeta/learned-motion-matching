@@ -6806,6 +6806,67 @@ int main(int argc, char** argv)
         FILE* report = fopen(report_path.c_str(), "w");
         if (report != nullptr)
         {
+            auto bytes_to_mb = [](size_t bytes) -> double
+            {
+                return (double)bytes / (1024.0 * 1024.0);
+            };
+
+            auto nnet_total_bytes = [](const nnet& nn) -> size_t
+            {
+                size_t total = 0;
+
+                total += (size_t)nn.input_mean.size * sizeof(float);
+                total += (size_t)nn.input_std.size * sizeof(float);
+                total += (size_t)nn.output_mean.size * sizeof(float);
+                total += (size_t)nn.output_std.size * sizeof(float);
+
+                for (const auto& w : nn.weights)
+                {
+                    total += (size_t)w.rows * (size_t)w.cols * sizeof(float);
+                }
+                for (const auto& b : nn.biases)
+                {
+                    total += (size_t)b.size * sizeof(float);
+                }
+
+                return total;
+            };
+
+            const int feature_cols_total = db.features.cols;
+            const int feature_rows_total = db.features.rows;
+            const int history_feature_cols = std::max(0, std::min((int)MM_HISTORY_FEATURE_COUNT, feature_cols_total - (int)MM_HISTORY_FEATURE_START));
+            const int non_history_feature_cols = std::max(0, feature_cols_total - history_feature_cols);
+
+            const size_t feature_total_bytes = (size_t)feature_rows_total * (size_t)feature_cols_total * sizeof(float);
+            const size_t feature_non_history_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
+            const size_t feature_history_bytes = (size_t)feature_rows_total * (size_t)history_feature_cols * sizeof(float);
+
+            const size_t anim_bone_positions_bytes = (size_t)db.bone_positions.rows * (size_t)db.bone_positions.cols * sizeof(vec3);
+            const size_t anim_bone_velocities_bytes = (size_t)db.bone_velocities.rows * (size_t)db.bone_velocities.cols * sizeof(vec3);
+            const size_t anim_bone_rotations_bytes = (size_t)db.bone_rotations.rows * (size_t)db.bone_rotations.cols * sizeof(quat);
+            const size_t anim_bone_angular_velocities_bytes = (size_t)db.bone_angular_velocities.rows * (size_t)db.bone_angular_velocities.cols * sizeof(vec3);
+            const size_t anim_contact_states_bytes = (size_t)db.contact_states.rows * (size_t)db.contact_states.cols * sizeof(bool);
+            const size_t anim_future_toe_positions_bytes = (size_t)db.future_toe_positions.rows * (size_t)db.future_toe_positions.cols * sizeof(float);
+            const size_t anim_database_total_bytes =
+                anim_bone_positions_bytes +
+                anim_bone_velocities_bytes +
+                anim_bone_rotations_bytes +
+                anim_bone_angular_velocities_bytes +
+                anim_contact_states_bytes +
+                anim_future_toe_positions_bytes;
+
+            const size_t additional_range_starts_bytes = (size_t)db.range_starts.size * sizeof(int);
+            const size_t additional_range_stops_bytes = (size_t)db.range_stops.size * sizeof(int);
+            const size_t additional_range_total_bytes = additional_range_starts_bytes + additional_range_stops_bytes;
+
+            const size_t mm_memory_total_without_additional_bytes = feature_total_bytes + anim_database_total_bytes;
+            const size_t mm_memory_total_with_additional_bytes = mm_memory_total_without_additional_bytes + additional_range_total_bytes;
+
+            const size_t lmm_decompressor_bytes = nnet_total_bytes(decompressor);
+            const size_t lmm_stepper_bytes = nnet_total_bytes(stepper);
+            const size_t lmm_projector_bytes = nnet_total_bytes(projector);
+            const size_t lmm_network_total_bytes = lmm_decompressor_bytes + lmm_stepper_bytes + lmm_projector_bytes;
+
             fprintf(report, "# %s REPORT\n", analysis_mode_title);
             fprintf(report, "input file: %s\n", analyze_input_path);
             fprintf(report, "generated: %s\n\n", analysis_output_generated_string().c_str());
@@ -6839,14 +6900,31 @@ int main(int argc, char** argv)
                     fprintf(report, "- MPJPE (world) = %.6e\n", r.mm_mpjpe);
                     fprintf(report, "- time (ms) = %.3f\n", r.mm_time_ms);
                     fprintf(report, "- average memory (MB) = %.3f\n", r.mm_mem_avg_mb);
-                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.mm_mem_peak_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n", r.mm_mem_peak_mb);
+                    fprintf(report, "- memory by components = %.3f MB (total with additional) / %.3f MB (total without additional)\n", bytes_to_mb(mm_memory_total_with_additional_bytes), bytes_to_mb(mm_memory_total_without_additional_bytes));
+                    fprintf(report, "   - X (Animation features): db.features = %.3f MB (total)\n", bytes_to_mb(feature_total_bytes));
+                    fprintf(report, "      - non history: %.3f MB\n", bytes_to_mb(feature_non_history_bytes));
+                    fprintf(report, "      - history: %.3f MB\n", bytes_to_mb(feature_history_bytes));
+                    fprintf(report, "   - Y (Animation database) = %.3f MB (total)\n", bytes_to_mb(anim_database_total_bytes));
+                    fprintf(report, "      - bone_positions: %.3f MB\n", bytes_to_mb(anim_bone_positions_bytes));
+                    fprintf(report, "      - bone_velocities: %.3f MB\n", bytes_to_mb(anim_bone_velocities_bytes));
+                    fprintf(report, "      - bone_rotations: %.3f MB\n", bytes_to_mb(anim_bone_rotations_bytes));
+                    fprintf(report, "      - bone_angular_velocities: %.3f MB\n", bytes_to_mb(anim_bone_angular_velocities_bytes));
+                    fprintf(report, "      - contact_states: %.3f MB\n", bytes_to_mb(anim_contact_states_bytes));
+                    fprintf(report, "      - future_toe_positions: %.3f MB\n", bytes_to_mb(anim_future_toe_positions_bytes));
+                    fprintf(report, "   - additional:\n");
+                    fprintf(report, "      - range: %.6f MB\n\n", bytes_to_mb(additional_range_total_bytes));
 
                     fprintf(report, "LMM:\n");
                     fprintf(report, "- MPJPE (local) = %.6e\n", r.lmm_pose_mpjpe);
                     fprintf(report, "- MPJPE (world) = %.6e\n", r.lmm_mpjpe);
                     fprintf(report, "- time (ms) = %.3f\n", r.lmm_time_ms);
                     fprintf(report, "- average memory (MB) = %.3f\n", r.lmm_mem_avg_mb);
-                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.lmm_mem_peak_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n", r.lmm_mem_peak_mb);
+                    fprintf(report, "- memory by components (MB) = %.3f (total)\n", bytes_to_mb(lmm_network_total_bytes));
+                    fprintf(report, "   - D (Decompressor) = %.3f\n", bytes_to_mb(lmm_decompressor_bytes));
+                    fprintf(report, "   - S (Stepper) = %.3f\n", bytes_to_mb(lmm_stepper_bytes));
+                    fprintf(report, "   - P (Projector) = %.3f\n\n", bytes_to_mb(lmm_projector_bytes));
 
                     fprintf(report, "Frozen:\n");
                     fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
@@ -6866,7 +6944,20 @@ int main(int argc, char** argv)
                     }
                     fprintf(report, "- time (ms) = %.3f\n", r.mm_time_ms);
                     fprintf(report, "- average memory (MB) = %.3f\n", r.mm_mem_avg_mb);
-                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.mm_mem_peak_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n", r.mm_mem_peak_mb);
+                    fprintf(report, "- memory by components = %.3f MB (total with additional) / %.3f MB (total without additional)\n", bytes_to_mb(mm_memory_total_with_additional_bytes), bytes_to_mb(mm_memory_total_without_additional_bytes));
+                    fprintf(report, "   - X (Animation features): db.features = %.3f MB (total)\n", bytes_to_mb(feature_total_bytes));
+                    fprintf(report, "      - non history: %.3f MB\n", bytes_to_mb(feature_non_history_bytes));
+                    fprintf(report, "      - history: %.3f MB\n", bytes_to_mb(feature_history_bytes));
+                    fprintf(report, "   - Y (Animation database) = %.3f MB (total)\n", bytes_to_mb(anim_database_total_bytes));
+                    fprintf(report, "      - bone_positions: %.3f MB\n", bytes_to_mb(anim_bone_positions_bytes));
+                    fprintf(report, "      - bone_velocities: %.3f MB\n", bytes_to_mb(anim_bone_velocities_bytes));
+                    fprintf(report, "      - bone_rotations: %.3f MB\n", bytes_to_mb(anim_bone_rotations_bytes));
+                    fprintf(report, "      - bone_angular_velocities: %.3f MB\n", bytes_to_mb(anim_bone_angular_velocities_bytes));
+                    fprintf(report, "      - contact_states: %.3f MB\n", bytes_to_mb(anim_contact_states_bytes));
+                    fprintf(report, "      - future_toe_positions: %.3f MB\n", bytes_to_mb(anim_future_toe_positions_bytes));
+                    fprintf(report, "   - additional:\n");
+                    fprintf(report, "      - range: %.6f MB\n\n", bytes_to_mb(additional_range_total_bytes));
 
                     fprintf(report, "Frozen:\n");
                     fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
@@ -6886,7 +6977,11 @@ int main(int argc, char** argv)
                     }
                     fprintf(report, "- time (ms) = %.3f\n", r.lmm_time_ms);
                     fprintf(report, "- average memory (MB) = %.3f\n", r.lmm_mem_avg_mb);
-                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.lmm_mem_peak_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n", r.lmm_mem_peak_mb);
+                    fprintf(report, "- memory by components (MB) = %.3f (total)\n", bytes_to_mb(lmm_network_total_bytes));
+                    fprintf(report, "   - D (Decompressor) = %.3f\n", bytes_to_mb(lmm_decompressor_bytes));
+                    fprintf(report, "   - S (Stepper) = %.3f\n", bytes_to_mb(lmm_stepper_bytes));
+                    fprintf(report, "   - P (Projector) = %.3f\n\n", bytes_to_mb(lmm_projector_bytes));
 
                     fprintf(report, "Frozen:\n");
                     fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
