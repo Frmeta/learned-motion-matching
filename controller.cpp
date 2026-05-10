@@ -450,6 +450,38 @@ static std::string joystick_recording_timestamp_string()
     return std::string(timestamp);
 }
 
+static std::string analysis_output_timestamp_string()
+{
+    std::time_t now = std::time(NULL);
+    std::tm local_now = {};
+
+#if defined(_WIN32)
+    localtime_s(&local_now, &now);
+#else
+    local_now = *std::localtime(&now);
+#endif
+
+    char timestamp[32];
+    std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M", &local_now);
+    return std::string(timestamp);
+}
+
+static std::string analysis_output_generated_string()
+{
+    std::time_t now = std::time(NULL);
+    std::tm local_now = {};
+
+#if defined(_WIN32)
+    localtime_s(&local_now, &now);
+#else
+    local_now = *std::localtime(&now);
+#endif
+
+    char timestamp[64];
+    std::strftime(timestamp, sizeof(timestamp), "%d %b %Y %H:%M", &local_now);
+    return std::string(timestamp);
+}
+
 static std::string joystick_recording_make_output_path(const char* folder)
 {
     std::string base_folder = (folder != NULL && folder[0] != '\0') ? folder : ".";
@@ -2257,6 +2289,8 @@ int main(int argc, char** argv)
         database test_db;
         std::vector<array1d<vec3>> database_test_reference_poses;
         std::vector<array1d<quat>> database_test_reference_rotations;
+        array1d<vec3> frozen_pose;
+        array1d<quat> frozen_rotation;
         bool database_playback_enabled = false;
         int database_playback_index = 0;
         bool playback_video = false;
@@ -6205,12 +6239,28 @@ int main(int argc, char** argv)
             }
             std::cout << "Analyze: Reference poses computed: " << database_test_reference_poses.size() << std::endl;
             
+            // Extract frozen character from first frame (sanity check baseline)
+            if (test_db.nframes() > 0 && test_db.nbones() > 0)
+            {
+                frozen_pose.resize(test_db.nbones());
+                frozen_rotation.resize(test_db.nbones());
+                forward_kinematics_full(
+                    frozen_pose,
+                    frozen_rotation,
+                    test_db.bone_positions(0),
+                    test_db.bone_rotations(0),
+                    test_db.bone_parents);
+            }
+            
             // Set up search for the whole database
             analysis_files.clear();
             analysis_files.push_back(GetFileName(analyze_input_path));
         }
         else if (analyze_input_is_file)
         {
+            frozen_pose = base_bone_positions;
+            frozen_rotation = base_bone_rotations;
+
             if (FileExists(analyze_input_path))
             {
                 analysis_files.push_back(GetFileName(analyze_input_path));
@@ -6241,6 +6291,8 @@ int main(int argc, char** argv)
             double mpjpe = -1.0;
             double mm_mpjpe = -1.0;
             double lmm_mpjpe = -1.0;
+            double frozen_mpjpe = -1.0;
+            double frozen_pose_mpjpe = -1.0;
             double mm_pose_mpjpe = -1.0;
             double lmm_pose_mpjpe = -1.0;
             double mm_time_ms = -1.0;
@@ -6255,6 +6307,21 @@ int main(int argc, char** argv)
             std::string note;
         };
 
+
+        const char* analysis_mode_name =
+            (mode == APP_MODE_ANALYZE_MM) ? "mm" :
+            (mode == APP_MODE_ANALYZE_LMM) ? "lmm" :
+            "both";
+        const char* analysis_mode_title =
+            (mode == APP_MODE_ANALYZE_MM) ? "MM" :
+            (mode == APP_MODE_ANALYZE_LMM) ? "LMM" :
+            "BOTH";
+        std::string analysis_output_folder = std::string("./score/") + analysis_output_timestamp_string() + "_" + analysis_mode_name;
+#if defined(_WIN32)
+        _mkdir(analysis_output_folder.c_str());
+#else
+        mkdir(analysis_output_folder.c_str(), 0777);
+#endif
         struct capture_stats
         {
             double elapsed_ms = -1.0;
@@ -6438,7 +6505,7 @@ int main(int argc, char** argv)
 
             RenderTexture2D render_target = LoadRenderTexture(screen_width, screen_height);
             
-            int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 3 : 2;
+            int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 4 : 3;
             int part_width = screen_width / parts;
 
             auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<feature_draw_data>& feature_data, int frame_idx)
@@ -6505,16 +6572,19 @@ int main(int argc, char** argv)
                     draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
                     draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
                     draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+                    draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
                     draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
                     draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
+                    draw_part(2, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
                     draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_data, i);
                     draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+                    draw_part(2, frozen_pose, frozen_rotation, "Frozen", lmm_feature_data, i);
                 }
                 
                 for (int p = 1; p < parts; p++)
@@ -6631,10 +6701,26 @@ int main(int argc, char** argv)
                     }
                 }
                 
+                // Compute frozen character MPJPE (baseline sanity check)
+                if (frozen_pose.size > 0)
+                {
+                    std::vector<array1d<vec3>> frozen_poses_repeated;
+                    std::vector<array1d<quat>> frozen_rotations_repeated;
+                    for (int i = 0; i < (int)database_test_reference_poses.size(); i++)
+                    {
+                        frozen_poses_repeated.push_back(frozen_pose);
+                        frozen_rotations_repeated.push_back(frozen_rotation);
+                    }
+                    res.frozen_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_poses_repeated, used_frames, used_joints, false); // World
+                    res.frozen_pose_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_poses_repeated, used_frames, used_joints, true); // Root-relative
+                }
+                
                 res.ok = (res.mm_mpjpe >= 0.0 || res.lmm_mpjpe >= 0.0);
 
-                if (need_mm) std::cout << "Analyze " << name << " -> MM World Error=" << res.mm_mpjpe << " (Pose=" << res.mm_pose_mpjpe << ")" << std::endl;
-                if (need_lmm) std::cout << "Analyze " << name << " -> LMM World Error=" << res.lmm_mpjpe << " (Pose=" << res.lmm_pose_mpjpe << ")" << std::endl;
+                if (need_mm) std::cout << "Analyze " << name << " -> MM World Error=" << res.mm_mpjpe << " (Pose=" << res.mm_pose_mpjpe << ")";
+                if (need_lmm) std::cout << "Analyze " << name << " -> LMM World Error=" << res.lmm_mpjpe << " (Pose=" << res.lmm_pose_mpjpe << ")";
+                if (res.frozen_mpjpe >= 0.0) std::cout << " | Frozen Error=" << res.frozen_mpjpe << " (Pose=" << res.frozen_pose_mpjpe << ")";
+                std::cout << std::endl;
             }
             else
             {
@@ -6697,10 +6783,7 @@ int main(int argc, char** argv)
             
             if (playback_video)
             {
-                std::string video_path = std::string("./score/") + 
-                    ((mode == APP_MODE_ANALYZE_MM) ? "mm_" :
-                     (mode == APP_MODE_ANALYZE_LMM) ? "lmm_" : "both_") + 
-                     GetFileNameWithoutExt(name.c_str()) + ".mp4";
+                std::string video_path = analysis_output_folder + "/video.mp4";
                 render_video_comparison(
                     video_path.c_str(),
                     mode,
@@ -6719,282 +6802,97 @@ int main(int argc, char** argv)
             results.push_back(res);
         }
 
-    #if defined(_WIN32)
-        _mkdir("./score");
-    #else
-        mkdir("./score", 0777);
-    #endif
-        std::string ts = joystick_recording_timestamp_string();
-        const char* report_prefix =
-            (mode == APP_MODE_ANALYZE_MM) ? "./score/mm_" :
-            (mode == APP_MODE_ANALYZE_LMM) ? "./score/lmm_" :
-            "./score/both_";
-        std::string report_path = std::string(report_prefix) + ts + ".txt";
+        std::string report_path = analysis_output_folder + "/report.md";
         FILE* report = fopen(report_path.c_str(), "w");
         if (report != nullptr)
         {
-            const char* report_title =
-                (mode == APP_MODE_ANALYZE_MM) ? "MM analysis" :
-                (mode == APP_MODE_ANALYZE_LMM) ? "LMM analysis" :
-                "MM vs LMM analysis (MPJPE)";
+            fprintf(report, "# %s REPORT\n", analysis_mode_title);
+            fprintf(report, "input file: %s\n", analyze_input_path);
+            fprintf(report, "generated: %s\n\n", analysis_output_generated_string().c_str());
 
-            fprintf(report, "%s\n", report_title);
-            fprintf(report, "%s: %s\n", analyze_input_is_file ? "input file" : "input folder", analyze_input_path);
-            fprintf(report, "generated: %s\n\n", ts.c_str());
+            fprintf(report, "Motion database:\n");
+            fprintf(report, "- Total Frames: %d\n", db.nframes());
+            fprintf(report, "- Total Duration: %.2f minutes\n", db.nframes() / 3600.0);
+            fprintf(report, "- Frame Rate: 60.0 Hz\n");
+            fprintf(report, "- Total Bones: %d\n", db.nbones());
+            fprintf(report, "- Total Clips: %d * 2 (mirrored) = %d\n\n", db.nranges() / 2, db.nranges());
 
-            double avg_sum = 0.0;
-            int avg_count = 0;
-            double mm_time_sum_ms = 0.0;
-            double lmm_time_sum_ms = 0.0;
-            int time_count = 0;
-#if defined(_WIN32)
-            double mm_mem_delta_sum_mb = 0.0;
-            double lmm_mem_delta_sum_mb = 0.0;
-            double mm_mem_peak_sum_mb = 0.0;
-            double lmm_mem_peak_sum_mb = 0.0;
-            double mm_mem_avg_sum_mb = 0.0;
-            double lmm_mem_avg_sum_mb = 0.0;
-            int mem_count = 0;
-#endif
+            fprintf(report, "Test database:\n");
+            fprintf(report, "- Total Frames: %d\n", test_db.nframes());
+            fprintf(report, "- Total Duration: %.2f minutes\n", test_db.nframes() / 3600.0);
+            fprintf(report, "- Frame Rate: 60.0 Hz\n");
+            fprintf(report, "- Total Bones: %d\n\n", test_db.nbones());
+
             for (const analyze_result& r : results)
             {
-                if (r.ok)
+                if (!r.ok)
                 {
-                    if (mode == APP_MODE_ANALYZE_BOTH)
-                    {
-                        fprintf(report, "%s | MPJPE=%.6e | frames=%d | joints=%d | time_ms MM=%.3f LMM=%.3f",
-                            r.file.c_str(), r.mpjpe, r.frame_count, r.joint_count, r.mm_time_ms, r.lmm_time_ms);
-#if defined(_WIN32)
-                        fprintf(report, " | mem_delta_mb MM=%.3f LMM=%.3f | mem_peak_mb MM=%.3f LMM=%.3f",
-                            r.mm_mem_delta_mb, r.lmm_mem_delta_mb, r.mm_mem_peak_mb, r.lmm_mem_peak_mb);
-                        fprintf(report, " | mem_avg_mb MM=%.3f LMM=%.3f",
-                            r.mm_mem_avg_mb, r.lmm_mem_avg_mb);
-#endif
-                        fprintf(report, "\n");
-                        avg_sum += r.mpjpe;
-                    }
-                    else if (mode == APP_MODE_ANALYZE_MM)
-                    {
-                        if (analyze_input_is_database)
-                        {
-                            fprintf(report, "%s | MM_World=%.6e | MM_Pose=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                                r.file.c_str(), r.mm_mpjpe, r.mm_pose_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
-                        }
-                        else
-                        {
-                            fprintf(report, "%s | MM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                                r.file.c_str(), r.mm_mpjpe, r.frame_count, r.joint_count, r.mm_time_ms);
-                        }
-#if defined(_WIN32)
-                        fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
-                            r.mm_mem_delta_mb, r.mm_mem_peak_mb);
-                        fprintf(report, " | mem_avg_mb=%.3f", r.mm_mem_avg_mb);
-#endif
-                        fprintf(report, "\n");
-                        avg_sum += r.mm_mpjpe;
-                    }
-                    else if (mode == APP_MODE_ANALYZE_LMM)
-                    {
-                        if (analyze_input_is_database)
-                        {
-                            fprintf(report, "%s | LMM_World=%.6e | LMM_Pose=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                                r.file.c_str(), r.lmm_mpjpe, r.lmm_pose_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
-                        }
-                        else
-                        {
-                            fprintf(report, "%s | LMM_MPJPE=%.6e | frames=%d | joints=%d | time_ms=%.3f",
-                                r.file.c_str(), r.lmm_mpjpe, r.frame_count, r.joint_count, r.lmm_time_ms);
-                        }
-#if defined(_WIN32)
-                        fprintf(report, " | mem_delta_mb=%.3f | mem_peak_mb=%.3f",
-                            r.lmm_mem_delta_mb, r.lmm_mem_peak_mb);
-                        fprintf(report, " | mem_avg_mb=%.3f", r.lmm_mem_avg_mb);
-#endif
-                        fprintf(report, "\n");
-                        avg_sum += r.lmm_mpjpe;
-                    }
-                    avg_count++;
-
-                    if (mode == APP_MODE_ANALYZE_BOTH)
-                    {
-                        if (r.mm_time_ms >= 0.0 && r.lmm_time_ms >= 0.0)
-                        {
-                            mm_time_sum_ms += r.mm_time_ms;
-                            lmm_time_sum_ms += r.lmm_time_ms;
-                            time_count++;
-                        }
-                    }
-                    else if (mode == APP_MODE_ANALYZE_MM && r.mm_time_ms >= 0.0)
-                    {
-                        mm_time_sum_ms += r.mm_time_ms;
-                        time_count++;
-                    }
-                    else if (mode == APP_MODE_ANALYZE_LMM && r.lmm_time_ms >= 0.0)
-                    {
-                        lmm_time_sum_ms += r.lmm_time_ms;
-                        time_count++;
-                    }
-#if defined(_WIN32)
-                    if (mode == APP_MODE_ANALYZE_BOTH)
-                    {
-                        if (r.mm_mem_delta_mb >= 0.0f && r.lmm_mem_delta_mb >= 0.0f &&
-                            r.mm_mem_peak_mb >= 0.0f && r.lmm_mem_peak_mb >= 0.0f &&
-                            r.mm_mem_avg_mb >= 0.0f && r.lmm_mem_avg_mb >= 0.0f)
-                        {
-                            mm_mem_delta_sum_mb += r.mm_mem_delta_mb;
-                            lmm_mem_delta_sum_mb += r.lmm_mem_delta_mb;
-                            mm_mem_peak_sum_mb += r.mm_mem_peak_mb;
-                            lmm_mem_peak_sum_mb += r.lmm_mem_peak_mb;
-                            mm_mem_avg_sum_mb += r.mm_mem_avg_mb;
-                            lmm_mem_avg_sum_mb += r.lmm_mem_avg_mb;
-                            mem_count++;
-                        }
-                    }
-                    else if (mode == APP_MODE_ANALYZE_MM)
-                    {
-                        if (r.mm_mem_delta_mb >= 0.0f && r.mm_mem_peak_mb >= 0.0f && r.mm_mem_avg_mb >= 0.0f)
-                        {
-                            mm_mem_delta_sum_mb += r.mm_mem_delta_mb;
-                            mm_mem_peak_sum_mb += r.mm_mem_peak_mb;
-                            mm_mem_avg_sum_mb += r.mm_mem_avg_mb;
-                            mem_count++;
-                        }
-                    }
-                    else if (mode == APP_MODE_ANALYZE_LMM)
-                    {
-                        if (r.lmm_mem_delta_mb >= 0.0f && r.lmm_mem_peak_mb >= 0.0f && r.lmm_mem_avg_mb >= 0.0f)
-                        {
-                            lmm_mem_delta_sum_mb += r.lmm_mem_delta_mb;
-                            lmm_mem_peak_sum_mb += r.lmm_mem_peak_mb;
-                            lmm_mem_avg_sum_mb += r.lmm_mem_avg_mb;
-                            mem_count++;
-                        }
-                    }
-#endif
+                    fprintf(report, "%s:\n- FAILED: %s\n\n", r.file.c_str(), r.note.c_str());
+                    continue;
                 }
-                else
-                {
-                    fprintf(report, "%s | FAILED | %s\n", r.file.c_str(), r.note.c_str());
-                }
-            }
 
-            if (avg_count > 0)
-            {
+                fprintf(report, "%s:\n", r.file.c_str());
                 if (mode == APP_MODE_ANALYZE_BOTH)
                 {
-                    fprintf(report, "\nAverage MPJPE: %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "MM:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", r.mm_pose_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n", r.mm_mpjpe);
+                    fprintf(report, "- time (ms) = %.3f\n", r.mm_time_ms);
+                    fprintf(report, "- average memory (MB) = %.3f\n", r.mm_mem_avg_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.mm_mem_peak_mb);
+
+                    fprintf(report, "LMM:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", r.lmm_pose_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n", r.lmm_mpjpe);
+                    fprintf(report, "- time (ms) = %.3f\n", r.lmm_time_ms);
+                    fprintf(report, "- average memory (MB) = %.3f\n", r.lmm_mem_avg_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.lmm_mem_peak_mb);
+
+                    fprintf(report, "Frozen:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n\n", r.frozen_mpjpe);
                 }
                 else if (mode == APP_MODE_ANALYZE_MM)
                 {
-                    fprintf(report, "\nAverage MM MPJPE (World): %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "MM:\n");
                     if (analyze_input_is_database)
                     {
-                        double pose_sum = 0.0;
-                        for (const auto& r : results) if (r.ok) pose_sum += r.mm_pose_mpjpe;
-                        fprintf(report, "Average MM MPJPE (Pose): %.6e\n", pose_sum / (double)avg_count);
+                        fprintf(report, "- MPJPE (local) = %.6e\n", r.mm_pose_mpjpe);
+                        fprintf(report, "- MPJPE (world) = %.6e\n", r.mm_mpjpe);
                     }
+                    else
+                    {
+                        fprintf(report, "- MPJPE = %.6e\n", r.mm_mpjpe);
+                    }
+                    fprintf(report, "- time (ms) = %.3f\n", r.mm_time_ms);
+                    fprintf(report, "- average memory (MB) = %.3f\n", r.mm_mem_avg_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.mm_mem_peak_mb);
+
+                    fprintf(report, "Frozen:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n\n", r.frozen_mpjpe);
                 }
                 else if (mode == APP_MODE_ANALYZE_LMM)
                 {
-                    fprintf(report, "\nAverage LMM MPJPE (World): %.6e (across %d files)\n", avg_sum / (double)avg_count, avg_count);
+                    fprintf(report, "LMM:\n");
                     if (analyze_input_is_database)
                     {
-                        double pose_sum = 0.0;
-                        for (const auto& r : results) if (r.ok) pose_sum += r.lmm_pose_mpjpe;
-                        fprintf(report, "Average LMM MPJPE (Pose): %.6e\n", pose_sum / (double)avg_count);
+                        fprintf(report, "- MPJPE (local) = %.6e\n", r.lmm_pose_mpjpe);
+                        fprintf(report, "- MPJPE (world) = %.6e\n", r.lmm_mpjpe);
                     }
-                }
-            }
-            else
-            {
-                if (mode == APP_MODE_ANALYZE_BOTH)
-                {
-                    fprintf(report, "\nAverage MPJPE: N/A\n");
-                }
-                else if (mode == APP_MODE_ANALYZE_MM)
-                {
-                    fprintf(report, "\nAverage MM MPJPE: N/A\n");
-                }
-                else if (mode == APP_MODE_ANALYZE_LMM)
-                {
-                    fprintf(report, "\nAverage LMM MPJPE: N/A\n");
-                }
-            }
+                    else
+                    {
+                        fprintf(report, "- MPJPE = %.6e\n", r.lmm_mpjpe);
+                    }
+                    fprintf(report, "- time (ms) = %.3f\n", r.lmm_time_ms);
+                    fprintf(report, "- average memory (MB) = %.3f\n", r.lmm_mem_avg_mb);
+                    fprintf(report, "- peak memory (MB) = %.3f\n\n", r.lmm_mem_peak_mb);
 
-            if (time_count > 0)
-            {
-                if (mode == APP_MODE_ANALYZE_BOTH)
-                {
-                    fprintf(report, "Average Time (ms): MM=%.3f LMM=%.3f\n",
-                        mm_time_sum_ms / (double)time_count,
-                        lmm_time_sum_ms / (double)time_count);
-                    fprintf(report, "Total Time (ms): MM=%.3f LMM=%.3f\n",
-                        mm_time_sum_ms,
-                        lmm_time_sum_ms);
-                }
-                else if (mode == APP_MODE_ANALYZE_MM)
-                {
-                    fprintf(report, "Average Time (ms): MM=%.3f\n",
-                        mm_time_sum_ms / (double)time_count);
-                    fprintf(report, "Total Time (ms): MM=%.3f\n",
-                        mm_time_sum_ms);
-                }
-                else if (mode == APP_MODE_ANALYZE_LMM)
-                {
-                    fprintf(report, "Average Time (ms): LMM=%.3f\n",
-                        lmm_time_sum_ms / (double)time_count);
-                    fprintf(report, "Total Time (ms): LMM=%.3f\n",
-                        lmm_time_sum_ms);
+                    fprintf(report, "Frozen:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", r.frozen_pose_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n\n", r.frozen_mpjpe);
                 }
             }
-            else
-            {
-                fprintf(report, "Average Time (ms): N/A\n");
-            }
-
-#if defined(_WIN32)
-            if (mem_count > 0)
-            {
-                if (mode == APP_MODE_ANALYZE_BOTH)
-                {
-                    fprintf(report, "Average Memory Delta (MB): MM=%.3f LMM=%.3f\n",
-                        mm_mem_delta_sum_mb / (double)mem_count,
-                        lmm_mem_delta_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Peak (MB): MM=%.3f LMM=%.3f\n",
-                        mm_mem_peak_sum_mb / (double)mem_count,
-                        lmm_mem_peak_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Usage (MB): MM=%.3f LMM=%.3f\n",
-                        mm_mem_avg_sum_mb / (double)mem_count,
-                        lmm_mem_avg_sum_mb / (double)mem_count);
-                }
-                else if (mode == APP_MODE_ANALYZE_MM)
-                {
-                    fprintf(report, "Average Memory Delta (MB): MM=%.3f\n",
-                        mm_mem_delta_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Peak (MB): MM=%.3f\n",
-                        mm_mem_peak_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Usage (MB): MM=%.3f\n",
-                        mm_mem_avg_sum_mb / (double)mem_count);
-                }
-                else if (mode == APP_MODE_ANALYZE_LMM)
-                {
-                    fprintf(report, "Average Memory Delta (MB): LMM=%.3f\n",
-                        lmm_mem_delta_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Peak (MB): LMM=%.3f\n",
-                        lmm_mem_peak_sum_mb / (double)mem_count);
-                    fprintf(report, "Average Memory Usage (MB): LMM=%.3f\n",
-                        lmm_mem_avg_sum_mb / (double)mem_count);
-                }
-            }
-            else
-            {
-                fprintf(report, "Average Memory Delta (MB): N/A\n");
-                fprintf(report, "Average Memory Peak (MB): N/A\n");
-                fprintf(report, "Average Memory Usage (MB): N/A\n");
-            }
-#else
-            fprintf(report, "Memory comparison: only available on Windows\n");
-#endif
 
             fclose(report);
             std::cout << "Analysis report exported to: " << report_path << std::endl;
