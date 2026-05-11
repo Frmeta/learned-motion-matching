@@ -1879,8 +1879,8 @@ void draw_features(const feature_draw_data& f, const vec3 pos, const quat rot)
     vec3 traj2_dir = quat_mul_vec3(rot, vec3(features(30), features(31), features(32)));
     
     // Draw matched feature: current foot pos (still weird)
-    DrawSphereWires(to_Vector3(lfoot_pos), 0.1f, 4, 10, DARKBROWN);
-    DrawSphereWires(to_Vector3(rfoot_pos), 0.1f, 4, 10, DARKBROWN);
+    DrawSphereWires(to_Vector3(lfoot_pos), 0.05f, 4, 10, DARKBROWN);
+    DrawSphereWires(to_Vector3(rfoot_pos), 0.05f, 4, 10, DARKBROWN);
 
     // Draw matched feature: trajectory pos
     DrawSphereWires(to_Vector3(traj0_pos), 0.05f, 4, 10, ORANGE);
@@ -6920,6 +6920,7 @@ int main(int argc, char** argv)
                     fprintf(report, "LMM:\n");
                     fprintf(report, "- MPJPE (local) = %.6e\n", r.lmm_pose_mpjpe);
                     fprintf(report, "- MPJPE (world) = %.6e\n", r.lmm_mpjpe);
+                    fprintf(report, "- MPJPE (MM gt vs LMM pred) = %.6e\n", r.mpjpe);
                     fprintf(report, "- time (ms) = %.3f\n", r.lmm_time_ms);
                     fprintf(report, "- average memory (MB) = %.3f\n", r.lmm_mem_avg_mb);
                     fprintf(report, "- peak memory (MB) = %.3f\n", r.lmm_mem_peak_mb);
