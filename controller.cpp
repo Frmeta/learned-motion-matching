@@ -2445,7 +2445,7 @@ int main(int argc, char** argv)
     {
         // If no GLB, create a simple procedural plane but still call it ground_plane_model 
         // to maintain compatibility with the rest of the code (collisions, etc.)
-        Mesh ground_plane_mesh = GenMeshPlane(20.0f, 20.0f, 10, 10);
+        Mesh ground_plane_mesh = GenMeshPlane(50.0f, 50.0f, 10, 10);
         ground_plane_model = LoadModelFromMesh(ground_plane_mesh);
         ground_plane_model.materials[0].shader = ground_plane_shader;
         ground_grid.build(ground_plane_model, 1.0f);
@@ -6556,6 +6556,8 @@ int main(int argc, char** argv)
                     }
                 }
                 EndMode3D();
+
+                rlViewport(0, 0, screen_width, screen_height);
 
                 DrawRectangle(part_idx * part_width + 15, 15, MeasureText(label, 20) + 10, 30, Fade(WHITE, 0.7f));
                 DrawText(label, part_idx * part_width + 20, 20, 20, BLACK);
