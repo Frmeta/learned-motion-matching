@@ -6888,8 +6888,8 @@ int main(int argc, char** argv)
                     double lmm_w = (f < (int)lmm_world_vals.size() ? lmm_world_vals[f] : -1.0);
                     double fr_l = (f < (int)frozen_local_vals.size() ? frozen_local_vals[f] : -1.0);
                     double fr_w = (f < (int)frozen_world_vals.size() ? frozen_world_vals[f] : -1.0);
-                    double diff_l = (mm_l >= 0.0 && lmm_l >= 0.0) ? (mm_l - lmm_l) : -1.0;
-                    double diff_w = (mm_w >= 0.0 && lmm_w >= 0.0) ? (mm_w - lmm_w) : -1.0;
+                    double diff_l = (mm_l >= 0.0 && lmm_l >= 0.0) ? fabs(mm_l - lmm_l) : -1.0;
+                    double diff_w = (mm_w >= 0.0 && lmm_w >= 0.0) ? fabs(mm_w - lmm_w) : -1.0;
                     fprintf(csvf, "%d,%.6f,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n", f, t, mm_l, mm_w, lmm_l, lmm_w, fr_l, fr_w, diff_l, diff_w);
                 }
                 fclose(csvf);
