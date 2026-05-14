@@ -97,3 +97,8 @@ Convert character fbx to bin
 ```
 Start-Process "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe" --background --python resources/python/export_character.py -- --input resources/fbx/character.fbx --output resources/bin/character2.bin                                         
 ```
+
+regenerate plots from an existing CSV
+```
+python plot_mpjpe.py path/to/<name>_mpjpe.csv path/to/outdir
+```

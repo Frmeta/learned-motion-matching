@@ -29,6 +29,7 @@
 #include <cmath>
 #include <vector>
 #include <chrono>
+#include <cstdlib>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -1879,8 +1880,8 @@ void draw_features(const feature_draw_data& f, const vec3 pos, const quat rot)
     vec3 traj2_dir = quat_mul_vec3(rot, vec3(features(30), features(31), features(32)));
     
     // Draw matched feature: current foot pos (still weird)
-    DrawSphereWires(to_Vector3(lfoot_pos), 0.05f, 4, 10, DARKBROWN);
-    DrawSphereWires(to_Vector3(rfoot_pos), 0.05f, 4, 10, DARKBROWN);
+    DrawSphereWires(to_Vector3(lfoot_pos), 0.02f, 4, 10, DARKBROWN);
+    DrawSphereWires(to_Vector3(rfoot_pos), 0.02f, 4, 10, DARKBROWN);
 
     // Draw matched feature: trajectory pos
     DrawSphereWires(to_Vector3(traj0_pos), 0.05f, 4, 10, ORANGE);
@@ -6799,6 +6800,107 @@ int main(int argc, char** argv)
                     lmm_feature_data,
                     res.frame_count
                 );
+            }
+
+            // Export per-frame MPJPE CSV and invoke plotting script
+            auto compute_per_frame_mpjpe = [&](const std::vector<array1d<vec3>>& ref_capture,
+                                               const std::vector<array1d<vec3>>& test_capture,
+                                               bool root_relative) -> std::vector<double>
+            {
+                int n_ref = (int)ref_capture.size();
+                int n_test = (int)test_capture.size();
+                std::vector<double> out(n_test, -1.0);
+                if (n_test <= 0 || n_ref <= 0) return out;
+
+                for (int f = 0; f < n_test; f++)
+                {
+                    int ref_f = std::min(f, n_ref - 1);
+                    int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
+                    if (joint_count <= 0) { out[f] = -1.0; continue; }
+
+                    vec3 ref_root = ref_capture[ref_f](0);
+                    vec3 test_root = test_capture[f](0);
+                    double sum_err = 0.0;
+                    for (int j = 0; j < joint_count; j++)
+                    {
+                        vec3 p_ref = ref_capture[ref_f](j);
+                        vec3 p_test = test_capture[f](j);
+                        if (root_relative)
+                        {
+                            p_ref = p_ref - ref_root;
+                            p_test = p_test - test_root;
+                        }
+                        vec3 d = p_ref - p_test;
+                        sum_err += sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
+                    }
+                    out[f] = sum_err / (double)joint_count;
+                }
+                return out;
+            };
+
+            // Prepare reference captures for per-frame comparison
+            std::vector<array1d<vec3>> ref_capture_for_plot;
+            if (analyze_input_is_database)
+            {
+                ref_capture_for_plot = database_test_reference_poses;
+            }
+            else
+            {
+                // Repeat base pose for all frames
+                ref_capture_for_plot.clear();
+                for (int i = 0; i < (int)mm_capture.size(); i++) ref_capture_for_plot.push_back(base_bone_positions);
+            }
+
+            // Compute per-frame MPJPEs
+            std::vector<double> mm_world_vals, mm_local_vals, lmm_world_vals, lmm_local_vals, frozen_world_vals, frozen_local_vals;
+            if (!mm_capture.empty())
+            {
+                mm_world_vals = compute_per_frame_mpjpe(ref_capture_for_plot, mm_capture, false);
+                mm_local_vals = compute_per_frame_mpjpe(ref_capture_for_plot, mm_capture, true);
+            }
+            if (!lmm_capture.empty())
+            {
+                lmm_world_vals = compute_per_frame_mpjpe(ref_capture_for_plot, lmm_capture, false);
+                lmm_local_vals = compute_per_frame_mpjpe(ref_capture_for_plot, lmm_capture, true);
+            }
+            if (frozen_pose.size > 0)
+            {
+                std::vector<array1d<vec3>> frozen_repeated;
+                for (int i = 0; i < (int)ref_capture_for_plot.size(); i++) frozen_repeated.push_back(frozen_pose);
+                frozen_world_vals = compute_per_frame_mpjpe(ref_capture_for_plot, frozen_repeated, false);
+                frozen_local_vals = compute_per_frame_mpjpe(ref_capture_for_plot, frozen_repeated, true);
+            }
+
+            // Write CSV
+            std::string csv_path = analysis_output_folder + "/" + name + "_mpjpe.csv";
+            FILE* csvf = fopen(csv_path.c_str(), "w");
+            if (csvf)
+            {
+                fprintf(csvf, "frame,time_seconds,mm_local,mm_world,lmm_local,lmm_world,frozen_local,frozen_world,mm_lmm_local_diff,mm_lmm_world_diff\n");
+                int nframes = (int)std::max({mm_world_vals.size(), lmm_world_vals.size(), frozen_world_vals.size()});
+                if (nframes == 0) nframes = (int)ref_capture_for_plot.size();
+                for (int f = 0; f < nframes; f++)
+                {
+                    double t = f / 60.0;
+                    double mm_l = (f < (int)mm_local_vals.size() ? mm_local_vals[f] : -1.0);
+                    double mm_w = (f < (int)mm_world_vals.size() ? mm_world_vals[f] : -1.0);
+                    double lmm_l = (f < (int)lmm_local_vals.size() ? lmm_local_vals[f] : -1.0);
+                    double lmm_w = (f < (int)lmm_world_vals.size() ? lmm_world_vals[f] : -1.0);
+                    double fr_l = (f < (int)frozen_local_vals.size() ? frozen_local_vals[f] : -1.0);
+                    double fr_w = (f < (int)frozen_world_vals.size() ? frozen_world_vals[f] : -1.0);
+                    double diff_l = (mm_l >= 0.0 && lmm_l >= 0.0) ? (mm_l - lmm_l) : -1.0;
+                    double diff_w = (mm_w >= 0.0 && lmm_w >= 0.0) ? (mm_w - lmm_w) : -1.0;
+                    fprintf(csvf, "%d,%.6f,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n", f, t, mm_l, mm_w, lmm_l, lmm_w, fr_l, fr_w, diff_l, diff_w);
+                }
+                fclose(csvf);
+
+                // Call plotting script (Python)
+                std::string plot_cmd = std::string("python \"resources/python/plot_mpjpe.py\" \"") + csv_path + "\" \"" + analysis_output_folder + "\"";
+                int plot_ret = system(plot_cmd.c_str());
+                if (plot_ret != 0)
+                {
+                    std::cout << "Warning: plotting script returned non-zero: " << plot_ret << std::endl;
+                }
             }
 
             results.push_back(res);
