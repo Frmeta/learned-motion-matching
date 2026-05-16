@@ -3899,15 +3899,18 @@ int main(int argc, char** argv)
                     return test_db.features(test_frame, idx) * test_db.features_scale(idx) + test_db.features_offset(idx);
                 };
 
+                quat gt_rot = test_db.bone_rotations(test_frame)(0);
+
                 // Extract trajectory position at +20 frames (indices 15, 16, 17)
                 vec3 local_target = vec3(get_raw_feature(15), get_raw_feature(16), get_raw_feature(17));
-                desired_velocity_curr = quat_mul_vec3(simulation_rotation, local_target) / (20.0f * dt);
+                vec3 gt_global_target = quat_mul_vec3(gt_rot, local_target);
+                desired_velocity_curr = gt_global_target / (20.0f * dt);
                 desired_velocity = desired_velocity_curr;
 
                 // Extract trajectory direction at +20 frames (indices 24, 25, 26)
                 vec3 local_dir = normalize(vec3(get_raw_feature(24), get_raw_feature(25), get_raw_feature(26)));
-                vec3 world_dir = quat_mul_vec3(simulation_rotation, local_dir);
-                float yaw = atan2f(world_dir.x, world_dir.z);
+                vec3 gt_global_dir = quat_mul_vec3(gt_rot, local_dir);
+                float yaw = atan2f(gt_global_dir.x, gt_global_dir.z);
                 
                 desired_rotation_curr = quat_from_angle_axis(yaw, vec3(0.0f, 1.0f, 0.0f));
                 desired_rotation = desired_rotation_curr;
@@ -4067,6 +4070,7 @@ int main(int argc, char** argv)
                 // Indices 15-17: traj0_pos (local), 18-20: traj1_pos (local), 21-23: traj2_pos (local)
                 // Indices 24-26: traj0_dir (local), 27-29: traj1_dir (local), 30-32: traj2_dir (local)
                 
+                quat gt_rot = test_db.bone_rotations(test_frame)(0);
                 vec3 root_pos = bone_positions(0);
                 quat root_rot = bone_rotations(0);
                 
@@ -4078,7 +4082,15 @@ int main(int argc, char** argv)
                         get_raw_feature(15 + i * 3 + 1),
                         get_raw_feature(15 + i * 3 + 2));
                     
-                    query_trajectory_positions(i + 1) = quat_mul_vec3(root_rot, local_pos) + root_pos;
+                    // 1. Compute global offset using ground truth rotation
+                    vec3 gt_global_offset = quat_mul_vec3(gt_rot, local_pos);
+                    
+                    // 2. Convert back to relative to root_rot (simulated character)
+                    vec3 sim_local_pos = quat_mul_vec3(quat_inv(root_rot), gt_global_offset);
+                    
+                    // 3. Store in query_trajectory_positions (which expects global space)
+                    // Note: quat_mul_vec3(root_rot, sim_local_pos) mathematically simplifies to gt_global_offset
+                    query_trajectory_positions(i + 1) = quat_mul_vec3(root_rot, sim_local_pos) + root_pos;
                 }
                 
                 // Convert local trajectory directions to world directions and extract yaw
@@ -4089,7 +4101,15 @@ int main(int argc, char** argv)
                         get_raw_feature(24 + i * 3 + 1),
                         get_raw_feature(24 + i * 3 + 2)));
                     
-                    vec3 world_dir = quat_mul_vec3(root_rot, local_dir);
+                    // 1. Compute global direction using ground truth rotation
+                    vec3 gt_global_dir = quat_mul_vec3(gt_rot, local_dir);
+                    
+                    // 2. Convert back to relative to root_rot
+                    vec3 sim_local_dir = quat_mul_vec3(quat_inv(root_rot), gt_global_dir);
+                    
+                    // 3. Convert to world direction
+                    vec3 world_dir = quat_mul_vec3(root_rot, sim_local_dir);
+                    
                     float yaw = atan2f(world_dir.x, world_dir.z);
                     query_trajectory_rotations(i + 1) = quat_from_angle_axis(yaw, vec3(0.0f, 1.0f, 0.0f));
                 }
@@ -6367,7 +6387,7 @@ int main(int argc, char** argv)
 #endif
 
             // Simulate MM/LMM for each frames in test
-            const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
+            const int max_steps = analyze_input_is_database ? (test_db.nframes() - 60) : ((int)samples.size() + 8);
             for (int i = 0; i < max_steps; i++)
             {
                 if (!analyze_input_is_database && !joystick_playback_enabled) break;
@@ -6983,8 +7003,8 @@ int main(int argc, char** argv)
             fprintf(report, "- Total Clips: %d * 2 (mirrored) = %d\n\n", db.nranges() / 2, db.nranges());
 
             fprintf(report, "Test database:\n");
-            fprintf(report, "- Total Frames: %d\n", test_db.nframes());
-            fprintf(report, "- Total Duration: %.2f minutes\n", test_db.nframes() / 3600.0);
+            fprintf(report, "- Total Frames: %d\n", test_db.nframes() - 60);
+            fprintf(report, "- Total Duration: %.2f minutes\n", (test_db.nframes() - 60) / 3600.0);
             fprintf(report, "- Frame Rate: 60.0 Hz\n");
             fprintf(report, "- Total Bones: %d\n\n", test_db.nbones());
 
