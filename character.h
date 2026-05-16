@@ -52,7 +52,7 @@ struct character
     array1d<quat> bone_rest_rotations;
 };
 
-void character_load(character& c, const char* filename)
+inline void character_load(character& c, const char* filename)
 {
     FILE* f = fopen(filename, "rb");
     assert(f != NULL);
@@ -73,7 +73,7 @@ void character_load(character& c, const char* filename)
 
 //--------------------------------------
 
-void linear_blend_skinning_positions(
+inline void linear_blend_skinning_positions(
     slice1d<vec3> anim_positions,
     const slice1d<vec3> rest_positions,
     const slice2d<float> bone_weights,
@@ -103,7 +103,7 @@ void linear_blend_skinning_positions(
     }
 }
 
-void linear_blend_skinning_normals(
+inline void linear_blend_skinning_normals(
     slice1d<vec3> anim_normals,
     const slice1d<vec3> rest_normals,
     const slice2d<float> bone_weights,
