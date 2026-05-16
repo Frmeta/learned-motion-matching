@@ -3899,18 +3899,24 @@ int main(int argc, char** argv)
                     return test_db.features(test_frame, idx) * test_db.features_scale(idx) + test_db.features_offset(idx);
                 };
 
-                quat gt_rot = test_db.bone_rotations(test_frame)(0);
+                bool lmm_runtime_enabled = lmm_enabled && lmm_networks_compatible;
+                auto get_sim_feature = [&](int idx) {
+                    if (lmm_runtime_enabled) {
+                        return features_curr(idx) * db.features_scale(idx) + db.features_offset(idx);
+                    } else {
+                        return db.features(frame_index, idx) * db.features_scale(idx) + db.features_offset(idx);
+                    }
+                };
 
-                // Extract trajectory position at +20 frames (indices 15, 16, 17)
-                vec3 local_target = vec3(get_raw_feature(15), get_raw_feature(16), get_raw_feature(17));
-                vec3 gt_global_target = quat_mul_vec3(gt_rot, local_target);
-                desired_velocity_curr = gt_global_target / (20.0f * dt);
+                // Extract trajectory position at +20 frames (indices 15, 16, 17) from SIMULATED features
+                vec3 local_target = vec3(get_sim_feature(15), get_sim_feature(16), get_sim_feature(17));
+                desired_velocity_curr = quat_mul_vec3(simulation_rotation, local_target) / (20.0f * dt);
                 desired_velocity = desired_velocity_curr;
 
-                // Extract trajectory direction at +20 frames (indices 24, 25, 26)
-                vec3 local_dir = normalize(vec3(get_raw_feature(24), get_raw_feature(25), get_raw_feature(26)));
-                vec3 gt_global_dir = quat_mul_vec3(gt_rot, local_dir);
-                float yaw = atan2f(gt_global_dir.x, gt_global_dir.z);
+                // Extract trajectory direction at +20 frames (indices 24, 25, 26) from SIMULATED features
+                vec3 local_dir = normalize(vec3(get_sim_feature(24), get_sim_feature(25), get_sim_feature(26)));
+                vec3 world_dir = quat_mul_vec3(simulation_rotation, local_dir);
+                float yaw = atan2f(world_dir.x, world_dir.z);
                 
                 desired_rotation_curr = quat_from_angle_axis(yaw, vec3(0.0f, 1.0f, 0.0f));
                 desired_rotation = desired_rotation_curr;
