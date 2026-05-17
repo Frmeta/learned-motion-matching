@@ -5563,36 +5563,55 @@ int main(int argc, char** argv)
             if (walkpath_csvf)
             {
                 // Build dynamic header
-                std::string header = "frame,gt_x,gt_z";
-                if (!mm_capture.empty()) header += ",mm_x,mm_z";
-                if (!lmm_capture.empty()) header += ",lmm_x,lmm_z";
-                if (frozen_pose.size > 0) header += ",frozen_x,frozen_z";
+                std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
+                if (!mm_capture.empty()) header += ",mm_x,mm_z,mm_yaw";
+                if (!lmm_capture.empty()) header += ",lmm_x,lmm_z,lmm_yaw";
+                if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
                 fprintf(walkpath_csvf, "%s\n", header.c_str());
 
                 int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), (size_t)(frozen_pose.size > 0 ? ref_capture_for_plot.size() : 0)});
                 if (nframes == 0) nframes = (int)ref_capture_for_plot.size();
                 
+                auto extract_yaw = [](quat q) -> float {
+                    vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
+                    return atan2f(fwd.x, fwd.z);
+                };
+
                 for (int f = 0; f < nframes; f++)
                 {
-                    fprintf(walkpath_csvf, "%d", f);
+                    int clip_id = -1;
+                    for (int r = 0; r < test_db.nranges(); r++) {
+                        if (f >= test_db.range_starts(r) && f < test_db.range_stops(r)) {
+                            clip_id = r;
+                            break;
+                        }
+                    }
+                    if (clip_id == -1 && test_db.nranges() > 0) {
+                        clip_id = test_db.nranges() - 1;
+                    }
+                    
+                    fprintf(walkpath_csvf, "%d,%d", f, clip_id);
                     
                     // Ground Truth
                     if (f < (int)ref_capture_for_plot.size()) {
                         vec3 pos = ref_capture_for_plot[f](0);
-                        fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        float yaw = extract_yaw(database_test_reference_rotations[f](0)); // Root rotation
+                        fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                     } else {
-                        fprintf(walkpath_csvf, ",0.0,0.0"); // Should not happen
+                        fprintf(walkpath_csvf, ",0.0,0.0,0.0"); // Should not happen
                     }
                     
                     // MM
                     if (!mm_capture.empty()) {
                         if (f < (int)mm_capture.size()) {
                             vec3 pos = mm_capture[f](0);
-                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                            float yaw = extract_yaw(mm_capture_rotations[f](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
                             // Replicate last pos
                             vec3 pos = mm_capture.back()(0);
-                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                            float yaw = extract_yaw(mm_capture_rotations.back()(0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
                     }
 
@@ -5600,17 +5619,20 @@ int main(int argc, char** argv)
                     if (!lmm_capture.empty()) {
                         if (f < (int)lmm_capture.size()) {
                             vec3 pos = lmm_capture[f](0);
-                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                            float yaw = extract_yaw(lmm_capture_rotations[f](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
                             vec3 pos = lmm_capture.back()(0);
-                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                            float yaw = extract_yaw(lmm_capture_rotations.back()(0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
                     }
 
                     // Frozen
                     if (frozen_pose.size > 0) {
                         vec3 pos = frozen_pose(0);
-                        fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        float yaw = extract_yaw(database_test_reference_rotations[0](0)); // Frozen is just the start
+                        fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                     }
                     
                     fprintf(walkpath_csvf, "\n");
