@@ -5554,15 +5554,84 @@ int main(int argc, char** argv)
                 int plot_ret = system(plot_cmd.c_str());
                 if (plot_ret != 0)
                 {
-                    std::cout << "Warning: plotting script returned non-zero: " << plot_ret << std::endl;
+                }
+            }
+
+            // Export walkpath CSV
+            std::string walkpath_csv_path = analysis_output_folder + "/" + name + "_walkpath.csv";
+            FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
+            if (walkpath_csvf)
+            {
+                // Build dynamic header
+                std::string header = "frame,gt_x,gt_z";
+                if (!mm_capture.empty()) header += ",mm_x,mm_z";
+                if (!lmm_capture.empty()) header += ",lmm_x,lmm_z";
+                if (frozen_pose.size > 0) header += ",frozen_x,frozen_z";
+                fprintf(walkpath_csvf, "%s\n", header.c_str());
+
+                int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), (size_t)(frozen_pose.size > 0 ? ref_capture_for_plot.size() : 0)});
+                if (nframes == 0) nframes = (int)ref_capture_for_plot.size();
+                
+                for (int f = 0; f < nframes; f++)
+                {
+                    fprintf(walkpath_csvf, "%d", f);
+                    
+                    // Ground Truth
+                    if (f < (int)ref_capture_for_plot.size()) {
+                        vec3 pos = ref_capture_for_plot[f](0);
+                        fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                    } else {
+                        fprintf(walkpath_csvf, ",0.0,0.0"); // Should not happen
+                    }
+                    
+                    // MM
+                    if (!mm_capture.empty()) {
+                        if (f < (int)mm_capture.size()) {
+                            vec3 pos = mm_capture[f](0);
+                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        } else {
+                            // Replicate last pos
+                            vec3 pos = mm_capture.back()(0);
+                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        }
+                    }
+
+                    // LMM
+                    if (!lmm_capture.empty()) {
+                        if (f < (int)lmm_capture.size()) {
+                            vec3 pos = lmm_capture[f](0);
+                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        } else {
+                            vec3 pos = lmm_capture.back()(0);
+                            fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                        }
+                    }
+
+                    // Frozen
+                    if (frozen_pose.size > 0) {
+                        vec3 pos = frozen_pose(0);
+                        fprintf(walkpath_csvf, ",%.6f,%.6f", pos.x, pos.z);
+                    }
+                    
+                    fprintf(walkpath_csvf, "\n");
+                }
+                fclose(walkpath_csvf);
+
+                // Call walkpath plotting script (Python)
+                std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + analysis_output_folder + "\"";
+                int plot_walkpath_ret = system(plot_walkpath_cmd.c_str());
+                if (plot_walkpath_ret != 0)
+                {
+                    std::cout << "Warning: walkpath plotting script returned non-zero: " << plot_walkpath_ret << std::endl;
                 }
             }
 
             results.push_back(res);
         }
 
-        std::string report_path = analysis_output_folder + "/report.md";
+        std::string report_path = analysis_output_folder + "/mpjpe/mpjpe_report.md";
         FILE* report = fopen(report_path.c_str(), "w");
+        
         if (report != nullptr)
         {
             auto bytes_to_mb = [](size_t bytes) -> double

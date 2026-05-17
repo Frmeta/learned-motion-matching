@@ -43,9 +43,9 @@ def main():
     out_dir = sys.argv[2]
     os.makedirs(out_dir, exist_ok=True)
 
-    pose_dir = os.path.join(out_dir, 'pose')
-    path_dir = os.path.join(out_dir, 'path')
-    os.makedirs(pose_dir, exist_ok=True)
+    mpjpe_dir = os.path.join(out_dir, 'mpjpe')
+    path_dir = os.path.join(out_dir, 'walkpath')
+    os.makedirs(mpjpe_dir, exist_ok=True)
     os.makedirs(path_dir, exist_ok=True)
 
     fieldnames, rows = read_csv(csv_path)
@@ -87,7 +87,7 @@ def main():
         plt.ylabel('MPJPE (m)')
         plt.title(metric)
         plt.grid(True, linestyle='--', alpha=0.4)
-        out_path = os.path.join(pose_dir, f"{metric}.png")
+        out_path = os.path.join(mpjpe_dir, f"{metric}.png")
         plt.tight_layout()
         plt.savefig(out_path, dpi=200)
         plt.close()
