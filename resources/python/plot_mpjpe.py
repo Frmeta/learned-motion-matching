@@ -43,6 +43,11 @@ def main():
     out_dir = sys.argv[2]
     os.makedirs(out_dir, exist_ok=True)
 
+    pose_dir = os.path.join(out_dir, 'pose')
+    path_dir = os.path.join(out_dir, 'path')
+    os.makedirs(pose_dir, exist_ok=True)
+    os.makedirs(path_dir, exist_ok=True)
+
     fieldnames, rows = read_csv(csv_path)
     if not fieldnames or not rows:
         print("No data to plot.")
@@ -65,18 +70,24 @@ def main():
         xs = []
         ys = []
         for t, v in zip(times, values):
-            if v != v:  # NaN
+            if v != v or v < 0.0:  # NaN or placeholder (-1.0)
                 continue
             xs.append(t)
             ys.append(v)
 
         plt.figure(figsize=(10, 3))
         plt.plot(xs, ys, linewidth=1.0)
+        
+        if ys:
+            mean_val = sum(ys) / len(ys)
+            plt.axhline(y=mean_val, color='r', linestyle=':', label=f'Mean: {mean_val:.4f}')
+            plt.legend()
+            
         plt.xlabel('Time (s)')
         plt.ylabel('MPJPE (m)')
         plt.title(metric)
         plt.grid(True, linestyle='--', alpha=0.4)
-        out_path = os.path.join(out_dir, f"{metric}.png")
+        out_path = os.path.join(pose_dir, f"{metric}.png")
         plt.tight_layout()
         plt.savefig(out_path, dpi=200)
         plt.close()

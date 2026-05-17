@@ -95,7 +95,10 @@ train_files = [
 
 test_files = [
     # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
-    ('resources/bvh/test/run2_subject1.bvh', 4000, 6000), # small clip for experimenting
+
+    # small clip for experimenting
+    ('resources/bvh/test/run2_subject1.bvh', 4000, 5000),
+    ('resources/bvh/test/walk3_subject2.bvh', 3000, 4000), 
 
     # ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
     # ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 

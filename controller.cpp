@@ -1963,6 +1963,86 @@ int main(int argc, char** argv)
         reset_motion_to_recording_start();
     };
 
+    auto teleport_to_test_frame = [&](int test_frame) {
+        if (test_frame < 0 || test_frame >= test_db.nframes()) return;
+
+        simulation_position = test_db.bone_positions(test_frame, 0);
+        simulation_rotation = test_db.bone_rotations(test_frame, 0);
+        simulation_velocity = test_db.bone_velocities(test_frame, 0);
+        simulation_angular_velocity = test_db.bone_angular_velocities(test_frame, 0);
+        simulation_acceleration = vec3();
+
+        desired_velocity = vec3();
+        desired_velocity_change_curr = vec3();
+        desired_velocity_change_prev = vec3();
+        desired_rotation = simulation_rotation;
+        desired_rotation_change_curr = vec3();
+        desired_rotation_change_prev = vec3();
+
+        trajectory_positions.set(simulation_position);
+        trajectory_velocities.set(vec3());
+        trajectory_accelerations.set(vec3());
+        trajectory_rotations.set(simulation_rotation);
+        trajectory_angular_velocities.set(vec3());
+        trajectory_desired_velocities.set(vec3());
+        trajectory_desired_rotations.set(simulation_rotation);
+
+        jump_active = false;
+        jump_vertical_velocity = 0.0f;
+        jump_buffer_timer = 0.0f;
+        jump_coyote_timer = 0.0f;
+
+        for (int i = 0; i < test_db.nbones(); i++) {
+            bone_positions(i) = test_db.bone_positions(test_frame, i);
+            bone_velocities(i) = test_db.bone_velocities(test_frame, i);
+            bone_rotations(i) = test_db.bone_rotations(test_frame, i);
+            bone_angular_velocities(i) = test_db.bone_angular_velocities(test_frame, i);
+
+            curr_bone_positions(i) = test_db.bone_positions(test_frame, i);
+            curr_bone_velocities(i) = test_db.bone_velocities(test_frame, i);
+            curr_bone_rotations(i) = test_db.bone_rotations(test_frame, i);
+            curr_bone_angular_velocities(i) = test_db.bone_angular_velocities(test_frame, i);
+
+            trns_bone_positions(i) = test_db.bone_positions(test_frame, i);
+            trns_bone_velocities(i) = test_db.bone_velocities(test_frame, i);
+            trns_bone_rotations(i) = test_db.bone_rotations(test_frame, i);
+            trns_bone_angular_velocities(i) = test_db.bone_angular_velocities(test_frame, i);
+
+            adjusted_bone_positions(i) = test_db.bone_positions(test_frame, i);
+            adjusted_bone_rotations(i) = test_db.bone_rotations(test_frame, i);
+        }
+
+        for (int i = 0; i < bone_offset_positions.size; i++) bone_offset_positions(i) = vec3();
+        for (int i = 0; i < bone_offset_velocities.size; i++) bone_offset_velocities(i) = vec3();
+        for (int i = 0; i < bone_offset_rotations.size; i++) bone_offset_rotations(i) = quat();
+        for (int i = 0; i < bone_offset_angular_velocities.size; i++) bone_offset_angular_velocities(i) = vec3();
+
+        transition_src_position = simulation_position;
+        transition_src_rotation = simulation_rotation;
+        transition_dst_position = simulation_position;
+        transition_dst_rotation = simulation_rotation;
+
+        root_history_positions.clear();
+        root_history_rotations.clear();
+        history_left_foot_positions.clear();
+        history_right_foot_positions.clear();
+        history_left_foot_velocities.clear();
+        history_right_foot_velocities.clear();
+        history_hip_positions.clear();
+        history_hip_velocities.clear();
+        history_terrain_heights.clear();
+        push_runtime_history();
+
+        if (test_frame < test_db.features.rows && test_db.features.cols == features_curr.size) {
+            for (int i = 0; i < test_db.nfeatures(); i++) {
+                features_curr(i) = test_db.features(test_frame, i);
+                features_proj(i) = test_db.features(test_frame, i);
+            }
+        }
+        latent_curr.zero();
+        latent_proj.zero();
+    };
+
     bool analysis_capture_enabled = false; // set to true if in analyze mode
     std::vector<array1d<vec3>> analysis_capture_bone_positions;
     std::vector<array1d<quat>> analysis_capture_bone_rotations;
@@ -4928,10 +5008,24 @@ int main(int argc, char** argv)
 #endif
 
             // Simulate MM/LMM for each frames in test
-            const int max_steps = analyze_input_is_database ? (test_db.nframes() - 60) : ((int)samples.size() + 8);
+            const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
             for (int i = 0; i < max_steps; i++)
             {
                 if (!analyze_input_is_database && !joystick_playback_enabled) break;
+
+                if (analyze_input_is_database) {
+                    int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
+                    bool is_clip_start = false;
+                    for (int r = 0; r < test_db.nranges(); r++) {
+                        if (test_frame == test_db.range_starts(r)) {
+                            is_clip_start = true;
+                            break;
+                        }
+                    }
+                    if (is_clip_start) {
+                        teleport_to_test_frame(test_frame);
+                    }
+                }
                 
                 // Simulate MM/LMM
                 update_func();
@@ -5544,8 +5638,8 @@ int main(int argc, char** argv)
             fprintf(report, "- Total Clips: %d * 2 (mirrored) = %d\n\n", db.nranges() / 2, db.nranges());
 
             fprintf(report, "Test database:\n");
-            fprintf(report, "- Total Frames: %d\n", test_db.nframes() - 60);
-            fprintf(report, "- Total Duration: %.2f minutes\n", (test_db.nframes() - 60) / 3600.0);
+            fprintf(report, "- Total Frames: %d\n", test_db.nframes());
+            fprintf(report, "- Total Duration: %.2f minutes\n", test_db.nframes() / 3600.0);
             fprintf(report, "- Frame Rate: 60.0 Hz\n");
             fprintf(report, "- Total Bones: %d\n\n", test_db.nbones());
 
