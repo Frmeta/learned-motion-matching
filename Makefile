@@ -43,8 +43,12 @@ controller: $(SOURCE) $(HEADER)
 >if not exist "$(OUT_DIR)" mkdir "$(OUT_DIR)"
 >$(CC) -o $(OUTPUT) $(SOURCE) $(CFLAGS) $(LIBS) 
 
+build-features: helper/build_features.cpp $(HEADER)
+>g++ -O3 -ffast-math -march=native -std=c++17 helper/build_features.cpp -o build_features.exe
+
 clean:
 >if exist "$(TARGET_BASENAME).exe" del /F /Q "$(TARGET_BASENAME).exe"
+>if exist "build_features.exe" del /F /Q "build_features.exe"
 >if exist "$(TARGET_BASENAME).html" del /F /Q "$(TARGET_BASENAME).html"
 >if exist "$(WEB_OUT_DIR)/$(TARGET_BASENAME).html" del /F /Q "$(WEB_OUT_DIR)/$(TARGET_BASENAME).html"
 >if exist "$(WEB_OUT_DIR)/$(TARGET_BASENAME).js" del /F /Q "$(WEB_OUT_DIR)/$(TARGET_BASENAME).js"

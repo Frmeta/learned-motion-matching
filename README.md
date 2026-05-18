@@ -89,6 +89,12 @@ set MOTION_MATCHING_TRAIN_TYPE=TRAIN_BIG
 set MOTION_MATCHING_TRAIN_TYPE=TRAIN_HISTORY
 ```
 
+If you want to create feature from generated db without running controller.exe:
+```
+make build-features
+./build_features.exe
+```
+
 Analyze
 ```
 ./controller.exe --analyze-mm ./resources/bin/database_test.bin

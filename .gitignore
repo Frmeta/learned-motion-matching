@@ -24,6 +24,7 @@ database_small.csv
 database_big.csv
 database_history.csv
 
+build_features.exe
 
 .vscode/
 .cursor/
