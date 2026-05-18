@@ -19,6 +19,7 @@ from train_common import (
     load_features,
     save_network,
     bin_path,
+    model_path,
     validate_runtime_compatibility,
     train_db_filename,
     train_features_filename,
@@ -648,7 +649,7 @@ if __name__ == '__main__':
         if i % 1000 == 0:
             generate_animation()
             save_compressed_database()
-            save_network(bin_path(f'decompressor{train_network_suffix()}.bin'), [
+            save_network(model_path(f'decompressor{train_network_suffix()}.bin'), [
                 network_decompressor.linear0, 
                 network_decompressor.linear1],
                 decompressor_mean_in,

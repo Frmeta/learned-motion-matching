@@ -24,6 +24,16 @@ def bin_path(filename):
     return repo_path('resources', 'bin', filename)
 
 
+def model_path(filename):
+    env_model_dir = os.environ.get('MOTION_MATCHING_MODEL_DIR', '').strip()
+    if env_model_dir:
+        path = Path(env_model_dir).expanduser().resolve()
+    else:
+        path = project_root().joinpath('resources', 'model')
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.joinpath(filename))
+
+
 # ============================================================
 # TRAIN_TYPE: selects which database variant to train on.
 #

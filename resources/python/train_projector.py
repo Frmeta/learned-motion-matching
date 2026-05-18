@@ -22,6 +22,7 @@ from train_common import (
     load_latent,
     save_network,
     bin_path,
+    model_path,
     validate_runtime_compatibility,
     train_db_filename,
     train_features_filename,
@@ -279,7 +280,7 @@ if __name__ == '__main__':
         
         if i % 1000 == 0:
             generate_predictions()
-            save_network(bin_path(f'projector{train_network_suffix()}.bin'), [
+            save_network(model_path(f'projector{train_network_suffix()}.bin'), [
                 network_projector.linear0, 
                 network_projector.linear1, 
                 network_projector.linear2, 

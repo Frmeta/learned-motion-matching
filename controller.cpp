@@ -1517,9 +1517,9 @@ int main(int argc, char** argv)
     bool lmm_enabled = start_with_lmm_enabled;
     
     nnet decompressor, stepper, projector;
-    const char* dec_path_default = "./resources/bin/decompressor_big.bin";
-    const char* stp_path_default = "./resources/bin/stepper_big.bin";
-    const char* prj_path_default = "./resources/bin/projector_big.bin";
+    const char* dec_path_default = "./resources/model/decompressor_big.bin";
+    const char* stp_path_default = "./resources/model/stepper_big.bin";
+    const char* prj_path_default = "./resources/model/projector_big.bin";
 
     bool dec_exists_default = FileExists(dec_path_default);
     bool stp_exists_default = FileExists(stp_path_default);
@@ -1562,14 +1562,14 @@ int main(int argc, char** argv)
     const bool projector_output_match =
         projector.output_mean.size == expected_features_plus_latent;
 
-    bool lmm_networks_compatible =
+    bool lmm_networks_compatible = networks_exist &&
         decompressor_input_match &&
         stepper_input_match &&
         stepper_output_match &&
         projector_input_match &&
         projector_output_match;
 
-    if (!lmm_networks_compatible)
+    if (networks_exist && !lmm_networks_compatible)
     {
         printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d). Retrain decompressor/projector/stepper for this feature layout.\n", db.nfeatures());
         printf("  [%-8s] decompressor.input_mean.size : actual=%d expected=%d\n",
@@ -6011,9 +6011,9 @@ int main(int argc, char** argv)
                 }
 
                 // Load LMM networks for this variant
-                std::string dec_path = std::string("./resources/bin/decompressor") + net_suffixes[vi] + ".bin";
-                std::string stp_path = std::string("./resources/bin/stepper")      + net_suffixes[vi] + ".bin";
-                std::string prj_path = std::string("./resources/bin/projector")    + net_suffixes[vi] + ".bin";
+                std::string dec_path = std::string("./resources/model/decompressor") + net_suffixes[vi] + ".bin";
+                std::string stp_path = std::string("./resources/model/stepper")      + net_suffixes[vi] + ".bin";
+                std::string prj_path = std::string("./resources/model/projector")    + net_suffixes[vi] + ".bin";
                 nnet var_decompressor, var_stepper, var_projector;
                 bool dec_exists = FileExists(dec_path.c_str());
                 bool stp_exists = FileExists(stp_path.c_str());
