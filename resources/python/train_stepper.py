@@ -21,6 +21,11 @@ from train_common import (
     save_network,
     bin_path,
     validate_runtime_compatibility,
+    train_db_filename,
+    train_features_filename,
+    train_latent_filename,
+    train_network_suffix,
+    get_train_type,
 )
 
 # Networks
@@ -45,17 +50,23 @@ class Stepper(nn.Module):
 
 if __name__ == '__main__':
     
+    # Log which database variant is being trained
+    print(f"[train_stepper] TRAIN_TYPE = {get_train_type()}")
+    print(f"[train_stepper] database   = {train_db_filename()}")
+    print(f"[train_stepper] features   = {train_features_filename()}")
+    print(f"[train_stepper] latent     = {train_latent_filename()}")
+
     # Load data
     
-    database = load_database(bin_path('database.bin'))
+    database = load_database(train_db_filename())
     range_starts = database['range_starts']
     range_stops = database['range_stops']
     future_toe_positions = database['future_toe_positions']
     cartwheel_states = database['cartwheel_states']
     del database
     
-    X = load_features(bin_path('features.bin'))['features'].copy().astype(np.float32)
-    Z = load_latent(bin_path('latent.bin'))['latent'].copy().astype(np.float32)
+    X = load_features(train_features_filename())['features'].copy().astype(np.float32)
+    Z = load_latent(train_latent_filename())['latent'].copy().astype(np.float32)
 
     validate_runtime_compatibility(X, future_toe_positions)
     
@@ -285,7 +296,7 @@ if __name__ == '__main__':
         
         if i % 1000 == 0:
             generate_predictions()
-            save_network(bin_path('stepper.bin'), [
+            save_network(bin_path(f'stepper{train_network_suffix()}.bin'), [
                 network_stepper.linear0, 
                 network_stepper.linear1, 
                 network_stepper.linear2],

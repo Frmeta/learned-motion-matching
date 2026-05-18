@@ -20,6 +20,11 @@ from train_common import (
     save_network,
     bin_path,
     validate_runtime_compatibility,
+    train_db_filename,
+    train_features_filename,
+    train_latent_filename,
+    train_network_suffix,
+    get_train_type,
 )
 
 # Networks
@@ -66,9 +71,14 @@ class Decompressor(nn.Module):
 
 if __name__ == '__main__':
     
+    # Log which database variant is being trained
+    print(f"[train_decompressor] TRAIN_TYPE = {get_train_type()}")
+    print(f"[train_decompressor] database   = {train_db_filename()}")
+    print(f"[train_decompressor] features   = {train_features_filename()}")
+
     # Load data
     
-    database = load_database(bin_path('database.bin'))
+    database = load_database(train_db_filename())
     
     parents = database['bone_parents']
     contacts = database['contact_states']
@@ -77,7 +87,7 @@ if __name__ == '__main__':
     future_toe_positions = database['future_toe_positions']
     cartwheel_states = database['cartwheel_states']
     
-    X = load_features(bin_path('features.bin'))['features'].astype(np.float32)
+    X = load_features(train_features_filename())['features'].astype(np.float32)
     Ypos = database['bone_positions'].astype(np.float32)
     Yrot = database['bone_rotations'].astype(np.float32)
     Yvel = database['bone_velocities'].astype(np.float32)
@@ -276,7 +286,7 @@ if __name__ == '__main__':
             
             # Write latent variables
             
-            with open(bin_path('latent.bin'), 'wb') as f:
+            with open(bin_path(f'latent{train_network_suffix()}.bin'), 'wb') as f:
                 f.write(struct.pack('II', nframes, nlatent) + Z.cpu().numpy().astype(np.float32).ravel().tobytes())
 
     # Function to generate test animation for comparison
@@ -631,7 +641,7 @@ if __name__ == '__main__':
         if i % 1000 == 0:
             generate_animation()
             save_compressed_database()
-            save_network(bin_path('decompressor.bin'), [
+            save_network(bin_path(f'decompressor{train_network_suffix()}.bin'), [
                 network_decompressor.linear0, 
                 network_decompressor.linear1],
                 decompressor_mean_in,

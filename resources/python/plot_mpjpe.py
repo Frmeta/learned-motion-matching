@@ -1,14 +1,16 @@
 """
 Simple plotting utility to read MPJPE CSV and save PNGs per metric.
-Usage: python plot_mpjpe.py <csv_path> <out_dir>
+Usage: python plot_mpjpe.py <csv_path> <out_dir> [--ymax=<value>]
 
 Produces one PNG per metric column (excluding frame,time_seconds).
+Optional --ymax=<value> enforces a shared y-axis upper limit across all plots
+(useful for big-vs-small database comparisons).
 """
 from __future__ import annotations
 import csv
 import os
 import sys
-from typing import List
+from typing import List, Optional
 
 try:
     import matplotlib
@@ -36,12 +38,21 @@ def to_float(v: str):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python plot_mpjpe.py <csv_path> <out_dir>")
+        print("Usage: python plot_mpjpe.py <csv_path> <out_dir> [--ymax=<value>]")
         return 2
 
     csv_path = sys.argv[1]
     out_dir = sys.argv[2]
     os.makedirs(out_dir, exist_ok=True)
+
+    # Parse optional --ymax argument
+    forced_ymax: Optional[float] = None
+    for arg in sys.argv[3:]:
+        if arg.startswith('--ymax='):
+            try:
+                forced_ymax = float(arg[len('--ymax='):])
+            except ValueError:
+                print(f"Warning: could not parse --ymax value '{arg}', ignoring.", file=sys.stderr)
 
     mpjpe_dir = os.path.join(out_dir, 'mpjpe')
     path_dir = os.path.join(out_dir, 'walkpath')
@@ -82,11 +93,16 @@ def main():
             mean_val = sum(ys) / len(ys)
             plt.axhline(y=mean_val, color='r', linestyle=':', label=f'Mean: {mean_val:.4f}')
             plt.legend()
-            
+
         plt.xlabel('Time (s)')
         plt.ylabel('MPJPE (m)')
         plt.title(metric)
         plt.grid(True, linestyle='--', alpha=0.4)
+
+        # Apply shared y-axis limit when provided
+        if forced_ymax is not None:
+            plt.ylim(0.0, forced_ymax)
+
         out_path = os.path.join(mpjpe_dir, f"{metric}.png")
         plt.tight_layout()
         plt.savefig(out_path, dpi=200)

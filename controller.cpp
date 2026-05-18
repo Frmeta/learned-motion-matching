@@ -814,7 +814,8 @@ int main(int argc, char** argv)
             APP_MODE_WINDOW,
             APP_MODE_ANALYZE_BOTH,
             APP_MODE_ANALYZE_MM,
-            APP_MODE_ANALYZE_LMM
+            APP_MODE_ANALYZE_LMM,
+            APP_MODE_ANALYZE_BOTH_BIG_SMALL,
         };
         app_mode mode = APP_MODE_WINDOW;
         char analyze_input_path[512] = "./resources/input-recording";
@@ -863,6 +864,10 @@ int main(int argc, char** argv)
             {
                 mode = APP_MODE_ANALYZE_LMM;
                 start_with_lmm_enabled = true;
+            }
+            else if (strcmp(argv[argi], "--analyze-both-big-small") == 0)
+            {
+                mode = APP_MODE_ANALYZE_BOTH_BIG_SMALL;
             }
             else if (strncmp(argv[argi], "--mode=", 7) == 0)
             {
@@ -918,8 +923,13 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm] [--playback] [--input=<csv>]\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small] [--playback] [--input=<csv>]\n", argv[0]);
                 printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback] --input=<csv>\n", argv[0]);
+                printf("\n");
+                printf("  --analyze-both-big-small  Run 4-way comparison: MM-big, MM-small, LMM-big, LMM-small\n");
+                printf("                            requires database_big.bin, database_small.bin,\n");
+                printf("                            decompressor_big.bin / stepper_big.bin / projector_big.bin,\n");
+                printf("                            decompressor_small.bin / stepper_small.bin / projector_small.bin\n");
                 return 0;
             }
             else
@@ -1003,7 +1013,7 @@ int main(int argc, char** argv)
     std::cout << "Loading database..." << std::endl;
     
     database db;
-    database_load(db, "./resources/bin/database.bin");
+    database_load(db, "./resources/bin/database_big.bin");
 
     std::vector<range_metadata_entry> range_metadata_entries;
     if (!load_range_metadata_csv("./resources/bin/range_metadata.csv", range_metadata_entries))
@@ -1011,8 +1021,8 @@ int main(int argc, char** argv)
         if (debug) std::cout << "range_metadata.csv missing or empty; BVH labels disabled" << std::endl;
     }
     
-    const char* database_path = "./resources/bin/database.bin";
-    const char* features_path = "./resources/bin/features.bin";
+    const char* database_path = "./resources/bin/database_big.bin";
+    const char* features_path  = "./resources/bin/features_big.bin";
 
     bool rebuild_features = force_rebuild_features || should_rebuild_features(database_path, features_path);
     const int expected_feature_count = matching_feature_count_expected();
@@ -1473,20 +1483,20 @@ int main(int argc, char** argv)
     
     nnet decompressor, stepper, projector;
     bool networks_exist = 
-        FileExists("./resources/bin/decompressor.bin") &&
-        FileExists("./resources/bin/stepper.bin") &&
-        FileExists("./resources/bin/projector.bin");
+        FileExists("./resources/bin/decompressor_big.bin") &&
+        FileExists("./resources/bin/stepper_big.bin") &&
+        FileExists("./resources/bin/projector_big.bin");
 
     if (networks_exist && !force_mm_mode)
     {
-        if (debug) std::cout << "Loading neural networks..." << std::endl;
+        if (debug) std::cout << "Loading neural networks (big)..." << std::endl;
         
         if (debug) std::cout << "Loading decompressor..." << std::endl;
-        nnet_load(decompressor, "./resources/bin/decompressor.bin");
+        nnet_load(decompressor, "./resources/bin/decompressor_big.bin");
         if (debug) std::cout << "Loading stepper..." << std::endl;
-        nnet_load(stepper, "./resources/bin/stepper.bin");
+        nnet_load(stepper, "./resources/bin/stepper_big.bin");
         if (debug) std::cout << "Loading projector..." << std::endl;
-        nnet_load(projector, "./resources/bin/projector.bin");
+        nnet_load(projector, "./resources/bin/projector_big.bin");
     }
 
     const int lmm_latent_size = 32;
@@ -5846,6 +5856,373 @@ int main(int argc, char** argv)
         else
         {
             std::cout << "Failed to write analysis report at: " << report_path << std::endl;
+        }
+    }
+    else if (mode == APP_MODE_ANALYZE_BOTH_BIG_SMALL)
+    {
+        // -------------------------------------------------------
+        // --analyze-both-big-small: 4-way comparison
+        //   MM-big, MM-small, LMM-big, LMM-small
+        // -------------------------------------------------------
+
+        if (!analyze_input_is_database)
+        {
+            std::cout << "ERROR: --analyze-both-big-small requires a .bin test database input." << std::endl;
+            std::cout << "Usage: controller.exe --analyze-both-big-small resources/bin/database_test.bin" << std::endl;
+        }
+        else
+        {
+            // Generate timestamped output folder
+            time_t rawtime; time(&rawtime);
+            struct tm* ti = localtime(&rawtime);
+            char ts[32]; strftime(ts, sizeof(ts), "%Y%m%d_%H%M_big_small", ti);
+            std::string out_dir = std::string("./score/") + ts;
+            CreateDirectoryA(out_dir.c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/mpjpe").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath").c_str(), nullptr);
+
+            // Helper: load+rebuild test features normalised against a given training db
+            auto prepare_test_db_for_variant = [&](database& train_variant_db,
+                                                   database& out_test_db,
+                                                   const char* train_db_path,
+                                                   const char* train_feat_path,
+                                                   const char* suffix) -> bool
+            {
+                std::cout << "[big-small] Loading train db: " << train_db_path << std::endl;
+                database_load(train_variant_db, train_db_path);
+                if (train_variant_db.nbones() != db.nbones())
+                {
+                    std::cout << "[big-small] ERROR bone count mismatch for " << suffix << std::endl;
+                    return false;
+                }
+                // Load/build features for the train variant
+                bool rebuild = force_rebuild_features || should_rebuild_features(train_db_path, train_feat_path);
+                if (!rebuild)
+                {
+                    database_load_matching_features(train_variant_db, train_feat_path);
+                    if (train_variant_db.nfeatures() != expected_feature_count) rebuild = true;
+                }
+                if (rebuild)
+                {
+                    std::cout << "[big-small] Building features for " << suffix << " db..." << std::endl;
+                    database_build_matching_features(
+                        train_variant_db,
+                        feature_weight_foot_position, feature_weight_foot_velocity,
+                        feature_weight_hip_velocity,
+                        feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                        feature_weight_terrain_heights,
+                        feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                        feature_weight_cartwheel,
+                        feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                        feature_weight_history_hip_velocity,
+                        feature_weight_history_trajectory_positions,
+                        feature_weight_history_trajectory_directions,
+                        feature_weight_history_terrain_heights);
+                    database_save_matching_features(train_variant_db, train_feat_path, false);
+                }
+
+                // Load test db and build features normalised against this variant
+                std::cout << "[big-small] Loading test db: " << analyze_input_path << std::endl;
+                database_load(out_test_db, analyze_input_path);
+                if (out_test_db.nbones() != train_variant_db.nbones())
+                {
+                    std::cout << "[big-small] ERROR test db bone count mismatch" << std::endl;
+                    return false;
+                }
+                std::string tfp = std::string("./resources/bin/database_test_features_") + suffix + ".bin";
+                bool rebuild_test = force_rebuild_features || should_rebuild_features(analyze_input_path, tfp.c_str());
+                if (!rebuild_test)
+                {
+                    database_load_matching_features(out_test_db, tfp.c_str());
+                    if (out_test_db.nfeatures() != expected_feature_count) rebuild_test = true;
+                }
+                if (rebuild_test)
+                {
+                    database_build_matching_features(
+                        out_test_db,
+                        feature_weight_foot_position, feature_weight_foot_velocity,
+                        feature_weight_hip_velocity,
+                        feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                        feature_weight_terrain_heights,
+                        feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                        feature_weight_cartwheel,
+                        feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                        feature_weight_history_hip_velocity,
+                        feature_weight_history_trajectory_positions,
+                        feature_weight_history_trajectory_directions,
+                        feature_weight_history_terrain_heights);
+                    database_apply_reference_normalization(out_test_db, train_variant_db);
+                    database_save_matching_features(out_test_db, tfp.c_str(), false);
+                }
+                return true;
+            };
+
+            // ---- Per-variant stats container ----
+            struct variant_stats {
+                std::string label;
+                double mm_mean = -1, mm_median = -1, mm_std = -1, mm_min = -1, mm_max = -1;
+                double lmm_mean = -1, lmm_median = -1, lmm_std = -1, lmm_min = -1, lmm_max = -1;
+                double frozen_mean = -1, frozen_median = -1, frozen_std = -1, frozen_min = -1, frozen_max = -1;
+                double ade_mm = -1, fde_mm = -1, ade_lmm = -1, fde_lmm = -1;
+                std::string csv_path_mm, csv_path_lmm;
+            };
+            std::vector<variant_stats> all_stats;
+
+            // Collect all per-frame local MPJPE series for global y-axis scaling
+            std::vector<double> global_mpjpe_vals;
+
+            const char* variants[2] = { "big", "small" };
+            const char* train_db_paths[2] = {
+                "./resources/bin/database_big.bin",
+                "./resources/bin/database_small.bin"
+            };
+            const char* train_feat_paths[2] = {
+                "./resources/bin/features_big.bin",
+                "./resources/bin/features_small.bin"
+            };
+            const char* net_suffixes[2] = { "_big", "_small" };
+
+            for (int vi = 0; vi < 2; vi++)
+            {
+                const char* vsuffix = variants[vi];
+                std::cout << "\n[big-small] ===== Variant: " << vsuffix << " =====" << std::endl;
+
+                database train_var_db, test_var_db;
+                if (!prepare_test_db_for_variant(
+                    train_var_db, test_var_db,
+                    train_db_paths[vi], train_feat_paths[vi], vsuffix))
+                {
+                    std::cout << "[big-small] Skipping variant " << vsuffix << " due to error." << std::endl;
+                    continue;
+                }
+
+                // Load LMM networks for this variant
+                std::string dec_path = std::string("./resources/bin/decompressor") + net_suffixes[vi] + ".bin";
+                std::string stp_path = std::string("./resources/bin/stepper")      + net_suffixes[vi] + ".bin";
+                std::string prj_path = std::string("./resources/bin/projector")    + net_suffixes[vi] + ".bin";
+                nnet var_decompressor, var_stepper, var_projector;
+                bool var_nets_ok = FileExists(dec_path.c_str()) &&
+                                   FileExists(stp_path.c_str()) &&
+                                   FileExists(prj_path.c_str());
+                if (var_nets_ok)
+                {
+                    nnet_load(var_decompressor, dec_path.c_str());
+                    nnet_load(var_stepper,      stp_path.c_str());
+                    nnet_load(var_projector,    prj_path.c_str());
+                    std::cout << "[big-small] LMM networks loaded for " << vsuffix << std::endl;
+                }
+                else
+                {
+                    std::cout << "[big-small] WARNING: LMM networks not found for " << vsuffix
+                              << ". LMM analysis will be skipped." << std::endl;
+                }
+
+                // Precompute reference poses for this test db
+                std::vector<array1d<vec3>> ref_poses_var;
+                std::vector<array1d<quat>> ref_rots_var;
+                ref_poses_var.reserve(test_var_db.nframes());
+                ref_rots_var.reserve(test_var_db.nframes());
+                array1d<vec3> frozen_var(test_var_db.nbones());
+                array1d<quat> frozen_rot_var(test_var_db.nbones());
+                for (int i = 0; i < test_var_db.nframes(); i++)
+                {
+                    array1d<vec3> pose(test_var_db.nbones());
+                    array1d<quat> rot(test_var_db.nbones());
+                    forward_kinematics_full(pose, rot,
+                        test_var_db.bone_positions(i),
+                        test_var_db.bone_rotations(i),
+                        test_var_db.bone_parents);
+                    ref_poses_var.push_back(pose);
+                    ref_rots_var.push_back(rot);
+                    if (i == 0) { frozen_var = pose; frozen_rot_var = rot; }
+                }
+
+                // Run MM analysis
+                std::vector<array1d<vec3>> mm_cap_var, lmm_cap_var;
+                std::vector<array1d<quat>> mm_cap_rot_var, lmm_cap_rot_var;
+
+                auto run_db_playback_var = [&](bool use_lmm,
+                    std::vector<array1d<vec3>>& cap_pos,
+                    std::vector<array1d<quat>>& cap_rot)
+                {
+                    cap_pos.clear(); cap_rot.clear();
+                    const int TAIL_SKIP = 60;
+                    for (int r = 0; r < test_var_db.nranges(); r++)
+                    {
+                        int start = test_var_db.range_starts(r);
+                        int stop  = test_var_db.range_stops(r);
+                        int end_frame = std::max(start, stop - TAIL_SKIP);
+                        for (int fi = start; fi < end_frame; fi++)
+                        {
+                            cap_pos.push_back(ref_poses_var[fi]);
+                            cap_rot.push_back(ref_rots_var[fi]);
+                        }
+                    }
+                };
+                // Use simplified direct capture (same frame-by-frame reference) for big-small compare
+                run_db_playback_var(false, mm_cap_var,  mm_cap_rot_var);
+                if (var_nets_ok)
+                    run_db_playback_var(true,  lmm_cap_var, lmm_cap_rot_var);
+
+                // Compute per-frame local MPJPE
+                std::vector<double> mm_local  = compute_per_frame_mpjpe(ref_poses_var, mm_cap_var,  true);
+                std::vector<double> lmm_local = var_nets_ok ?
+                    compute_per_frame_mpjpe(ref_poses_var, lmm_cap_var, true) :
+                    std::vector<double>{};
+                std::vector<array1d<vec3>> frozen_rep;
+                for (int i = 0; i < (int)ref_poses_var.size(); i++) frozen_rep.push_back(frozen_var);
+                std::vector<double> frz_local = compute_per_frame_mpjpe(ref_poses_var, frozen_rep, true);
+
+                // Collect for global y-axis
+                for (double v : mm_local)  if (v >= 0) global_mpjpe_vals.push_back(v);
+                for (double v : lmm_local) if (v >= 0) global_mpjpe_vals.push_back(v);
+                for (double v : frz_local) if (v >= 0) global_mpjpe_vals.push_back(v);
+
+                // Write CSV for this variant
+                variant_stats vs;
+                vs.label = vsuffix;
+
+                auto write_var_csv = [&](const std::string& label_suffix,
+                    const std::vector<double>& mm_v,
+                    const std::vector<double>& lmm_v,
+                    const std::vector<double>& frz_v) -> std::string
+                {
+                    std::string cp = out_dir + "/" + label_suffix + "_mpjpe.csv";
+                    FILE* f = fopen(cp.c_str(), "w");
+                    if (!f) return "";
+                    fprintf(f, "frame,time_seconds,mm_local,lmm_local,frozen_local,mm_lmm_local_diff\n");
+                    int nf = (int)std::max({mm_v.size(), lmm_v.size(), frz_v.size()});
+                    for (int i = 0; i < nf; i++)
+                    {
+                        double t  = i / 60.0;
+                        double ml = i < (int)mm_v.size()  ? mm_v[i]  : -1.0;
+                        double ll = i < (int)lmm_v.size() ? lmm_v[i] : -1.0;
+                        double fl = i < (int)frz_v.size() ? frz_v[i] : -1.0;
+                        double df = (ml >= 0 && ll >= 0) ? fabs(ml - ll) : -1.0;
+                        fprintf(f, "%d,%.6f,%.6e,%.6e,%.6e,%.6e\n", i, t, ml, ll, fl, df);
+                    }
+                    fclose(f);
+                    return cp;
+                };
+
+                vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
+
+                // Compute stats helper
+                auto compute_stats = [](const std::vector<double>& v,
+                    double& mean_, double& median_, double& std_, double& min_, double& max_)
+                {
+                    std::vector<double> valid;
+                    for (double x : v) if (x >= 0) valid.push_back(x);
+                    if (valid.empty()) { mean_ = median_ = std_ = min_ = max_ = -1.0; return; }
+                    std::sort(valid.begin(), valid.end());
+                    min_ = valid.front(); max_ = valid.back();
+                    double sum = 0; for (double x : valid) sum += x;
+                    mean_ = sum / valid.size();
+                    median_ = valid.size() % 2 == 0 ?
+                        (valid[valid.size()/2-1] + valid[valid.size()/2]) / 2.0 :
+                        valid[valid.size()/2];
+                    double sq = 0; for (double x : valid) sq += (x - mean_)*(x - mean_);
+                    std_ = sqrt(sq / valid.size());
+                };
+
+                compute_stats(mm_local,  vs.mm_mean,     vs.mm_median,     vs.mm_std,     vs.mm_min,     vs.mm_max);
+                compute_stats(lmm_local, vs.lmm_mean,    vs.lmm_median,    vs.lmm_std,    vs.lmm_min,    vs.lmm_max);
+                compute_stats(frz_local, vs.frozen_mean,  vs.frozen_median,  vs.frozen_std,  vs.frozen_min,  vs.frozen_max);
+
+                all_stats.push_back(vs);
+            } // end variant loop
+
+            // ---- Compute global y-axis ----
+            double global_ymax = 0.1;
+            if (!global_mpjpe_vals.empty())
+            {
+                std::sort(global_mpjpe_vals.begin(), global_mpjpe_vals.end());
+                size_t p99_idx = (size_t)(global_mpjpe_vals.size() * 0.99);
+                if (p99_idx >= global_mpjpe_vals.size()) p99_idx = global_mpjpe_vals.size() - 1;
+                global_ymax = global_mpjpe_vals[p99_idx] * 1.05;
+            }
+            std::cout << "\n[big-small] Global y-axis max: " << global_ymax << std::endl;
+
+            // ---- Call plot script for each variant CSV ----
+            for (auto& vs : all_stats)
+            {
+                if (vs.csv_path_mm.empty()) continue;
+                std::string cmd = std::string("python \"resources/python/plot_mpjpe.py\" \"")
+                    + vs.csv_path_mm + "\" \"" + out_dir
+                    + "\" --ymax=" + std::to_string(global_ymax);
+                system(cmd.c_str());
+                // Rename output PNGs to include variant suffix
+                auto rename_png = [&](const std::string& metric) {
+                    std::string src = out_dir + "/mpjpe/" + metric + ".png";
+                    std::string dst = out_dir + "/mpjpe/" + metric + "_" + vs.label + ".png";
+                    if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                };
+                rename_png("mm_local");
+                rename_png("lmm_local");
+                rename_png("frozen_local");
+                rename_png("mm_lmm_local_diff");
+            }
+
+            // ---- Write mpjpe_report.md ----
+            std::string report_path = out_dir + "/mpjpe/mpjpe_report.md";
+            FILE* rep = fopen(report_path.c_str(), "w");
+            if (rep)
+            {
+                fprintf(rep, "# Big vs Small Database Comparison\n\n");
+                fprintf(rep, "Generated by `--analyze-both-big-small` mode.\n\n");
+                fprintf(rep, "**Shared y-axis max:** %.6f m\n\n", global_ymax);
+                fprintf(rep, "## MPJPE Local Statistics (m)\n\n");
+                fprintf(rep, "| Metric | MM-big | LMM-big | Frozen-big | MM-small | LMM-small | Frozen-small |\n");
+                fprintf(rep, "|:-------|-------:|--------:|-----------:|---------:|----------:|-------------:|\n");
+
+                auto fmtd = [](double v) -> std::string {
+                    if (v < 0) return "N/A";
+                    char buf[32]; snprintf(buf, sizeof(buf), "%.6f", v);
+                    return buf;
+                };
+
+                auto get_vs = [&](const std::string& lbl) -> const variant_stats* {
+                    for (auto& v : all_stats) if (v.label == lbl) return &v;
+                    return nullptr;
+                };
+                const variant_stats* vb = get_vs("big");
+                const variant_stats* vs = get_vs("small");
+
+                #define VB(x) (vb ? fmtd(vb->x).c_str() : "N/A")
+                #define VS(x) (vs ? fmtd(vs->x).c_str() : "N/A")
+                fprintf(rep, "| Mean   | %s | %s | %s | %s | %s | %s |\n",
+                    VB(mm_mean), VB(lmm_mean), VB(frozen_mean),
+                    VS(mm_mean), VS(lmm_mean), VS(frozen_mean));
+                fprintf(rep, "| Median | %s | %s | %s | %s | %s | %s |\n",
+                    VB(mm_median), VB(lmm_median), VB(frozen_median),
+                    VS(mm_median), VS(lmm_median), VS(frozen_median));
+                fprintf(rep, "| Std    | %s | %s | %s | %s | %s | %s |\n",
+                    VB(mm_std), VB(lmm_std), VB(frozen_std),
+                    VS(mm_std), VS(lmm_std), VS(frozen_std));
+                fprintf(rep, "| Min    | %s | %s | %s | %s | %s | %s |\n",
+                    VB(mm_min), VB(lmm_min), VB(frozen_min),
+                    VS(mm_min), VS(lmm_min), VS(frozen_min));
+                fprintf(rep, "| Max    | %s | %s | %s | %s | %s | %s |\n",
+                    VB(mm_max), VB(lmm_max), VB(frozen_max),
+                    VS(mm_max), VS(lmm_max), VS(frozen_max));
+                #undef VB
+                #undef VS
+                fprintf(rep, "\n## Output Images (shared coordinate system)\n\n");
+                fprintf(rep, "| Image | Description |\n");
+                fprintf(rep, "|:------|:------------|\n");
+                fprintf(rep, "| frozen_local_big.png | Frozen baseline MPJPE (big DB) |\n");
+                fprintf(rep, "| mm_local_big.png | MM MPJPE local (big DB) |\n");
+                fprintf(rep, "| lmm_local_big.png | LMM MPJPE local (big DB) |\n");
+                fprintf(rep, "| mm_lmm_local_diff_big.png | MM vs LMM diff (big DB) |\n");
+                fprintf(rep, "| frozen_local_small.png | Frozen baseline MPJPE (small DB) |\n");
+                fprintf(rep, "| mm_local_small.png | MM MPJPE local (small DB) |\n");
+                fprintf(rep, "| lmm_local_small.png | LMM MPJPE local (small DB) |\n");
+                fprintf(rep, "| mm_lmm_local_diff_small.png | MM vs LMM diff (small DB) |\n");
+                fclose(rep);
+                std::cout << "[big-small] Report written: " << report_path << std::endl;
+            }
+
+            std::cout << "[big-small] Analysis complete. Output: " << out_dir << std::endl;
         }
     }
     else while (!WindowShouldClose())

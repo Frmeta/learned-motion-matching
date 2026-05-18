@@ -82,6 +82,13 @@ python resources/python/generate_database.py
 python resources/python/generate_database.py test
 ```
 
+LMM Train (set the env var in notebook settings)
+```
+set MOTION_MATCHING_TRAIN_TYPE=TRAIN_SMALL
+set MOTION_MATCHING_TRAIN_TYPE=TRAIN_BIG
+set MOTION_MATCHING_TRAIN_TYPE=TRAIN_HISTORY
+```
+
 Analyze
 ```
 ./controller.exe --analyze-mm ./resources/bin/database_test.bin

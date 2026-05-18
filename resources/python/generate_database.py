@@ -32,7 +32,10 @@ def animation_mirror(lrot, lpos, names, parents):
 
 """ Files to Process """
 
-train_files = [
+# ============================================================
+# BIG database  - full clip selection (original train_files)
+# ============================================================
+train_files_big = [
     # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
     # Semantic feature order used by runtime/database: idle -> crouch -> jump -> cartwheel.
     # We just use a small section of this clip for the standing idle
@@ -90,7 +93,41 @@ train_files = [
     # Cartwheel
     ('resources/bvh/dance1_subject1.bvh',       3190, 3245, False, False, False, True),
     ('resources/bvh/dance1_subject1.bvh',       3450, 3500, False, False, False, True),
+]
 
+# ============================================================
+# SMALL database - lite representative subset (~30% of big)
+# One or two clips per motion category, shorter frame ranges.
+# ============================================================
+train_files_small = [
+    # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
+
+    # Idle (1 frame clip – same as big)
+    ('resources/bvh/pushAndStumble1_subject5.bvh',  194,  195, False, True, False, False),
+
+    # Running (trimmed to ~2000 frames)
+    ('resources/bvh/run1_subject5.bvh',              90, 2500, False, False, False, False),
+
+    # Walking (trimmed to ~2000 frames)
+    ('resources/bvh/walk1_subject5.bvh',             80, 2500, False, False, False),
+
+    # Terrain (one clip each from two subjects)
+    ('resources/bvh/obstacles1_subject2.bvh',       231, 1240, False, False, False, False),
+    ('resources/bvh/obstacles2_subject5.bvh',       250, 2500, False, False, False, False),
+
+    # Jump (three representative clips)
+    ('resources/bvh/jumps1_subject1.bvh',           1490, 1600, False, False, True, False),
+    ('resources/bvh/fight1_subject2.bvh',           4290, 4390, False, False, True, False),
+    ('resources/bvh/obstacles2_subject1.bvh',       4200, 4350, False, False, True, False),
+
+    # Monkey crouch (stand-to-crouch transition + short locomotion)
+    ('resources/bvh/ground2_subject2.bvh',           160,  204, True, False, False, False),
+    ('resources/bvh/ground2_subject2.bvh',           205,  206, True, True,  False, False),
+    ('resources/bvh/ground2_subject2.bvh',           325, 1300, True, False, False, False),
+
+    # Cartwheel
+    ('resources/bvh/dance1_subject1.bvh',           3190, 3245, False, False, False, True),
+    ('resources/bvh/dance1_subject1.bvh',           3450, 3500, False, False, False, True),
 ]
 
 test_files = [
@@ -723,14 +760,23 @@ def generate_database(config):
         print("range_metadata.csv written successfully!")
 
 
-train_config = {
-    'files' : train_files,
-    'output_bin' : "database.bin",
-    'output_csv' : "database.csv",
+train_config_big = {
+    'files' : train_files_big,
+    'output_bin' : "database_big.bin",
+    'output_csv' : "database_big.csv",
     'is_generate_range_metadata' : True,
     'is_mirror' : True,
     'has_gait' : True
-} 
+}
+
+train_config_small = {
+    'files' : train_files_small,
+    'output_bin' : "database_small.bin",
+    'output_csv' : "database_small.csv",
+    'is_generate_range_metadata' : False,
+    'is_mirror' : True,
+    'has_gait' : True
+}
 
 test_config = {
     'files' : test_files,
@@ -739,9 +785,8 @@ test_config = {
     'is_generate_range_metadata' : False,
     'is_mirror' : False,
     'has_gait' : False
-}        
+}
 
-       
 
 if len(sys.argv) > 1:
     print(f"First argument: {sys.argv[1]}")
@@ -749,4 +794,19 @@ if len(sys.argv) > 1:
     generate_database(test_config)
 
 else:
-    generate_database(train_config)
+    # Generate both big and small training databases
+    print("=" * 60)
+    print("Generating BIG database (database_big.bin)...")
+    print("=" * 60)
+    generate_database(train_config_big)
+
+    print("=" * 60)
+    print("Generating SMALL database (database_small.bin)...")
+    print("=" * 60)
+    generate_database(train_config_small)
+
+    print("=" * 60)
+    print("Both databases generated successfully.")
+    print("  - resources/bin/database_big.bin")
+    print("  - resources/bin/database_small.bin")
+    print("=" * 60)
