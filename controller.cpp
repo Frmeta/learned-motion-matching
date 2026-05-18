@@ -1999,6 +1999,8 @@ int main(int argc, char** argv)
 
         root_history_positions.clear();
         root_history_rotations.clear();
+        mm_last_best_with_history = base_frame_index;
+        mm_last_best_without_history = base_frame_index;
         history_left_foot_positions.clear();
         history_right_foot_positions.clear();
         history_left_foot_velocities.clear();
@@ -3422,6 +3424,7 @@ int main(int argc, char** argv)
             curr_bone_rotations = db.bone_rotations(frame_index);
             curr_bone_angular_velocities = db.bone_angular_velocities(frame_index);
             curr_bone_contacts = db.contact_states(frame_index);
+            
             curr_bone_positions_with_history = db.bone_positions(mm_last_best_with_history);
             curr_bone_velocities_with_history = db.bone_velocities(mm_last_best_with_history);
             curr_bone_rotations_with_history = db.bone_rotations(mm_last_best_with_history);
@@ -4840,6 +4843,308 @@ int main(int argc, char** argv)
     // Initialize simulation/trajectory state to the configured spawn pose.
     reset_motion_to_recording_start();
 
+    struct capture_stats
+    {
+        double elapsed_ms = -1.0;
+        float mem_delta_mb = -1.0f;
+        float mem_peak_mb = -1.0f;
+        float mem_avg_mb = -1.0f;
+    };
+
+    auto run_capture_for_mode = [&](const std::vector<joystick_record_sample>& samples,
+                                    bool use_lmm,
+                                    std::vector<array1d<vec3>>& output_positions,
+                                    std::vector<array1d<quat>>& output_rotations,
+                                    std::vector<feature_draw_data>& output_feature_data,
+                                    capture_stats& stats) -> bool
+    {
+        // Run & capture MM/LMM generated animation
+        reset_runtime_for_analysis();
+        lmm_enabled = use_lmm;
+        database_playback_enabled = analyze_input_is_database;
+        database_playback_index = 0;
+        joystick_playback_samples = samples;
+        joystick_playback_enabled = !analyze_input_is_database;
+        joystick_playback_index = 0;
+        analysis_capture_bone_positions.clear();
+        analysis_capture_bone_rotations.clear();
+        analysis_capture_mm_feature_data.clear();
+        analysis_capture_lmm_feature_data.clear();
+        analysis_capture_enabled = true;
+        analysis_capture_features_enabled = true; // set this flag to true, so that simulation will be captured
+
+        auto start = std::chrono::high_resolution_clock::now();
+#if defined(_WIN32)
+        float mem_start = get_process_memory_mb();
+        float mem_peak = mem_start;
+        double mem_sum = 0.0;
+        int mem_samples = 0;
+        if (mem_start >= 0.0f)
+        {
+            mem_sum += mem_start;
+            mem_samples++;
+        }
+#endif
+
+        // Simulate MM/LMM for each frames in test
+        const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
+        for (int i = 0; i < max_steps; i++)
+        {
+            if (!analyze_input_is_database && !joystick_playback_enabled) break;
+
+            if (analyze_input_is_database) {
+                int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
+                bool is_clip_start = false;
+                for (int r = 0; r < test_db.nranges(); r++) {
+                    if (test_frame == test_db.range_starts(r)) {
+                        is_clip_start = true;
+                        break;
+                    }
+                }
+                if (is_clip_start) {
+                    teleport_to_test_frame(test_frame);
+                }
+            }
+            
+            // Simulate MM/LMM
+            std::cout << "[debug] Step " << i << " update_func start" << std::endl;
+            update_func();
+            std::cout << "[debug] Step " << i << " update_func end" << std::endl;
+            
+            if (analyze_input_is_database)
+            {
+                database_playback_index++;
+            }
+#if defined(_WIN32)
+            // Capture memory stats
+            float mem_now = get_process_memory_mb();
+            if (mem_now >= 0.0f)
+            {
+                if (mem_now > mem_peak)
+                {
+                    mem_peak = mem_now;
+                }
+                mem_sum += mem_now;
+                mem_samples++;
+            }
+#endif
+        }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        stats.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+#if defined(_WIN32)
+        // Memory delta, peak, & avg
+        float mem_end = get_process_memory_mb();
+        stats.mem_delta_mb = (mem_start >= 0.0f && mem_end >= 0.0f) ? (mem_end - mem_start) : -1.0f;
+        stats.mem_peak_mb = mem_peak;
+        stats.mem_avg_mb = (mem_samples > 0) ? (float)(mem_sum / (double)mem_samples) : -1.0f;
+#endif
+        
+        analysis_capture_enabled = false;
+        analysis_capture_features_enabled = false;
+        database_playback_enabled = false;
+        output_positions = analysis_capture_bone_positions;
+        output_rotations = analysis_capture_bone_rotations;
+        output_feature_data = use_lmm ? analysis_capture_lmm_feature_data : analysis_capture_mm_feature_data;
+        return !output_positions.empty();
+    };
+
+    auto compute_mpjpe = [](const std::vector<array1d<vec3>>& ref_capture,
+                            const std::vector<array1d<vec3>>& test_capture,
+                            int& used_frames,
+                            int& used_joints,
+                            bool root_relative = false) -> double
+    {
+        int n_ref = (int)ref_capture.size();
+        int n_test = (int)test_capture.size();
+        used_frames = n_test;
+        used_joints = 0;
+        if (used_frames <= 0 || n_ref <= 0)
+        {
+            return -1.0;
+        }
+
+        double error_sum = 0.0;
+        long long sample_count = 0;
+
+        for (int f = 0; f < used_frames; f++)
+        {
+            int ref_f = std::min(f, n_ref - 1);
+            int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
+            if (joint_count <= 0)
+            {
+                continue;
+            }
+
+            used_joints = joint_count;
+
+            vec3 ref_root = ref_capture[ref_f](0);
+            vec3 test_root = test_capture[f](0);
+
+            for (int j = 0; j < joint_count; j++)
+            {
+                vec3 p_ref = ref_capture[ref_f](j);
+                vec3 p_test = test_capture[f](j);
+
+                if (root_relative)
+                {
+                    p_ref = p_ref - ref_root;
+                    p_test = p_test - test_root;
+                }
+
+                vec3 d = p_ref - p_test;
+                error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
+                sample_count++;
+            }
+        }
+
+        if (sample_count == 0)
+        {
+            return -1.0;
+        }
+
+        return error_sum / (double)sample_count;
+    };
+
+    auto compute_reference_mpjpe = [&](const std::vector<array1d<vec3>>& reference,
+                                       const std::vector<array1d<vec3>>& capture,
+                                       int& used_frames,
+                                       int& used_joints,
+                                       bool root_relative = false) -> double
+    {
+        return compute_mpjpe(reference, capture, used_frames, used_joints, root_relative);
+    };
+
+    auto render_video_comparison = [&](const char* output_filename,
+                                       int mode,
+                                       const std::vector<array1d<vec3>>& gt_poses,
+                                       const std::vector<array1d<quat>>& gt_rotations,
+                                       const std::vector<array1d<vec3>>& mm_poses,
+                                       const std::vector<array1d<quat>>& mm_rotations,
+                                       const std::vector<array1d<vec3>>& lmm_poses,
+                                       const std::vector<array1d<quat>>& lmm_rotations,
+                                       const std::vector<feature_draw_data>& mm_feature_data,
+                                       const std::vector<feature_draw_data>& lmm_feature_data,
+                                       int num_frames)
+    {
+        if (num_frames <= 0) return;
+
+        char command[1024];
+        snprintf(command, sizeof(command), "ffmpeg -y -f rawvideo -vcodec rawvideo -s %dx%d -pix_fmt rgba -r 60 -i - -c:v libx264 -preset fast -pix_fmt yuv420p \"%s\"", screen_width, screen_height, output_filename);
+        
+        FILE* ffmpeg = _popen(command, "wb");
+        if (!ffmpeg)
+        {
+            std::cout << "Failed to open FFmpeg pipe for: " << output_filename << std::endl;
+            return;
+        }
+
+        RenderTexture2D render_target = LoadRenderTexture(screen_width, screen_height);
+        
+        int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 4 : 3;
+        int part_width = screen_width / parts;
+
+        auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<feature_draw_data>& feature_data, int frame_idx)
+        {
+            Camera3D cam = camera;
+            if (pose.size > 0)
+            {
+                Vector3 root = to_Vector3(pose(0));
+                Vector3 offset = Vector3Subtract(camera.position, camera.target);
+                cam.target = root;
+                cam.position = Vector3Add(root, offset);
+            }
+
+            BeginMode3D(cam);
+            rlViewport(part_idx * part_width, 0, part_width, screen_height);
+            
+            rlMatrixMode(RL_PROJECTION);
+            rlLoadIdentity();
+            float aspect = (float)part_width / (float)screen_height;
+            double top = 0.01 * tan(cam.fovy * 0.5 * DEG2RAD);
+            double right = top * aspect;
+            rlFrustum(-right, right, -top, top, 0.01, 1000.0);
+            rlMatrixMode(RL_MODELVIEW);
+
+            if (has_glb_ground)
+                DrawModel(ground_plane_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+            else
+                DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
+
+            DrawGrid(20, 1.0f);
+
+            if (pose.size > 0 && rot.size > 0)
+            {
+                if (show_stickman)
+                {
+                    draw_stickman(pose, db.bone_parents, ORANGE);
+                }
+                else
+                {
+                    deform_character_mesh(character_mesh, character_data, pose, rot, db.bone_parents);
+                    DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                }
+
+                if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feature_data.size())
+                {
+                    // Draw features during recording video
+                    draw_features(feature_data[frame_idx], pose(0), rot(0));
+                }
+            }
+            EndMode3D();
+
+            rlViewport(0, 0, screen_width, screen_height);
+
+            DrawRectangle(part_idx * part_width + 15, 15, MeasureText(label, 20) + 10, 30, Fade(WHITE, 0.7f));
+            DrawText(label, part_idx * part_width + 20, 20, 20, BLACK);
+        };
+
+        SetTraceLogLevel(LOG_WARNING); // Suppress "Pixel data retrieved successfully" spam
+        for (int i = 0; i < num_frames; i++)
+        {
+            BeginTextureMode(render_target);
+            ClearBackground(RAYWHITE);
+            
+            if (mode == APP_MODE_ANALYZE_BOTH)
+            {
+                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
+                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
+                draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+                draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
+            }
+            else if (mode == APP_MODE_ANALYZE_MM)
+            {
+                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
+                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
+                draw_part(2, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
+            }
+            else if (mode == APP_MODE_ANALYZE_LMM)
+            {
+                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_data, i);
+                draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+                draw_part(2, frozen_pose, frozen_rotation, "Frozen", lmm_feature_data, i);
+            }
+            
+            for (int p = 1; p < parts; p++)
+            {
+                DrawLine(p * part_width, 0, p * part_width, screen_height, DARKGRAY);
+            }
+            
+            EndTextureMode();
+            
+            Image img = LoadImageFromTexture(render_target.texture);
+            ImageFlipVertical(&img);
+            fwrite(img.data, 1, screen_width * screen_height * 4, ffmpeg);
+            UnloadImage(img);
+        }
+        SetTraceLogLevel(LOG_INFO); // Restore logging
+        
+        UnloadRenderTexture(render_target);
+        _pclose(ffmpeg);
+        std::cout << "Analyze: Video playback saved to " << output_filename << std::endl;
+    };
+
 #if defined(PLATFORM_WEB)
     std::function<void()> u{update_func};
     emscripten_set_main_loop_arg(update_callback, &u, 0, 1);
@@ -5022,305 +5327,7 @@ int main(int argc, char** argv)
 #else
         mkdir(analysis_output_folder.c_str(), 0777);
 #endif
-        struct capture_stats
-        {
-            double elapsed_ms = -1.0;
-            float mem_delta_mb = -1.0f;
-            float mem_peak_mb = -1.0f;
-            float mem_avg_mb = -1.0f;
-        };
-
-        auto run_capture_for_mode = [&](const std::vector<joystick_record_sample>& samples,
-                                        bool use_lmm,
-                                        std::vector<array1d<vec3>>& output_positions,
-                                        std::vector<array1d<quat>>& output_rotations,
-                                        std::vector<feature_draw_data>& output_feature_data,
-                                        capture_stats& stats) -> bool
-        {
-            // Run & capture MM/LMM generated animation
-            reset_runtime_for_analysis();
-            lmm_enabled = use_lmm;
-            database_playback_enabled = analyze_input_is_database;
-            database_playback_index = 0;
-            joystick_playback_samples = samples;
-            joystick_playback_enabled = !analyze_input_is_database;
-            joystick_playback_index = 0;
-            analysis_capture_bone_positions.clear();
-            analysis_capture_bone_rotations.clear();
-            analysis_capture_mm_feature_data.clear();
-            analysis_capture_lmm_feature_data.clear();
-            analysis_capture_enabled = true;
-            analysis_capture_features_enabled = true; // set this flag to true, so that simulation will be captured
-
-            auto start = std::chrono::high_resolution_clock::now();
-#if defined(_WIN32)
-            float mem_start = get_process_memory_mb();
-            float mem_peak = mem_start;
-            double mem_sum = 0.0;
-            int mem_samples = 0;
-            if (mem_start >= 0.0f)
-            {
-                mem_sum += mem_start;
-                mem_samples++;
-            }
-#endif
-
-            // Simulate MM/LMM for each frames in test
-            const int max_steps = analyze_input_is_database ? test_db.nframes() : ((int)samples.size() + 8);
-            for (int i = 0; i < max_steps; i++)
-            {
-                if (!analyze_input_is_database && !joystick_playback_enabled) break;
-
-                if (analyze_input_is_database) {
-                    int test_frame = clamp(database_playback_index, 0, test_db.nframes() - 1);
-                    bool is_clip_start = false;
-                    for (int r = 0; r < test_db.nranges(); r++) {
-                        if (test_frame == test_db.range_starts(r)) {
-                            is_clip_start = true;
-                            break;
-                        }
-                    }
-                    if (is_clip_start) {
-                        teleport_to_test_frame(test_frame);
-                    }
-                }
-                
-                // Simulate MM/LMM
-                update_func();
-                
-                if (analyze_input_is_database)
-                {
-                    database_playback_index++;
-                }
-#if defined(_WIN32)
-                // Capture memory stats
-                float mem_now = get_process_memory_mb();
-                if (mem_now >= 0.0f)
-                {
-                    if (mem_now > mem_peak)
-                    {
-                        mem_peak = mem_now;
-                    }
-                    mem_sum += mem_now;
-                    mem_samples++;
-                }
-#endif
-            }
-
-            auto end = std::chrono::high_resolution_clock::now();
-            stats.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
-
-#if defined(_WIN32)
-            // Memory delta, peak, & avg
-            float mem_end = get_process_memory_mb();
-            stats.mem_delta_mb = (mem_start >= 0.0f && mem_end >= 0.0f) ? (mem_end - mem_start) : -1.0f;
-            stats.mem_peak_mb = mem_peak;
-            stats.mem_avg_mb = (mem_samples > 0) ? (float)(mem_sum / (double)mem_samples) : -1.0f;
-#endif
-            
-            analysis_capture_enabled = false;
-            analysis_capture_features_enabled = false;
-            database_playback_enabled = false;
-            output_positions = analysis_capture_bone_positions;
-            output_rotations = analysis_capture_bone_rotations;
-            output_feature_data = use_lmm ? analysis_capture_lmm_feature_data : analysis_capture_mm_feature_data;
-            return !output_positions.empty();
-        };
-
-        auto compute_mpjpe = [](const std::vector<array1d<vec3>>& ref_capture,
-                                const std::vector<array1d<vec3>>& test_capture,
-                                int& used_frames,
-                                int& used_joints,
-                                bool root_relative = false) -> double
-        {
-            int n_ref = (int)ref_capture.size();
-            int n_test = (int)test_capture.size();
-            used_frames = n_test;
-            used_joints = 0;
-            if (used_frames <= 0 || n_ref <= 0)
-            {
-                return -1.0;
-            }
-
-            double error_sum = 0.0;
-            long long sample_count = 0;
-
-            for (int f = 0; f < used_frames; f++)
-            {
-                int ref_f = std::min(f, n_ref - 1);
-                int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
-                if (joint_count <= 0)
-                {
-                    continue;
-                }
-
-                used_joints = joint_count;
-
-                vec3 ref_root = ref_capture[ref_f](0);
-                vec3 test_root = test_capture[f](0);
-
-                for (int j = 0; j < joint_count; j++)
-                {
-                    vec3 p_ref = ref_capture[ref_f](j);
-                    vec3 p_test = test_capture[f](j);
-
-                    if (root_relative)
-                    {
-                        p_ref = p_ref - ref_root;
-                        p_test = p_test - test_root;
-                    }
-
-                    vec3 d = p_ref - p_test;
-                    error_sum += std::sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
-                    sample_count++;
-                }
-            }
-
-            if (sample_count == 0)
-            {
-                return -1.0;
-            }
-
-            return error_sum / (double)sample_count;
-        };
-
-        auto compute_reference_mpjpe = [&](const std::vector<array1d<vec3>>& reference,
-                                           const std::vector<array1d<vec3>>& capture,
-                                           int& used_frames,
-                                           int& used_joints,
-                                           bool root_relative = false) -> double
-        {
-            return compute_mpjpe(reference, capture, used_frames, used_joints, root_relative);
-        };
-
-        auto render_video_comparison = [&](const char* output_filename,
-                                           int mode,
-                                           const std::vector<array1d<vec3>>& gt_poses,
-                                           const std::vector<array1d<quat>>& gt_rotations,
-                                           const std::vector<array1d<vec3>>& mm_poses,
-                                           const std::vector<array1d<quat>>& mm_rotations,
-                                           const std::vector<array1d<vec3>>& lmm_poses,
-                                           const std::vector<array1d<quat>>& lmm_rotations,
-                                           const std::vector<feature_draw_data>& mm_feature_data,
-                                           const std::vector<feature_draw_data>& lmm_feature_data,
-                                           int num_frames)
-        {
-            if (num_frames <= 0) return;
-
-            char command[1024];
-            snprintf(command, sizeof(command), "ffmpeg -y -f rawvideo -vcodec rawvideo -s %dx%d -pix_fmt rgba -r 60 -i - -c:v libx264 -preset fast -pix_fmt yuv420p \"%s\"", screen_width, screen_height, output_filename);
-            
-            FILE* ffmpeg = _popen(command, "wb");
-            if (!ffmpeg)
-            {
-                std::cout << "Failed to open FFmpeg pipe for: " << output_filename << std::endl;
-                return;
-            }
-
-            RenderTexture2D render_target = LoadRenderTexture(screen_width, screen_height);
-            
-            int parts = (mode == APP_MODE_ANALYZE_BOTH) ? 4 : 3;
-            int part_width = screen_width / parts;
-
-            auto draw_part = [&](int part_idx, const array1d<vec3>& pose, const array1d<quat>& rot, const char* label, const std::vector<feature_draw_data>& feature_data, int frame_idx)
-            {
-                Camera3D cam = camera;
-                if (pose.size > 0)
-                {
-                    Vector3 root = to_Vector3(pose(0));
-                    Vector3 offset = Vector3Subtract(camera.position, camera.target);
-                    cam.target = root;
-                    cam.position = Vector3Add(root, offset);
-                }
-
-                BeginMode3D(cam);
-                rlViewport(part_idx * part_width, 0, part_width, screen_height);
-                
-                rlMatrixMode(RL_PROJECTION);
-                rlLoadIdentity();
-                float aspect = (float)part_width / (float)screen_height;
-                double top = 0.01 * tan(cam.fovy * 0.5 * DEG2RAD);
-                double right = top * aspect;
-                rlFrustum(-right, right, -top, top, 0.01, 1000.0);
-                rlMatrixMode(RL_MODELVIEW);
-
-                if (has_glb_ground)
-                    DrawModel(ground_plane_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-                else
-                    DrawModel(ground_plane_model, (Vector3){0.0f, -0.01f, 0.0f}, 1.0f, WHITE);
-
-                DrawGrid(20, 1.0f);
-
-                if (pose.size > 0 && rot.size > 0)
-                {
-                    if (show_stickman)
-                    {
-                        draw_stickman(pose, db.bone_parents, ORANGE);
-                    }
-                    else
-                    {
-                        deform_character_mesh(character_mesh, character_data, pose, rot, db.bone_parents);
-                        DrawModel(character_model, (Vector3){0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-                    }
-
-                    if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feature_data.size())
-                    {
-                        // Draw features during recording video
-                        draw_features(feature_data[frame_idx], pose(0), rot(0));
-                    }
-                }
-                EndMode3D();
-
-                rlViewport(0, 0, screen_width, screen_height);
-
-                DrawRectangle(part_idx * part_width + 15, 15, MeasureText(label, 20) + 10, 30, Fade(WHITE, 0.7f));
-                DrawText(label, part_idx * part_width + 20, 20, 20, BLACK);
-            };
-
-            SetTraceLogLevel(LOG_WARNING); // Suppress "Pixel data retrieved successfully" spam
-            for (int i = 0; i < num_frames; i++)
-            {
-                BeginTextureMode(render_target);
-                ClearBackground(RAYWHITE);
-                
-                if (mode == APP_MODE_ANALYZE_BOTH)
-                {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
-                    draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
-                    draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
-                }
-                else if (mode == APP_MODE_ANALYZE_MM)
-                {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
-                    draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
-                    draw_part(2, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
-                }
-                else if (mode == APP_MODE_ANALYZE_LMM)
-                {
-                    draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_data, i);
-                    draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
-                    draw_part(2, frozen_pose, frozen_rotation, "Frozen", lmm_feature_data, i);
-                }
-                
-                for (int p = 1; p < parts; p++)
-                {
-                    DrawLine(p * part_width, 0, p * part_width, screen_height, DARKGRAY);
-                }
-                
-                EndTextureMode();
-                
-                Image img = LoadImageFromTexture(render_target.texture);
-                ImageFlipVertical(&img);
-                fwrite(img.data, 1, screen_width * screen_height * 4, ffmpeg);
-                UnloadImage(img);
-            }
-            SetTraceLogLevel(LOG_INFO); // Restore logging
-            
-            UnloadRenderTexture(render_target);
-            _pclose(ffmpeg);
-            std::cout << "Analyze: Video playback saved to " << output_filename << std::endl;
-        };
+        // Helpers relocated to outer scope
 
         if (db.nbones() == 0)
         {
@@ -5978,7 +5985,42 @@ int main(int argc, char** argv)
                 double lmm_mean = -1, lmm_median = -1, lmm_std = -1, lmm_min = -1, lmm_max = -1;
                 double frozen_mean = -1, frozen_median = -1, frozen_std = -1, frozen_min = -1, frozen_max = -1;
                 double ade_mm = -1, fde_mm = -1, ade_lmm = -1, fde_lmm = -1;
-                std::string csv_path_mm, csv_path_lmm;
+                std::string csv_path_mm;
+
+                double mm_world_mpjpe = -1.0;
+                double mm_local_mpjpe = -1.0;
+                double mm_time_ms = -1.0;
+                double mm_mem_avg = -1.0;
+                double mm_mem_peak = -1.0;
+
+                double lmm_world_mpjpe = -1.0;
+                double lmm_local_mpjpe = -1.0;
+                double lmm_mm_diff_mpjpe = -1.0;
+                double lmm_time_ms = -1.0;
+                double lmm_mem_avg = -1.0;
+                double lmm_mem_peak = -1.0;
+
+                double frozen_world_mpjpe = -1.0;
+                double frozen_local_mpjpe = -1.0;
+
+                size_t feature_total_bytes = 0;
+                size_t feature_non_history_bytes = 0;
+                size_t feature_history_bytes = 0;
+                size_t anim_database_total_bytes = 0;
+                size_t anim_bone_positions_bytes = 0;
+                size_t anim_bone_velocities_bytes = 0;
+                size_t anim_bone_rotations_bytes = 0;
+                size_t anim_bone_angular_velocities_bytes = 0;
+                size_t anim_contact_states_bytes = 0;
+                size_t anim_future_toe_positions_bytes = 0;
+                size_t additional_range_total_bytes = 0;
+                size_t mm_memory_total_with_additional_bytes = 0;
+                size_t mm_memory_total_without_additional_bytes = 0;
+
+                size_t lmm_network_total_bytes = 0;
+                size_t lmm_decompressor_bytes = 0;
+                size_t lmm_stepper_bytes = 0;
+                size_t lmm_projector_bytes = 0;
             };
             std::vector<variant_stats> all_stats;
 
@@ -6001,29 +6043,79 @@ int main(int argc, char** argv)
                 const char* vsuffix = variants[vi];
                 std::cout << "\n[big-small] ===== Variant: " << vsuffix << " =====" << std::endl;
 
-                database train_var_db, test_var_db;
-                if (!prepare_test_db_for_variant(
-                    train_var_db, test_var_db,
-                    train_db_paths[vi], train_feat_paths[vi], vsuffix))
+                // Load active database & test database directly into the main variables so simulation uses them
+                std::cout << "[big-small] Loading active database: " << train_db_paths[vi] << std::endl;
+                database_load(db, train_db_paths[vi]);
+                
+                bool rebuild = force_rebuild_features || should_rebuild_features(train_db_paths[vi], train_feat_paths[vi]);
+                if (!rebuild)
                 {
-                    std::cout << "[big-small] Skipping variant " << vsuffix << " due to error." << std::endl;
-                    continue;
+                    database_load_matching_features(db, train_feat_paths[vi]);
+                    if (db.nfeatures() != expected_feature_count) rebuild = true;
+                }
+                if (rebuild)
+                {
+                    std::cout << "[big-small] Building features for " << vsuffix << " db..." << std::endl;
+                    database_build_matching_features(
+                        db,
+                        feature_weight_foot_position, feature_weight_foot_velocity,
+                        feature_weight_hip_velocity,
+                        feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                        feature_weight_terrain_heights,
+                        feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                        feature_weight_cartwheel,
+                        feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                        feature_weight_history_hip_velocity,
+                        feature_weight_history_trajectory_positions,
+                        feature_weight_history_trajectory_directions,
+                        feature_weight_history_terrain_heights);
+                    database_save_matching_features(db, train_feat_paths[vi], false);
+                }
+                database_build_bounds(db);
+
+                std::cout << "[big-small] Loading active test database: " << analyze_input_path << std::endl;
+                database_load(test_db, analyze_input_path);
+                
+                std::string tfp = std::string("./resources/bin/database_test_features_") + vsuffix + ".bin";
+                bool rebuild_test = force_rebuild_features || should_rebuild_features(analyze_input_path, tfp.c_str());
+                if (!rebuild_test)
+                {
+                    database_load_matching_features(test_db, tfp.c_str());
+                    if (test_db.nfeatures() != expected_feature_count) rebuild_test = true;
+                }
+                if (rebuild_test)
+                {
+                    std::cout << "[big-small] Building features for test db normalized against " << vsuffix << "..." << std::endl;
+                    database_build_matching_features(
+                        test_db,
+                        feature_weight_foot_position, feature_weight_foot_velocity,
+                        feature_weight_hip_velocity,
+                        feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                        feature_weight_terrain_heights,
+                        feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                        feature_weight_cartwheel,
+                        feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                        feature_weight_history_hip_velocity,
+                        feature_weight_history_trajectory_positions,
+                        feature_weight_history_trajectory_directions,
+                        feature_weight_history_terrain_heights);
+                    database_apply_reference_normalization(test_db, db);
+                    database_save_matching_features(test_db, tfp.c_str(), false);
                 }
 
-                // Load LMM networks for this variant
+                // Load LMM networks for this variant into active nnet variables
                 std::string dec_path = std::string("./resources/model/decompressor") + net_suffixes[vi] + ".bin";
                 std::string stp_path = std::string("./resources/model/stepper")      + net_suffixes[vi] + ".bin";
                 std::string prj_path = std::string("./resources/model/projector")    + net_suffixes[vi] + ".bin";
-                nnet var_decompressor, var_stepper, var_projector;
                 bool dec_exists = FileExists(dec_path.c_str());
                 bool stp_exists = FileExists(stp_path.c_str());
                 bool prj_exists = FileExists(prj_path.c_str());
                 bool var_nets_ok = dec_exists && stp_exists && prj_exists;
                 if (var_nets_ok)
                 {
-                    nnet_load(var_decompressor, dec_path.c_str());
-                    nnet_load(var_stepper,      stp_path.c_str());
-                    nnet_load(var_projector,    prj_path.c_str());
+                    nnet_load(decompressor, dec_path.c_str());
+                    nnet_load(stepper,      stp_path.c_str());
+                    nnet_load(projector,    prj_path.c_str());
                     std::cout << "[big-small] LMM networks loaded for " << vsuffix << std::endl;
                 }
                 else
@@ -6036,94 +6128,105 @@ int main(int argc, char** argv)
                 }
 
                 // Precompute reference poses for this test db
-                std::vector<array1d<vec3>> ref_poses_var;
-                std::vector<array1d<quat>> ref_rots_var;
-                ref_poses_var.reserve(test_var_db.nframes());
-                ref_rots_var.reserve(test_var_db.nframes());
-                array1d<vec3> frozen_var(test_var_db.nbones());
-                array1d<quat> frozen_rot_var(test_var_db.nbones());
-                for (int i = 0; i < test_var_db.nframes(); i++)
+                database_test_reference_poses.clear();
+                database_test_reference_rotations.clear();
+                database_test_reference_poses.reserve(test_db.nframes());
+                database_test_reference_rotations.reserve(test_db.nframes());
+                frozen_pose = array1d<vec3>(test_db.nbones());
+                frozen_rotation = array1d<quat>(test_db.nbones());
+                for (int i = 0; i < test_db.nframes(); i++)
                 {
-                    array1d<vec3> pose(test_var_db.nbones());
-                    array1d<quat> rot(test_var_db.nbones());
+                    array1d<vec3> pose(test_db.nbones());
+                    array1d<quat> rot(test_db.nbones());
                     forward_kinematics_full(pose, rot,
-                        test_var_db.bone_positions(i),
-                        test_var_db.bone_rotations(i),
-                        test_var_db.bone_parents);
-                    ref_poses_var.push_back(pose);
-                    ref_rots_var.push_back(rot);
-                    if (i == 0) { frozen_var = pose; frozen_rot_var = rot; }
+                        test_db.bone_positions(i),
+                        test_db.bone_rotations(i),
+                        test_db.bone_parents);
+                    database_test_reference_poses.push_back(pose);
+                    database_test_reference_rotations.push_back(rot);
+                    if (i == 0) { frozen_pose = pose; frozen_rotation = rot; }
                 }
 
-                // Run MM analysis
-                std::vector<array1d<vec3>> mm_cap_var, lmm_cap_var;
-                std::vector<array1d<quat>> mm_cap_rot_var, lmm_cap_rot_var;
+                // Run MM and LMM simulation captures
+                std::vector<array1d<vec3>> mm_capture;
+                std::vector<array1d<quat>> mm_capture_rotations;
+                std::vector<feature_draw_data> mm_feature_data;
+                std::vector<array1d<vec3>> lmm_capture;
+                std::vector<array1d<quat>> lmm_capture_rotations;
+                std::vector<feature_draw_data> lmm_feature_data;
+                capture_stats mm_stats;
+                capture_stats lmm_stats;
 
-                auto run_db_playback_var = [&](bool use_lmm,
-                    std::vector<array1d<vec3>>& cap_pos,
-                    std::vector<array1d<quat>>& cap_rot)
-                {
-                    cap_pos.clear(); cap_rot.clear();
-                    const int TAIL_SKIP = 60;
-                    for (int r = 0; r < test_var_db.nranges(); r++)
-                    {
-                        int start = test_var_db.range_starts(r);
-                        int stop  = test_var_db.range_stops(r);
-                        int end_frame = std::max(start, stop - TAIL_SKIP);
-                        for (int fi = start; fi < end_frame; fi++)
-                        {
-                            cap_pos.push_back(ref_poses_var[fi]);
-                            cap_rot.push_back(ref_rots_var[fi]);
-                        }
-                    }
-                };
-                // Use simplified direct capture (same frame-by-frame reference) for big-small compare
-                run_db_playback_var(false, mm_cap_var,  mm_cap_rot_var);
+                std::vector<joystick_record_sample> samples; // Empty for database simulation
+                std::cout << "[big-small] Simulating Motion Matching capture..." << std::endl;
+                bool mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_feature_data, mm_stats);
+                
+                bool lmm_ok = false;
                 if (var_nets_ok)
-                    run_db_playback_var(true,  lmm_cap_var, lmm_cap_rot_var);
+                {
+                    std::cout << "[big-small] Simulating Learned Motion Matching capture..." << std::endl;
+                    lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_feature_data, lmm_stats);
+                }
 
-                // Compute per-frame local MPJPE
-                std::vector<double> mm_local  = compute_per_frame_mpjpe(ref_poses_var, mm_cap_var,  true);
-                std::vector<double> lmm_local = var_nets_ok ?
-                    compute_per_frame_mpjpe(ref_poses_var, lmm_cap_var, true) :
+                // Compute Core Benchmark Metrics
+                variant_stats vs;
+                vs.label = vsuffix;
+
+                int used_frames = 0, used_joints = 0;
+                if (mm_ok)
+                {
+                    vs.mm_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, false);
+                    vs.mm_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, true);
+                    vs.mm_time_ms = mm_stats.elapsed_ms;
+                    vs.mm_mem_avg = mm_stats.mem_avg_mb;
+                    vs.mm_mem_peak = mm_stats.mem_peak_mb;
+                }
+                if (lmm_ok)
+                {
+                    vs.lmm_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, false);
+                    vs.lmm_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, true);
+                    vs.lmm_mm_diff_mpjpe = compute_mpjpe(mm_capture, lmm_capture, used_frames, used_joints, false);
+                    vs.lmm_time_ms = lmm_stats.elapsed_ms;
+                    vs.lmm_mem_avg = lmm_stats.mem_avg_mb;
+                    vs.lmm_mem_peak = lmm_stats.mem_peak_mb;
+                }
+                
+                std::vector<array1d<vec3>> frozen_repeated;
+                for (int i = 0; i < (int)database_test_reference_poses.size(); i++) frozen_repeated.push_back(frozen_pose);
+                vs.frozen_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, false);
+                vs.frozen_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, true);
+
+                // Render video comparison side-by-side if playback_video is true
+                if (playback_video)
+                {
+                    std::string video_path = out_dir + "/video_" + vsuffix + ".mp4";
+                    std::cout << "[big-small] Rendering side-by-side comparative playback to: " << video_path << std::endl;
+                    render_video_comparison(
+                        video_path.c_str(),
+                        APP_MODE_ANALYZE_BOTH,
+                        database_test_reference_poses,
+                        database_test_reference_rotations,
+                        mm_capture,
+                        mm_capture_rotations,
+                        lmm_capture,
+                        lmm_capture_rotations,
+                        mm_feature_data,
+                        lmm_feature_data,
+                        used_frames
+                    );
+                }
+
+                // Compute per-frame local MPJPE for plotting
+                std::vector<double> mm_local  = compute_per_frame_mpjpe(database_test_reference_poses, mm_capture,  true);
+                std::vector<double> lmm_local = lmm_ok ?
+                    compute_per_frame_mpjpe(database_test_reference_poses, lmm_capture, true) :
                     std::vector<double>{};
-                std::vector<array1d<vec3>> frozen_rep;
-                for (int i = 0; i < (int)ref_poses_var.size(); i++) frozen_rep.push_back(frozen_var);
-                std::vector<double> frz_local = compute_per_frame_mpjpe(ref_poses_var, frozen_rep, true);
+                std::vector<double> frz_local = compute_per_frame_mpjpe(database_test_reference_poses, frozen_repeated, true);
 
                 // Collect for global y-axis
                 for (double v : mm_local)  if (v >= 0) global_mpjpe_vals.push_back(v);
                 for (double v : lmm_local) if (v >= 0) global_mpjpe_vals.push_back(v);
                 for (double v : frz_local) if (v >= 0) global_mpjpe_vals.push_back(v);
-
-                // Write CSV for this variant
-                variant_stats vs;
-                vs.label = vsuffix;
-
-                auto write_var_csv = [&](const std::string& label_suffix,
-                    const std::vector<double>& mm_v,
-                    const std::vector<double>& lmm_v,
-                    const std::vector<double>& frz_v) -> std::string
-                {
-                    std::string cp = out_dir + "/" + label_suffix + "_mpjpe.csv";
-                    FILE* f = fopen(cp.c_str(), "w");
-                    if (!f) return "";
-                    fprintf(f, "frame,time_seconds,mm_local,lmm_local,frozen_local,mm_lmm_local_diff\n");
-                    int nf = (int)std::max({mm_v.size(), lmm_v.size(), frz_v.size()});
-                    for (int i = 0; i < nf; i++)
-                    {
-                        double t  = i / 60.0;
-                        double ml = i < (int)mm_v.size()  ? mm_v[i]  : -1.0;
-                        double ll = i < (int)lmm_v.size() ? lmm_v[i] : -1.0;
-                        double fl = i < (int)frz_v.size() ? frz_v[i] : -1.0;
-                        double df = (ml >= 0 && ll >= 0) ? fabs(ml - ll) : -1.0;
-                        fprintf(f, "%d,%.6f,%.6e,%.6e,%.6e,%.6e\n", i, t, ml, ll, fl, df);
-                    }
-                    fclose(f);
-                    return cp;
-                };
-
-                vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
 
                 // Compute stats helper
                 auto compute_stats = [](const std::vector<double>& v,
@@ -6146,6 +6249,180 @@ int main(int argc, char** argv)
                 compute_stats(mm_local,  vs.mm_mean,     vs.mm_median,     vs.mm_std,     vs.mm_min,     vs.mm_max);
                 compute_stats(lmm_local, vs.lmm_mean,    vs.lmm_median,    vs.lmm_std,    vs.lmm_min,    vs.lmm_max);
                 compute_stats(frz_local, vs.frozen_mean,  vs.frozen_median,  vs.frozen_std,  vs.frozen_min,  vs.frozen_max);
+
+                // Write per-frame local MPJPE CSV for Python plotting
+                auto write_var_csv = [&](const std::string& label_suffix,
+                    const std::vector<double>& mm_v,
+                    const std::vector<double>& lmm_v,
+                    const std::vector<double>& frz_v) -> std::string
+                {
+                    std::string cp = out_dir + "/" + label_suffix + "_mpjpe.csv";
+                    FILE* f = fopen(cp.c_str(), "w");
+                    if (!f) return "";
+                    fprintf(f, "frame,time_seconds,mm_local,lmm_local,frozen_local,mm_lmm_local_diff\n");
+                    int nf = (int)std::max({mm_v.size(), lmm_v.size(), frz_v.size()});
+                    for (int i = 0; i < nf; i++)
+                    {
+                        double t  = i / 60.0;
+                        double ml = i < (int)mm_v.size()  ? mm_v[i]  : -1.0;
+                        double ll = i < (int)lmm_v.size() ? lmm_v[i] : -1.0;
+                        double fl = i < (int)frz_v.size() ? frz_v[i] : -1.0;
+                        double df = (ml >= 0 && ll >= 0) ? fabs(ml - ll) : -1.0;
+                        fprintf(f, "%d,%.6f,%.6e,%.6e,%.6e,%.6e\n", i, t, ml, ll, fl, df);
+                    }
+                    fclose(f);
+                    return cp;
+                };
+                vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
+
+                // Export walkpath CSV and run Python walkpath plotting script
+                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
+                FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
+                if (walkpath_csvf)
+                {
+                    std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
+                    if (mm_ok) header += ",mm_x,mm_z,mm_yaw";
+                    if (lmm_ok) header += ",lmm_x,lmm_z,lmm_yaw";
+                    if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
+                    fprintf(walkpath_csvf, "%s\n", header.c_str());
+
+                    int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                    
+                    auto extract_yaw = [](quat q) -> float {
+                        vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
+                        return atan2f(fwd.x, fwd.z);
+                    };
+
+                    for (int f = 0; f < nframes; f++)
+                    {
+                        int clip_id = -1;
+                        for (int r = 0; r < test_db.nranges(); r++) {
+                            if (f >= test_db.range_starts(r) && f < test_db.range_stops(r)) {
+                                clip_id = r;
+                                break;
+                            }
+                        }
+                        if (clip_id == -1 && test_db.nranges() > 0) {
+                            clip_id = test_db.nranges() - 1;
+                        }
+                        
+                        fprintf(walkpath_csvf, "%d,%d", f, clip_id);
+                        
+                        if (f < (int)database_test_reference_poses.size()) {
+                            vec3 pos = database_test_reference_poses[f](0);
+                            float yaw = extract_yaw(database_test_reference_rotations[f](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        } else {
+                            fprintf(walkpath_csvf, ",0.0,0.0,0.0");
+                        }
+                        
+                        if (mm_ok) {
+                            if (f < (int)mm_capture.size()) {
+                                vec3 pos = mm_capture[f](0);
+                                float yaw = extract_yaw(mm_capture_rotations[f](0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            } else {
+                                vec3 pos = mm_capture.back()(0);
+                                float yaw = extract_yaw(mm_capture_rotations.back()(0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            }
+                        }
+
+                        if (lmm_ok) {
+                            if (f < (int)lmm_capture.size()) {
+                                vec3 pos = lmm_capture[f](0);
+                                float yaw = extract_yaw(lmm_capture_rotations[f](0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            } else {
+                                vec3 pos = lmm_capture.back()(0);
+                                float yaw = extract_yaw(lmm_capture_rotations.back()(0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            }
+                        }
+
+                        if (frozen_pose.size > 0) {
+                            vec3 pos = frozen_pose(0);
+                            float yaw = extract_yaw(database_test_reference_rotations[0](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        }
+                        fprintf(walkpath_csvf, "\n");
+                    }
+                    fclose(walkpath_csvf);
+
+                    std::cout << "[big-small] Running walkpath analysis plotting script..." << std::endl;
+                    std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
+                    system(plot_walkpath_cmd.c_str());
+
+                    // Rename generated walkpath files for this variant
+                    auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
+                        std::string src = out_dir + "/walkpath/" + basename + ext;
+                        std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                        if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                    };
+                    rename_walkpath_file("walkpath", ".png");
+                    rename_walkpath_file("rte_histogram", ".png");
+                    rename_walkpath_file("rre_deg_histogram", ".png");
+                    rename_walkpath_file("are_full_deg_histogram", ".png");
+                    rename_walkpath_file("are_1s_deg_histogram", ".png");
+                    rename_walkpath_file("are_2s_deg_histogram", ".png");
+                    rename_walkpath_file("are_5s_deg_histogram", ".png");
+                    rename_walkpath_file("ade_full_m_histogram", ".png");
+                    rename_walkpath_file("ade_1s_m_histogram", ".png");
+                    rename_walkpath_file("ade_2s_m_histogram", ".png");
+                    rename_walkpath_file("ade_5s_m_histogram", ".png");
+                    rename_walkpath_file("walkpath_report", ".md");
+                }
+
+                // Compute Memory Footprint Breakdown
+                const int feature_cols_total = db.features.cols;
+                const int feature_rows_total = db.features.rows;
+                const int history_feature_cols = std::max(0, std::min((int)MM_HISTORY_FEATURE_COUNT, feature_cols_total - (int)MM_HISTORY_FEATURE_START));
+                const int non_history_feature_cols = std::max(0, feature_cols_total - history_feature_cols);
+
+                vs.feature_total_bytes = (size_t)feature_rows_total * (size_t)feature_cols_total * sizeof(float);
+                vs.feature_non_history_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
+                vs.feature_history_bytes = (size_t)feature_rows_total * (size_t)history_feature_cols * sizeof(float);
+
+                vs.anim_bone_positions_bytes = (size_t)db.bone_positions.rows * (size_t)db.bone_positions.cols * sizeof(vec3);
+                vs.anim_bone_velocities_bytes = (size_t)db.bone_velocities.rows * (size_t)db.bone_velocities.cols * sizeof(vec3);
+                vs.anim_bone_rotations_bytes = (size_t)db.bone_rotations.rows * (size_t)db.bone_rotations.cols * sizeof(quat);
+                vs.anim_bone_angular_velocities_bytes = (size_t)db.bone_angular_velocities.rows * (size_t)db.bone_angular_velocities.cols * sizeof(vec3);
+                vs.anim_contact_states_bytes = (size_t)db.contact_states.rows * (size_t)db.contact_states.cols * sizeof(bool);
+                vs.anim_future_toe_positions_bytes = (size_t)db.future_toe_positions.rows * (size_t)db.future_toe_positions.cols * sizeof(float);
+                vs.anim_database_total_bytes =
+                    vs.anim_bone_positions_bytes +
+                    vs.anim_bone_velocities_bytes +
+                    vs.anim_bone_rotations_bytes +
+                    vs.anim_bone_angular_velocities_bytes +
+                    vs.anim_contact_states_bytes +
+                    vs.anim_future_toe_positions_bytes;
+
+                vs.additional_range_total_bytes = (size_t)db.range_starts.size * sizeof(int) + (size_t)db.range_stops.size * sizeof(int);
+
+                vs.mm_memory_total_without_additional_bytes = vs.feature_total_bytes + vs.anim_database_total_bytes;
+                vs.mm_memory_total_with_additional_bytes = vs.mm_memory_total_without_additional_bytes + vs.additional_range_total_bytes;
+
+                auto nnet_total_bytes = [](const nnet& nn) -> size_t
+                {
+                    size_t total = 0;
+                    total += (size_t)nn.input_mean.size * sizeof(float);
+                    total += (size_t)nn.input_std.size * sizeof(float);
+                    total += (size_t)nn.output_mean.size * sizeof(float);
+                    total += (size_t)nn.output_std.size * sizeof(float);
+                    for (const auto& w : nn.weights)
+                        total += (size_t)w.rows * (size_t)w.cols * sizeof(float);
+                    for (const auto& b : nn.biases)
+                        total += (size_t)b.size * sizeof(float);
+                    return total;
+                };
+
+                if (var_nets_ok)
+                {
+                    vs.lmm_decompressor_bytes = nnet_total_bytes(decompressor);
+                    vs.lmm_stepper_bytes = nnet_total_bytes(stepper);
+                    vs.lmm_projector_bytes = nnet_total_bytes(projector);
+                    vs.lmm_network_total_bytes = vs.lmm_decompressor_bytes + vs.lmm_stepper_bytes + vs.lmm_projector_bytes;
+                }
 
                 all_stats.push_back(vs);
             } // end variant loop
@@ -6186,17 +6463,24 @@ int main(int argc, char** argv)
             FILE* rep = fopen(report_path.c_str(), "w");
             if (rep)
             {
-                fprintf(rep, "# Big vs Small Database Comparison\n\n");
-                fprintf(rep, "Generated by `--analyze-both-big-small` mode.\n\n");
+                fprintf(rep, "# Big vs Small Database Comparison Report\n\n");
+                fprintf(rep, "Generated by `--analyze-both-big-small` mode.\n");
+                fprintf(rep, "Test Database: %s\n\n", analyze_input_path);
+                
                 fprintf(rep, "**Shared y-axis max:** %.6f m\n\n", global_ymax);
-                fprintf(rep, "## MPJPE Local Statistics (m)\n\n");
-                fprintf(rep, "| Metric | MM-big | LMM-big | Frozen-big | MM-small | LMM-small | Frozen-small |\n");
-                fprintf(rep, "|:-------|-------:|--------:|-----------:|---------:|----------:|-------------:|\n");
-
+                
                 auto fmtd = [](double v) -> std::string {
                     if (v < 0) return "N/A";
                     char buf[32]; snprintf(buf, sizeof(buf), "%.6f", v);
                     return buf;
+                };
+                auto fmt_sci = [](double v) -> std::string {
+                    if (v < 0) return "N/A";
+                    char buf[32]; snprintf(buf, sizeof(buf), "%.6e", v);
+                    return buf;
+                };
+                auto bytes_to_mb = [](size_t bytes) -> double {
+                    return (double)bytes / (1024.0 * 1024.0);
                 };
 
                 auto get_vs = [&](const std::string& lbl) -> const variant_stats* {
@@ -6208,6 +6492,12 @@ int main(int argc, char** argv)
 
                 #define VB(x) (vb ? fmtd(vb->x).c_str() : "N/A")
                 #define VS(x) (vs ? fmtd(vs->x).c_str() : "N/A")
+                #define VBSCI(x) (vb ? fmt_sci(vb->x).c_str() : "N/A")
+                #define VSSCI(x) (vs ? fmt_sci(vs->x).c_str() : "N/A")
+
+                fprintf(rep, "## MPJPE Local Statistics (m)\n\n");
+                fprintf(rep, "| Metric | MM-big | LMM-big | Frozen-big | MM-small | LMM-small | Frozen-small |\n");
+                fprintf(rep, "|:-------|-------:|--------:|-----------:|---------:|----------:|-------------:|\n");
                 fprintf(rep, "| Mean   | %s | %s | %s | %s | %s | %s |\n",
                     VB(mm_mean), VB(lmm_mean), VB(frozen_mean),
                     VS(mm_mean), VS(lmm_mean), VS(frozen_mean));
@@ -6220,12 +6510,87 @@ int main(int argc, char** argv)
                 fprintf(rep, "| Min    | %s | %s | %s | %s | %s | %s |\n",
                     VB(mm_min), VB(lmm_min), VB(frozen_min),
                     VS(mm_min), VS(lmm_min), VS(frozen_min));
-                fprintf(rep, "| Max    | %s | %s | %s | %s | %s | %s |\n",
+                fprintf(rep, "| Max    | %s | %s | %s | %s | %s | %s |\n\n",
                     VB(mm_max), VB(lmm_max), VB(frozen_max),
                     VS(mm_max), VS(lmm_max), VS(frozen_max));
+
+                fprintf(rep, "## Core Benchmark Metrics Comparison\n\n");
+                fprintf(rep, "| Metric | MM-big | LMM-big | Frozen-big | MM-small | LMM-small | Frozen-small |\n");
+                fprintf(rep, "|:-------|-------:|--------:|-----------:|---------:|----------:|-------------:|\n");
+                fprintf(rep, "| MPJPE (local) | %s | %s | %s | %s | %s | %s |\n",
+                    VBSCI(mm_local_mpjpe), VBSCI(lmm_local_mpjpe), VBSCI(frozen_local_mpjpe),
+                    VSSCI(mm_local_mpjpe), VSSCI(lmm_local_mpjpe), VSSCI(frozen_local_mpjpe));
+                fprintf(rep, "| MPJPE (world) | %s | %s | %s | %s | %s | %s |\n",
+                    VBSCI(mm_world_mpjpe), VBSCI(lmm_world_mpjpe), VBSCI(frozen_world_mpjpe),
+                    VSSCI(mm_world_mpjpe), VSSCI(lmm_world_mpjpe), VSSCI(frozen_world_mpjpe));
+                fprintf(rep, "| Time (ms)     | %s | %s | N/A | %s | %s | N/A |\n",
+                    VB(mm_time_ms), VB(lmm_time_ms),
+                    VS(mm_time_ms), VS(lmm_time_ms));
+                fprintf(rep, "| Avg Memory(MB)| %s | %s | N/A | %s | %s | N/A |\n",
+                    VB(mm_mem_avg), VB(lmm_mem_avg),
+                    VS(mm_mem_avg), VS(lmm_mem_avg));
+                fprintf(rep, "| Peak Memory(MB)|%s | %s | N/A | %s | %s | N/A |\n\n",
+                    VB(mm_mem_peak), VB(lmm_mem_peak),
+                    VS(mm_mem_peak), VS(lmm_mem_peak));
+
+                fprintf(rep, "## Memory Component Breakdown (MB)\n\n");
+                if (vb)
+                {
+                    fprintf(rep, "### Big Database Memory Breakdown:\n");
+                    fprintf(rep, "- **MM Total Memory:** %.3f MB (with range metadata) / %.3f MB (without range metadata)\n",
+                        bytes_to_mb(vb->mm_memory_total_with_additional_bytes), bytes_to_mb(vb->mm_memory_total_without_additional_bytes));
+                    fprintf(rep, "  - Features (db.features): %.3f MB\n", bytes_to_mb(vb->feature_total_bytes));
+                    fprintf(rep, "    - Non-History Features: %.3f MB\n", bytes_to_mb(vb->feature_non_history_bytes));
+                    fprintf(rep, "    - History Features: %.3f MB\n", bytes_to_mb(vb->feature_history_bytes));
+                    fprintf(rep, "  - Motion Database: %.3f MB\n", bytes_to_mb(vb->anim_database_total_bytes));
+                    fprintf(rep, "    - Bone Positions: %.3f MB\n", bytes_to_mb(vb->anim_bone_positions_bytes));
+                    fprintf(rep, "    - Bone Velocities: %.3f MB\n", bytes_to_mb(vb->anim_bone_velocities_bytes));
+                    fprintf(rep, "    - Bone Rotations: %.3f MB\n", bytes_to_mb(vb->anim_bone_rotations_bytes));
+                    fprintf(rep, "    - Bone Angular Velocities: %.3f MB\n", bytes_to_mb(vb->anim_bone_angular_velocities_bytes));
+                    fprintf(rep, "    - Contact States: %.3f MB\n", bytes_to_mb(vb->anim_contact_states_bytes));
+                    fprintf(rep, "    - Future Toe Positions: %.3f MB\n", bytes_to_mb(vb->anim_future_toe_positions_bytes));
+                    fprintf(rep, "  - Range Metadata: %.3f MB\n", bytes_to_mb(vb->additional_range_total_bytes));
+                    if (vb->lmm_network_total_bytes > 0)
+                    {
+                        fprintf(rep, "- **LMM Total Network Memory:** %.3f MB\n", bytes_to_mb(vb->lmm_network_total_bytes));
+                        fprintf(rep, "  - Decompressor Network: %.3f MB\n", bytes_to_mb(vb->lmm_decompressor_bytes));
+                        fprintf(rep, "  - Stepper Network: %.3f MB\n", bytes_to_mb(vb->lmm_stepper_bytes));
+                        fprintf(rep, "  - Projector Network: %.3f MB\n", bytes_to_mb(vb->lmm_projector_bytes));
+                    }
+                    fprintf(rep, "\n");
+                }
+                if (vs)
+                {
+                    fprintf(rep, "### Small Database Memory Breakdown:\n");
+                    fprintf(rep, "- **MM Total Memory:** %.3f MB (with range metadata) / %.3f MB (without range metadata)\n",
+                        bytes_to_mb(vs->mm_memory_total_with_additional_bytes), bytes_to_mb(vs->mm_memory_total_without_additional_bytes));
+                    fprintf(rep, "  - Features (db.features): %.3f MB\n", bytes_to_mb(vs->feature_total_bytes));
+                    fprintf(rep, "    - Non-History Features: %.3f MB\n", bytes_to_mb(vs->feature_non_history_bytes));
+                    fprintf(rep, "    - History Features: %.3f MB\n", bytes_to_mb(vs->feature_history_bytes));
+                    fprintf(rep, "  - Motion Database: %.3f MB\n", bytes_to_mb(vs->anim_database_total_bytes));
+                    fprintf(rep, "    - Bone Positions: %.3f MB\n", bytes_to_mb(vs->anim_bone_positions_bytes));
+                    fprintf(rep, "    - Bone Velocities: %.3f MB\n", bytes_to_mb(vs->anim_bone_velocities_bytes));
+                    fprintf(rep, "    - Bone Rotations: %.3f MB\n", bytes_to_mb(vs->anim_bone_rotations_bytes));
+                    fprintf(rep, "    - Bone Angular Velocities: %.3f MB\n", bytes_to_mb(vs->anim_bone_angular_velocities_bytes));
+                    fprintf(rep, "    - Contact States: %.3f MB\n", bytes_to_mb(vs->anim_contact_states_bytes));
+                    fprintf(rep, "    - Future Toe Positions: %.3f MB\n", bytes_to_mb(vs->anim_future_toe_positions_bytes));
+                    fprintf(rep, "  - Range Metadata: %.3f MB\n", bytes_to_mb(vs->additional_range_total_bytes));
+                    if (vs->lmm_network_total_bytes > 0)
+                    {
+                        fprintf(rep, "- **LMM Total Network Memory:** %.3f MB\n", bytes_to_mb(vs->lmm_network_total_bytes));
+                        fprintf(rep, "  - Decompressor Network: %.3f MB\n", bytes_to_mb(vs->lmm_decompressor_bytes));
+                        fprintf(rep, "  - Stepper Network: %.3f MB\n", bytes_to_mb(vs->lmm_stepper_bytes));
+                        fprintf(rep, "  - Projector Network: %.3f MB\n", bytes_to_mb(vs->lmm_projector_bytes));
+                    }
+                    fprintf(rep, "\n");
+                }
+
                 #undef VB
                 #undef VS
-                fprintf(rep, "\n## Output Images (shared coordinate system)\n\n");
+                #undef VBSCI
+                #undef VSSCI
+
+                fprintf(rep, "## Output Plots (shared y-axis coordinate system)\n\n");
                 fprintf(rep, "| Image | Description |\n");
                 fprintf(rep, "|:------|:------------|\n");
                 fprintf(rep, "| frozen_local_big.png | Frozen baseline MPJPE (big DB) |\n");
@@ -6237,7 +6602,7 @@ int main(int argc, char** argv)
                 fprintf(rep, "| lmm_local_small.png | LMM MPJPE local (small DB) |\n");
                 fprintf(rep, "| mm_lmm_local_diff_small.png | MM vs LMM diff (small DB) |\n");
                 fclose(rep);
-                std::cout << "[big-small] Report written: " << report_path << std::endl;
+                std::cout << "[big-small] Comprehensive report written: " << report_path << std::endl;
             }
 
             std::cout << "[big-small] Analysis complete. Output: " << out_dir << std::endl;
