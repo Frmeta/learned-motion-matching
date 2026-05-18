@@ -83,6 +83,7 @@ def train_network_suffix() -> str:
 
 def expected_feature_count_current_runtime():
     # Must mirror matching_feature_count_expected() in controller.cpp.
+    # Full feature vector (68 total = 45 non-history + 23 history).
     return (
         3 +   # Left Foot Position
         3 +   # Right Foot Position
@@ -107,12 +108,22 @@ def expected_feature_count_current_runtime():
     )
 
 
+# Must mirror MM_HISTORY_FEATURE_START = 45 in database.h.
+# LMM networks are trained on non-history features ONLY so that
+# the projector/stepper/decompressor are independent of the history
+# extension and can generalise across history-on and history-off modes.
+NON_HISTORY_FEATURE_COUNT = 45   # first 45 cols of features.bin
+
+
 def validate_runtime_compatibility(features, future_toe_positions):
-    expected_features = expected_feature_count_current_runtime()
-    if features.shape[1] != expected_features:
+    expected_full = expected_feature_count_current_runtime()
+    expected_lmm  = NON_HISTORY_FEATURE_COUNT
+    actual = features.shape[1]
+    if actual not in (expected_full, expected_lmm):
         raise RuntimeError(
-            f'Feature layout mismatch: got {features.shape[1]} features, '
-            f'expected {expected_features}. Rebuild features.bin using current controller.cpp layout.'
+            f'Feature layout mismatch: got {actual} features, '
+            f'expected {expected_full} (full) or {expected_lmm} (LMM non-history). '
+            f'Rebuild features.bin using current controller.cpp layout.'
         )
 
     if future_toe_positions.shape[1] != 12:

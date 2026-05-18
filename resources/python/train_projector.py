@@ -28,6 +28,7 @@ from train_common import (
     train_latent_filename,
     train_network_suffix,
     get_train_type,
+    NON_HISTORY_FEATURE_COUNT,
 )
 
 # Networks
@@ -72,6 +73,10 @@ if __name__ == '__main__':
     del database
     
     X = load_features(train_features_filename())['features'].copy().astype(np.float32)
+    # LMM networks use non-history features only (first 45 of 68).
+    if X.shape[1] > NON_HISTORY_FEATURE_COUNT:
+        print(f'[train_projector] Trimming features: {X.shape[1]} -> {NON_HISTORY_FEATURE_COUNT} (dropping history)')
+        X = X[:, :NON_HISTORY_FEATURE_COUNT]
     Z = load_latent(train_latent_filename())['latent'].copy().astype(np.float32)
 
     validate_runtime_compatibility(X, future_toe_positions)

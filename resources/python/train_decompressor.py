@@ -25,6 +25,7 @@ from train_common import (
     train_latent_filename,
     train_network_suffix,
     get_train_type,
+    NON_HISTORY_FEATURE_COUNT,
 )
 
 # Networks
@@ -88,6 +89,13 @@ if __name__ == '__main__':
     cartwheel_states = database['cartwheel_states']
     
     X = load_features(train_features_filename())['features'].astype(np.float32)
+    # LMM networks use non-history features only (first 45 of 68).
+    # History features are a MM extension and are excluded from LMM training
+    # so the networks generalise across history-on/off modes.
+    if X.shape[1] > NON_HISTORY_FEATURE_COUNT:
+        print(f'[train_decompressor] Trimming features: {X.shape[1]} -> {NON_HISTORY_FEATURE_COUNT} (dropping history)')
+        X = X[:, :NON_HISTORY_FEATURE_COUNT]
+    nfeatures = X.shape[1]  # now always NON_HISTORY_FEATURE_COUNT
     Ypos = database['bone_positions'].astype(np.float32)
     Yrot = database['bone_rotations'].astype(np.float32)
     Yvel = database['bone_velocities'].astype(np.float32)
@@ -96,7 +104,6 @@ if __name__ == '__main__':
     nframes = Ypos.shape[0]
     nbones = Ypos.shape[1]
     nextra = contacts.shape[1]
-    nfeatures = X.shape[1]
     nlatent = 32
 
     validate_runtime_compatibility(X, future_toe_positions)
