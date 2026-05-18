@@ -797,6 +797,41 @@ vec3 simulation_collide_obstacles(
 
 //--------------------------------------
 
+static std::vector<double> compute_per_frame_mpjpe(const std::vector<array1d<vec3>>& ref_capture,
+                                                   const std::vector<array1d<vec3>>& test_capture,
+                                                   bool root_relative)
+{
+    int n_ref = (int)ref_capture.size();
+    int n_test = (int)test_capture.size();
+    std::vector<double> out(n_test, -1.0);
+    if (n_test <= 0 || n_ref <= 0) return out;
+
+    for (int f = 0; f < n_test; f++)
+    {
+        int ref_f = std::min(f, n_ref - 1);
+        int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
+        if (joint_count <= 0) { out[f] = -1.0; continue; }
+
+        vec3 ref_root = ref_capture[ref_f](0);
+        vec3 test_root = test_capture[f](0);
+        double sum_err = 0.0;
+        for (int j = 0; j < joint_count; j++)
+        {
+            vec3 p_ref = ref_capture[ref_f](j);
+            vec3 p_test = test_capture[f](j);
+            if (root_relative)
+            {
+                p_ref = p_ref - ref_root;
+                p_test = p_test - test_root;
+            }
+            vec3 d = p_ref - p_test;
+            sum_err += sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
+        }
+        out[f] = sum_err / (double)joint_count;
+    }
+    return out;
+}
+
 void update_callback(void* args)
 {
     ((std::function<void()>*)args)->operator()();
@@ -1482,21 +1517,34 @@ int main(int argc, char** argv)
     bool lmm_enabled = start_with_lmm_enabled;
     
     nnet decompressor, stepper, projector;
-    bool networks_exist = 
-        FileExists("./resources/bin/decompressor_big.bin") &&
-        FileExists("./resources/bin/stepper_big.bin") &&
-        FileExists("./resources/bin/projector_big.bin");
+    const char* dec_path_default = "./resources/bin/decompressor_big.bin";
+    const char* stp_path_default = "./resources/bin/stepper_big.bin";
+    const char* prj_path_default = "./resources/bin/projector_big.bin";
+
+    bool dec_exists_default = FileExists(dec_path_default);
+    bool stp_exists_default = FileExists(stp_path_default);
+    bool prj_exists_default = FileExists(prj_path_default);
+
+    bool networks_exist = dec_exists_default && stp_exists_default && prj_exists_default;
+
+    if (!networks_exist && !force_mm_mode)
+    {
+        std::cout << "Warning: One or more neural network files are missing (LMM will be disabled):" << std::endl;
+        if (!dec_exists_default) std::cout << "  - Missing: " << dec_path_default << std::endl;
+        if (!stp_exists_default) std::cout << "  - Missing: " << stp_path_default << std::endl;
+        if (!prj_exists_default) std::cout << "  - Missing: " << prj_path_default << std::endl;
+    }
 
     if (networks_exist && !force_mm_mode)
     {
         if (debug) std::cout << "Loading neural networks (big)..." << std::endl;
         
         if (debug) std::cout << "Loading decompressor..." << std::endl;
-        nnet_load(decompressor, "./resources/bin/decompressor_big.bin");
+        nnet_load(decompressor, dec_path_default);
         if (debug) std::cout << "Loading stepper..." << std::endl;
-        nnet_load(stepper, "./resources/bin/stepper_big.bin");
+        nnet_load(stepper, stp_path_default);
         if (debug) std::cout << "Loading projector..." << std::endl;
-        nnet_load(projector, "./resources/bin/projector_big.bin");
+        nnet_load(projector, prj_path_default);
     }
 
     const int lmm_latent_size = 32;
@@ -4796,7 +4844,7 @@ int main(int argc, char** argv)
     std::function<void()> u{update_func};
     emscripten_set_main_loop_arg(update_callback, &u, 0, 1);
 #else
-    if (mode != APP_MODE_WINDOW)
+    if (mode != APP_MODE_WINDOW && mode != APP_MODE_ANALYZE_BOTH_BIG_SMALL)
     {
         char cwd[1024];
         if (GetCurrentDirectoryA(sizeof(cwd), cwd))
@@ -5468,40 +5516,6 @@ int main(int argc, char** argv)
             }
 
             // Export per-frame MPJPE CSV and invoke plotting script
-            auto compute_per_frame_mpjpe = [&](const std::vector<array1d<vec3>>& ref_capture,
-                                               const std::vector<array1d<vec3>>& test_capture,
-                                               bool root_relative) -> std::vector<double>
-            {
-                int n_ref = (int)ref_capture.size();
-                int n_test = (int)test_capture.size();
-                std::vector<double> out(n_test, -1.0);
-                if (n_test <= 0 || n_ref <= 0) return out;
-
-                for (int f = 0; f < n_test; f++)
-                {
-                    int ref_f = std::min(f, n_ref - 1);
-                    int joint_count = std::min(ref_capture[ref_f].size, test_capture[f].size);
-                    if (joint_count <= 0) { out[f] = -1.0; continue; }
-
-                    vec3 ref_root = ref_capture[ref_f](0);
-                    vec3 test_root = test_capture[f](0);
-                    double sum_err = 0.0;
-                    for (int j = 0; j < joint_count; j++)
-                    {
-                        vec3 p_ref = ref_capture[ref_f](j);
-                        vec3 p_test = test_capture[f](j);
-                        if (root_relative)
-                        {
-                            p_ref = p_ref - ref_root;
-                            p_test = p_test - test_root;
-                        }
-                        vec3 d = p_ref - p_test;
-                        sum_err += sqrt((double)d.x * (double)d.x + (double)d.y * (double)d.y + (double)d.z * (double)d.z);
-                    }
-                    out[f] = sum_err / (double)joint_count;
-                }
-                return out;
-            };
 
             // Prepare reference captures for per-frame comparison
             std::vector<array1d<vec3>> ref_capture_for_plot;
@@ -6001,9 +6015,10 @@ int main(int argc, char** argv)
                 std::string stp_path = std::string("./resources/bin/stepper")      + net_suffixes[vi] + ".bin";
                 std::string prj_path = std::string("./resources/bin/projector")    + net_suffixes[vi] + ".bin";
                 nnet var_decompressor, var_stepper, var_projector;
-                bool var_nets_ok = FileExists(dec_path.c_str()) &&
-                                   FileExists(stp_path.c_str()) &&
-                                   FileExists(prj_path.c_str());
+                bool dec_exists = FileExists(dec_path.c_str());
+                bool stp_exists = FileExists(stp_path.c_str());
+                bool prj_exists = FileExists(prj_path.c_str());
+                bool var_nets_ok = dec_exists && stp_exists && prj_exists;
                 if (var_nets_ok)
                 {
                     nnet_load(var_decompressor, dec_path.c_str());
@@ -6015,6 +6030,9 @@ int main(int argc, char** argv)
                 {
                     std::cout << "[big-small] WARNING: LMM networks not found for " << vsuffix
                               << ". LMM analysis will be skipped." << std::endl;
+                    if (!dec_exists) std::cout << "  - Missing: " << dec_path << std::endl;
+                    if (!stp_exists) std::cout << "  - Missing: " << stp_path << std::endl;
+                    if (!prj_exists) std::cout << "  - Missing: " << prj_path << std::endl;
                 }
 
                 // Precompute reference poses for this test db

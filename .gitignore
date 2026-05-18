@@ -14,8 +14,16 @@ local/
 build/
 
 database.bin
-features.csv
+database_small.bin
+database_big.bin
+database_history.bin
+
+
 database.csv
+database_small.csv
+database_big.csv
+database_history.csv
+
 
 .vscode/
 .cursor/

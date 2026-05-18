@@ -913,12 +913,43 @@ float query_terrain_height(
     float min_distance_sq = FLT_MAX;
     float height = 0.0f;
     
-    for (int i = 0; i < terrain_points.size; i++)
+    int start_idx = 0;
+    int end_idx = terrain_points.size;
+    
+    // Binary search for first index >= range_start
+    int low = 0, high = terrain_points.size - 1;
+    while (low <= high)
     {
-        // Only search contact points within the current animation range
-        if (contact_frame_indices(i) < range_start || contact_frame_indices(i) >= range_stop)
-            continue;
-        
+        int mid = low + (high - low) / 2;
+        if (contact_frame_indices(mid) >= range_start)
+        {
+            start_idx = mid;
+            high = mid - 1;
+        }
+        else
+        {
+            low = mid + 1;
+        }
+    }
+    
+    // Binary search for first index >= range_stop
+    low = 0; high = terrain_points.size - 1;
+    while (low <= high)
+    {
+        int mid = low + (high - low) / 2;
+        if (contact_frame_indices(mid) >= range_stop)
+        {
+            end_idx = mid;
+            high = mid - 1;
+        }
+        else
+        {
+            low = mid + 1;
+        }
+    }
+    
+    for (int i = start_idx; i < end_idx; i++)
+    {
         float dx = terrain_points(i).x - query_x;
         float dy = terrain_points(i).y - query_y;
         float distance_sq = dx * dx + dy * dy;
