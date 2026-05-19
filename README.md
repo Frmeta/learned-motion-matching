@@ -111,6 +111,7 @@ Analyze
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin --playback
 ```
+(Replace  --playback with  --playback-small for rendering only 1000 frame in the 4700-th frame)
 
 Convert character fbx to bin
 ```

@@ -78,6 +78,11 @@ def main():
                         data[var][model]['Memory Average (MB)'] = float('nan')
                         data[var][model]['Memory Peak (MB)'] = float('nan')
                     data[var][model]['Time (ms)'] = float(row['time_ms'])
+                    
+                    # Parse detailed memory components if available
+                    for col in ['mm_feat_tot', 'mm_feat_non_hist', 'mm_feat_hist', 'mm_anim_tot', 'mm_anim_pos', 'mm_anim_vel', 'mm_anim_rot', 'mm_anim_ang', 'mm_anim_cont', 'mm_anim_toe', 'mm_add_range', 'lmm_dec', 'lmm_step', 'lmm_proj']:
+                        if col in row:
+                            data[var][model][col] = float(row[col])
 
     # 2. Parse walkpath reports
     nohistory_walk_metrics = parse_markdown_table_v2(nohistory_report)
@@ -285,7 +290,52 @@ def main():
         if not np.isnan(lmm_peak_no) and not np.isnan(lmm_peak_yes):
             rf.write(f"- **Learned Motion Matching**: The peak dynamic RAM consumption went from **{lmm_peak_no:.2f} MB** (without history) to **{lmm_peak_yes:.2f} MB** (with history).\n")
 
-        rf.write("\n## 3. Visualization Dashboard\n\n")
+        # Detailed Memory Component Comparison Section
+        rf.write("\n## 3. Memory Component Breakdown Comparison\n\n")
+        rf.write("Here is the detailed side-by-side breakdown of the memory components (in MB) for both configurations:\n\n")
+        
+        # Table of MM memory components
+        rf.write("### Motion Matching (MM) Memory Components (MB)\n\n")
+        headers_mm = ["Component", "Without History", "With History", "Difference"]
+        rf.write("| " + " | ".join(headers_mm) + " |\n")
+        rf.write("|" + "|".join(["---" for _ in headers_mm]) + "|\n")
+        
+        def write_mm_comp_row(label, col_key):
+            v_no = data['nohistory']['MM'].get(col_key, 0.0)
+            v_yes = data['history']['MM'].get(col_key, 0.0)
+            diff = v_yes - v_no
+            rf.write(f"| {label} | {v_no:.6f} | {v_yes:.6f} | {diff:+.6f} |\n")
+
+        write_mm_comp_row("**Total Static Memory (with additional)**", 'Memory Static (MB)')
+        write_mm_comp_row("   - db.features (Total)", 'mm_feat_tot')
+        write_mm_comp_row("      - non history columns", 'mm_feat_non_hist')
+        write_mm_comp_row("      - history columns", 'mm_feat_hist')
+        write_mm_comp_row("   - Animation Database (Total)", 'mm_anim_tot')
+        write_mm_comp_row("      - bone_positions", 'mm_anim_pos')
+        write_mm_comp_row("      - bone_velocities", 'mm_anim_vel')
+        write_mm_comp_row("      - bone_rotations", 'mm_anim_rot')
+        write_mm_comp_row("      - bone_angular_velocities", 'mm_anim_ang')
+        write_mm_comp_row("      - contact_states", 'mm_anim_cont')
+        write_mm_comp_row("      - future_toe_positions", 'mm_anim_toe')
+        write_mm_comp_row("   - additional (range starts/stops)", 'mm_add_range')
+
+        rf.write("\n### Learned Motion Matching (LMM) Memory Components (MB)\n\n")
+        headers_lmm = ["Component", "Without History", "With History", "Difference"]
+        rf.write("| " + " | ".join(headers_lmm) + " |\n")
+        rf.write("|" + "|".join(["---" for _ in headers_lmm]) + "|\n")
+
+        def write_lmm_comp_row(label, col_key):
+            v_no = data['nohistory']['LMM'].get(col_key, 0.0)
+            v_yes = data['history']['LMM'].get(col_key, 0.0)
+            diff = v_yes - v_no
+            rf.write(f"| {label} | {v_no:.6f} | {v_yes:.6f} | {diff:+.6f} |\n")
+
+        write_lmm_comp_row("**Total Static Network Memory**", 'Memory Static (MB)')
+        write_lmm_comp_row("   - D (Decompressor weights)", 'lmm_dec')
+        write_lmm_comp_row("   - S (Stepper weights)", 'lmm_step')
+        write_lmm_comp_row("   - P (Projector weights)", 'lmm_proj')
+
+        rf.write("\n## 4. Visualization Dashboard\n\n")
         rf.write("![History Impact Summary Dashboard](history_metrics_comparison.png)\n")
 
     print(f"Comprehensive history comparison report generated: {report_path}")

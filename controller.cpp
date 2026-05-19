@@ -57,6 +57,7 @@
 
 static constexpr bool debug = false;
 static TerrainGrid ground_grid;
+static int analyze_1000_start_frame = 4700;
 
 #if defined(_WIN32)
 struct runtime_metrics
@@ -867,6 +868,7 @@ int main(int argc, char** argv)
         bool database_playback_enabled = false;
         int database_playback_index = 0;
         bool playback_video = false;
+        bool playback_video_small = false;
         for (int argi = 1; argi < argc; argi++)
         {
             if (strcmp(argv[argi], "--mm") == 0)
@@ -949,6 +951,10 @@ int main(int argc, char** argv)
             {
                 playback_video = true;
             }
+            else if (strcmp(argv[argi], "--playback-small") == 0)
+            {
+                playback_video_small = true;
+            }
             else if (argv[argi][0] != '-')
             {
                 snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi]);
@@ -963,8 +969,8 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small] [--playback] [--input=<csv>]\n", argv[0]);
-                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback] --input=<csv>\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small] [--playback | --playback-small] [--input=<csv>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback | --playback-small] --input=<csv>\n", argv[0]);
                 printf("\n");
                 printf("  --analyze-both-big-small  Run 4-way comparison: MM-big, MM-small, LMM-big, LMM-small\n");
                 printf("                            requires database_big.bin, database_small.bin,\n");
@@ -4950,9 +4956,9 @@ int main(int argc, char** argv)
             }
             
             // Simulate MM/LMM
-            std::cout << "[debug] Step " << i << " update_func start" << std::endl;
+            if (i % (max_steps / 10) == 0) std::cout << "[debug] Step " << i << " update_func start" << std::endl;
             update_func();
-            std::cout << "[debug] Step " << i << " update_func end" << std::endl;
+            if (i % (max_steps / 10) == 0)  std::cout << "[debug] Step " << i << " update_func end" << std::endl;
             
             if (analyze_input_is_database)
             {
@@ -5069,6 +5075,7 @@ int main(int argc, char** argv)
                                        const std::vector<array1d<quat>>& lmm_rotations,
                                        const std::vector<feature_draw_data>& mm_feature_data,
                                        const std::vector<feature_draw_data>& lmm_feature_data,
+                                       int start_frame,
                                        int num_frames)
     {
         if (num_frames <= 0) return;
@@ -5146,33 +5153,34 @@ int main(int argc, char** argv)
         SetTraceLogLevel(LOG_WARNING); // Suppress "Pixel data retrieved successfully" spam
         for (int i = 0; i < num_frames; i++)
         {
+            int idx = start_frame + i;
             BeginTextureMode(render_target);
             ClearBackground(RAYWHITE);
             
             if (mode == APP_MODE_ANALYZE_BOTH)
             {
-                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
-                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
-                draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
-                draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
+                draw_part(0, idx < gt_poses.size() ? gt_poses[idx] : gt_poses.back(), idx < gt_rotations.size() ? gt_rotations[idx] : gt_rotations.back(), "Ground Truth", mm_feature_data, idx);
+                draw_part(1, idx < mm_poses.size() ? mm_poses[idx] : mm_poses.back(), idx < mm_rotations.size() ? mm_rotations[idx] : mm_rotations.back(), "Motion Matching", mm_feature_data, idx);
+                draw_part(2, idx < lmm_poses.size() ? lmm_poses[idx] : lmm_poses.back(), idx < lmm_rotations.size() ? lmm_rotations[idx] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, idx);
+                draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, idx);
             }
             else if (mode == APP_MODE_ANALYZE_BOTH_BIG_SMALL || mode == APP_MODE_ANALYZE_BOTH_HISTORY)
             {
-                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
-                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
-                draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+                draw_part(0, idx < gt_poses.size() ? gt_poses[idx] : gt_poses.back(), idx < gt_rotations.size() ? gt_rotations[idx] : gt_rotations.back(), "Ground Truth", mm_feature_data, idx);
+                draw_part(1, idx < mm_poses.size() ? mm_poses[idx] : mm_poses.back(), idx < mm_rotations.size() ? mm_rotations[idx] : mm_rotations.back(), "Motion Matching", mm_feature_data, idx);
+                draw_part(2, idx < lmm_poses.size() ? lmm_poses[idx] : lmm_poses.back(), idx < lmm_rotations.size() ? lmm_rotations[idx] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, idx);
             }
             else if (mode == APP_MODE_ANALYZE_MM)
             {
-                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
-                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
-                draw_part(2, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
+                draw_part(0, idx < gt_poses.size() ? gt_poses[idx] : gt_poses.back(), idx < gt_rotations.size() ? gt_rotations[idx] : gt_rotations.back(), "Ground Truth", mm_feature_data, idx);
+                draw_part(1, idx < mm_poses.size() ? mm_poses[idx] : mm_poses.back(), idx < mm_rotations.size() ? mm_rotations[idx] : mm_rotations.back(), "Motion Matching", mm_feature_data, idx);
+                draw_part(2, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, idx);
             }
             else if (mode == APP_MODE_ANALYZE_LMM)
             {
-                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", lmm_feature_data, i);
-                draw_part(1, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
-                draw_part(2, frozen_pose, frozen_rotation, "Frozen", lmm_feature_data, i);
+                draw_part(0, idx < gt_poses.size() ? gt_poses[idx] : gt_poses.back(), idx < gt_rotations.size() ? gt_rotations[idx] : gt_rotations.back(), "Ground Truth", lmm_feature_data, idx);
+                draw_part(1, idx < lmm_poses.size() ? lmm_poses[idx] : lmm_poses.back(), idx < lmm_rotations.size() ? lmm_rotations[idx] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, idx);
+                draw_part(2, frozen_pose, frozen_rotation, "Frozen", lmm_feature_data, idx);
             }
             
             for (int p = 1; p < parts; p++)
@@ -5567,7 +5575,28 @@ int main(int argc, char** argv)
                     lmm_capture_rotations,
                     mm_feature_data,
                     lmm_feature_data,
+                    0,
                     res.frame_count
+                );
+            }
+            else if (playback_video_small)
+            {
+                std::string video_path = analysis_output_folder + "/video_1000.mp4";
+                int start_f = (res.frame_count > 0) ? std::max(0, std::min(analyze_1000_start_frame, res.frame_count - 1)) : 0;
+                int num_f = std::min(1000, res.frame_count - start_f);
+                render_video_comparison(
+                    video_path.c_str(),
+                    mode,
+                    analyze_input_is_database ? database_test_reference_poses : std::vector<array1d<vec3>>(1, base_bone_positions),
+                    analyze_input_is_database ? database_test_reference_rotations : std::vector<array1d<quat>>(1, base_bone_rotations),
+                    mm_capture,
+                    mm_capture_rotations,
+                    lmm_capture,
+                    lmm_capture_rotations,
+                    mm_feature_data,
+                    lmm_feature_data,
+                    start_f,
+                    num_f
                 );
             }
 
@@ -5637,27 +5666,31 @@ int main(int argc, char** argv)
                 }
             }
 
-            // Export walkpath CSV
-            std::string walkpath_csv_path = analysis_output_folder + "/" + name + "_walkpath.csv";
-            FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
-            if (walkpath_csvf)
-            {
+            // Export walkpath CSV (Full and 1000 frames)
+            auto write_walkpath_csv = [&](const std::string& path, int start_frame, int limit_frames) {
+                FILE* csv_file = fopen(path.c_str(), "w");
+                if (!csv_file) return;
+
                 // Build dynamic header
                 std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
                 if (!mm_capture.empty()) header += ",mm_x,mm_z,mm_yaw";
                 if (!lmm_capture.empty()) header += ",lmm_x,lmm_z,lmm_yaw";
                 if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
-                fprintf(walkpath_csvf, "%s\n", header.c_str());
+                fprintf(csv_file, "%s\n", header.c_str());
 
-                int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), (size_t)(frozen_pose.size > 0 ? ref_capture_for_plot.size() : 0)});
-                if (nframes == 0) nframes = (int)ref_capture_for_plot.size();
+                int total_frames = (int)std::max({mm_capture.size(), lmm_capture.size(), (size_t)(frozen_pose.size > 0 ? ref_capture_for_plot.size() : 0)});
+                if (total_frames == 0) total_frames = (int)ref_capture_for_plot.size();
+                int end_frame = total_frames;
+                if (limit_frames > 0 && start_frame + limit_frames < total_frames) {
+                    end_frame = start_frame + limit_frames;
+                }
                 
                 auto extract_yaw = [](quat q) -> float {
                     vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
                     return atan2f(fwd.x, fwd.z);
                 };
 
-                for (int f = 0; f < nframes; f++)
+                for (int f = start_frame; f < end_frame; f++)
                 {
                     int clip_id = -1;
                     for (int r = 0; r < test_db.nranges(); r++) {
@@ -5670,15 +5703,15 @@ int main(int argc, char** argv)
                         clip_id = test_db.nranges() - 1;
                     }
                     
-                    fprintf(walkpath_csvf, "%d,%d", f, clip_id);
+                    fprintf(csv_file, "%d,%d", f, clip_id);
                     
                     // Ground Truth
                     if (f < (int)ref_capture_for_plot.size()) {
                         vec3 pos = ref_capture_for_plot[f](0);
                         float yaw = extract_yaw(database_test_reference_rotations[f](0)); // Root rotation
-                        fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                     } else {
-                        fprintf(walkpath_csvf, ",0.0,0.0,0.0"); // Should not happen
+                        fprintf(csv_file, ",0.0,0.0,0.0"); // Should not happen
                     }
                     
                     // MM
@@ -5686,12 +5719,12 @@ int main(int argc, char** argv)
                         if (f < (int)mm_capture.size()) {
                             vec3 pos = mm_capture[f](0);
                             float yaw = extract_yaw(mm_capture_rotations[f](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
                             // Replicate last pos
                             vec3 pos = mm_capture.back()(0);
                             float yaw = extract_yaw(mm_capture_rotations.back()(0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
                     }
 
@@ -5700,11 +5733,11 @@ int main(int argc, char** argv)
                         if (f < (int)lmm_capture.size()) {
                             vec3 pos = lmm_capture[f](0);
                             float yaw = extract_yaw(lmm_capture_rotations[f](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
                             vec3 pos = lmm_capture.back()(0);
                             float yaw = extract_yaw(lmm_capture_rotations.back()(0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
                     }
 
@@ -5712,20 +5745,36 @@ int main(int argc, char** argv)
                     if (frozen_pose.size > 0) {
                         vec3 pos = frozen_pose(0);
                         float yaw = extract_yaw(database_test_reference_rotations[0](0)); // Frozen is just the start
-                        fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                     }
                     
-                    fprintf(walkpath_csvf, "\n");
+                    fprintf(csv_file, "\n");
                 }
-                fclose(walkpath_csvf);
+                fclose(csv_file);
+            };
 
-                // Call walkpath plotting script (Python)
-                std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + analysis_output_folder + "\"";
-                int plot_walkpath_ret = system(plot_walkpath_cmd.c_str());
-                if (plot_walkpath_ret != 0)
-                {
-                    std::cout << "Warning: walkpath plotting script returned non-zero: " << plot_walkpath_ret << std::endl;
-                }
+            std::string walkpath_csv_path = analysis_output_folder + "/" + name + "_walkpath.csv";
+            std::string walkpath_1000_csv_path = analysis_output_folder + "/" + name + "_walkpath_1000.csv";
+
+            write_walkpath_csv(walkpath_csv_path, 0, -1);
+            int total_f = (int)std::max({mm_capture.size(), lmm_capture.size(), (size_t)(frozen_pose.size > 0 ? ref_capture_for_plot.size() : 0)});
+            if (total_f == 0) total_f = (int)ref_capture_for_plot.size();
+            int start_f = (total_f > 0) ? std::max(0, std::min(analyze_1000_start_frame, total_f - 1)) : 0;
+            write_walkpath_csv(walkpath_1000_csv_path, start_f, 1000);
+
+            // Call walkpath plotting script (Python)
+            std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + analysis_output_folder + "\"";
+            int plot_walkpath_ret = system(plot_walkpath_cmd.c_str());
+            if (plot_walkpath_ret != 0)
+            {
+                std::cout << "Warning: walkpath plotting script returned non-zero: " << plot_walkpath_ret << std::endl;
+            }
+
+            std::string plot_walkpath_1000_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_1000_csv_path + "\" \"" + analysis_output_folder + "\"";
+            int plot_walkpath_1000_ret = system(plot_walkpath_1000_cmd.c_str());
+            if (plot_walkpath_1000_ret != 0)
+            {
+                std::cout << "Warning: walkpath_1000 plotting script returned non-zero: " << plot_walkpath_1000_ret << std::endl;
             }
 
             results.push_back(res);
@@ -6267,7 +6316,7 @@ int main(int argc, char** argv)
                 vs.frozen_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, false);
                 vs.frozen_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, true);
 
-                // Render video comparison side-by-side if playback_video is true
+                // Render video comparison side-by-side
                 if (playback_video)
                 {
                     std::string video_path = out_dir + "/video_" + vsuffix + ".mp4";
@@ -6283,7 +6332,29 @@ int main(int argc, char** argv)
                         lmm_capture_rotations,
                         mm_feature_data,
                         lmm_feature_data,
+                        0,
                         used_frames
+                    );
+                }
+                else if (playback_video_small)
+                {
+                    std::string video_path = out_dir + "/video_" + vsuffix + "_1000.mp4";
+                    std::cout << "[big-small] Rendering side-by-side comparative playback (1000 frames) to: " << video_path << std::endl;
+                    int start_f = (used_frames > 0) ? std::max(0, std::min(analyze_1000_start_frame, used_frames - 1)) : 0;
+                    int num_f = std::min(1000, used_frames - start_f);
+                    render_video_comparison(
+                        video_path.c_str(),
+                        APP_MODE_ANALYZE_BOTH,
+                        database_test_reference_poses,
+                        database_test_reference_rotations,
+                        mm_capture,
+                        mm_capture_rotations,
+                        lmm_capture,
+                        lmm_capture_rotations,
+                        mm_feature_data,
+                        lmm_feature_data,
+                        start_f,
+                        num_f
                     );
                 }
 
@@ -6346,25 +6417,29 @@ int main(int argc, char** argv)
                 };
                 vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
 
-                // Export walkpath CSV and run Python walkpath plotting script
-                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
-                FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
-                if (walkpath_csvf)
-                {
+                // Export walkpath CSV (Full and 1000 frames)
+                auto write_walkpath_csv = [&](const std::string& path, int start_frame, int limit_frames) {
+                    FILE* csv_file = fopen(path.c_str(), "w");
+                    if (!csv_file) return;
+
                     std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
                     if (mm_ok) header += ",mm_x,mm_z,mm_yaw";
                     if (lmm_ok) header += ",lmm_x,lmm_z,lmm_yaw";
                     if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
-                    fprintf(walkpath_csvf, "%s\n", header.c_str());
+                    fprintf(csv_file, "%s\n", header.c_str());
 
-                    int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
-                    
+                    int total_frames = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                    int end_frame = total_frames;
+                    if (limit_frames > 0 && start_frame + limit_frames < total_frames) {
+                        end_frame = start_frame + limit_frames;
+                    }
+
                     auto extract_yaw = [](quat q) -> float {
                         vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
                         return atan2f(fwd.x, fwd.z);
                     };
 
-                    for (int f = 0; f < nframes; f++)
+                    for (int f = start_frame; f < end_frame; f++)
                     {
                         int clip_id = -1;
                         for (int r = 0; r < test_db.nranges(); r++) {
@@ -6376,26 +6451,26 @@ int main(int argc, char** argv)
                         if (clip_id == -1 && test_db.nranges() > 0) {
                             clip_id = test_db.nranges() - 1;
                         }
-                        
-                        fprintf(walkpath_csvf, "%d,%d", f, clip_id);
-                        
+
+                        fprintf(csv_file, "%d,%d", f, clip_id);
+
                         if (f < (int)database_test_reference_poses.size()) {
                             vec3 pos = database_test_reference_poses[f](0);
                             float yaw = extract_yaw(database_test_reference_rotations[f](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
-                            fprintf(walkpath_csvf, ",0.0,0.0,0.0");
+                            fprintf(csv_file, ",0.0,0.0,0.0");
                         }
-                        
+
                         if (mm_ok) {
                             if (f < (int)mm_capture.size()) {
                                 vec3 pos = mm_capture[f](0);
                                 float yaw = extract_yaw(mm_capture_rotations[f](0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             } else {
                                 vec3 pos = mm_capture.back()(0);
                                 float yaw = extract_yaw(mm_capture_rotations.back()(0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             }
                         }
 
@@ -6403,46 +6478,73 @@ int main(int argc, char** argv)
                             if (f < (int)lmm_capture.size()) {
                                 vec3 pos = lmm_capture[f](0);
                                 float yaw = extract_yaw(lmm_capture_rotations[f](0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             } else {
                                 vec3 pos = lmm_capture.back()(0);
                                 float yaw = extract_yaw(lmm_capture_rotations.back()(0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             }
                         }
 
                         if (frozen_pose.size > 0) {
                             vec3 pos = frozen_pose(0);
                             float yaw = extract_yaw(database_test_reference_rotations[0](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
-                        fprintf(walkpath_csvf, "\n");
+                        fprintf(csv_file, "\n");
                     }
-                    fclose(walkpath_csvf);
+                    fclose(csv_file);
+                };
 
-                    std::cout << "[big-small] Running walkpath analysis plotting script..." << std::endl;
-                    std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
-                    system(plot_walkpath_cmd.c_str());
+                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
+                std::string walkpath_1000_csv_path = out_dir + "/" + vsuffix + "_walkpath_1000.csv";
 
-                    // Rename generated walkpath files for this variant
-                    auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
-                        std::string src = out_dir + "/walkpath/" + basename + ext;
-                        std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
-                        if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
-                    };
-                    rename_walkpath_file("walkpath", ".png");
-                    rename_walkpath_file("rte_histogram", ".png");
-                    rename_walkpath_file("rre_deg_histogram", ".png");
-                    rename_walkpath_file("are_full_deg_histogram", ".png");
-                    rename_walkpath_file("are_1s_deg_histogram", ".png");
-                    rename_walkpath_file("are_2s_deg_histogram", ".png");
-                    rename_walkpath_file("are_5s_deg_histogram", ".png");
-                    rename_walkpath_file("ade_full_m_histogram", ".png");
-                    rename_walkpath_file("ade_1s_m_histogram", ".png");
-                    rename_walkpath_file("ade_2s_m_histogram", ".png");
-                    rename_walkpath_file("ade_5s_m_histogram", ".png");
-                    rename_walkpath_file("walkpath_report", ".md");
-                }
+                write_walkpath_csv(walkpath_csv_path, 0, -1);
+                int total_f = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                int start_f = (total_f > 0) ? std::max(0, std::min(analyze_1000_start_frame, total_f - 1)) : 0;
+                write_walkpath_csv(walkpath_1000_csv_path, start_f, 1000);
+
+                std::cout << "[big-small] Running walkpath analysis plotting script..." << std::endl;
+                std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
+                system(plot_walkpath_cmd.c_str());
+
+                std::string plot_walkpath_1000_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_1000_csv_path + "\" \"" + out_dir + "\"";
+                system(plot_walkpath_1000_cmd.c_str());
+
+                // Rename generated walkpath files for this variant
+                auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
+                    std::string src = out_dir + "/walkpath/" + basename + ext;
+                    std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                    if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                };
+                
+                // Rename full plots
+                rename_walkpath_file("walkpath", ".png");
+                rename_walkpath_file("rte_histogram", ".png");
+                rename_walkpath_file("rre_deg_histogram", ".png");
+                rename_walkpath_file("are_full_deg_histogram", ".png");
+                rename_walkpath_file("are_1s_deg_histogram", ".png");
+                rename_walkpath_file("are_2s_deg_histogram", ".png");
+                rename_walkpath_file("are_5s_deg_histogram", ".png");
+                rename_walkpath_file("ade_full_m_histogram", ".png");
+                rename_walkpath_file("ade_1s_m_histogram", ".png");
+                rename_walkpath_file("ade_2s_m_histogram", ".png");
+                rename_walkpath_file("ade_5s_m_histogram", ".png");
+                rename_walkpath_file("walkpath_report", ".md");
+
+                // Rename 1000-frame plots
+                rename_walkpath_file("walkpath_1000", ".png");
+                rename_walkpath_file("rte_histogram_1000", ".png");
+                rename_walkpath_file("rre_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_full_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_1s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_2s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_5s_deg_histogram_1000", ".png");
+                rename_walkpath_file("ade_full_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_1s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_2s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_5s_m_histogram_1000", ".png");
+                rename_walkpath_file("walkpath_report_1000", ".md");
 
                 // Compute Memory Footprint Breakdown
                 const int feature_cols_total = db.features.cols;
@@ -6950,12 +7052,21 @@ int main(int argc, char** argv)
                 vs.frozen_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, false);
                 vs.frozen_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, true);
 
-                // Render video comparison side-by-side if playback_video is true
+                // Render video comparison side-by-side
                 if (playback_video)
                 {
                     std::string video_name = out_dir + "/comparison_" + vsuffix + ".mp4";
                     std::cout << "[history] Recording side-by-side video to: " << video_name << std::endl;
-                    render_video_comparison(video_name.c_str(), mode, database_test_reference_poses, database_test_reference_rotations, mm_capture, mm_capture_rotations, lmm_capture, lmm_capture_rotations, mm_feature_data, lmm_feature_data, (int)database_test_reference_poses.size());
+                    render_video_comparison(video_name.c_str(), mode, database_test_reference_poses, database_test_reference_rotations, mm_capture, mm_capture_rotations, lmm_capture, lmm_capture_rotations, mm_feature_data, lmm_feature_data, 0, (int)database_test_reference_poses.size());
+                }
+                else if (playback_video_small)
+                {
+                    std::string video_name = out_dir + "/comparison_" + vsuffix + "_1000.mp4";
+                    std::cout << "[history] Recording side-by-side video (1000 frames) to: " << video_name << std::endl;
+                    int total_f = (int)database_test_reference_poses.size();
+                    int start_f = (total_f > 0) ? std::max(0, std::min(analyze_1000_start_frame, total_f - 1)) : 0;
+                    int num_f = std::min(1000, total_f - start_f);
+                    render_video_comparison(video_name.c_str(), mode, database_test_reference_poses, database_test_reference_rotations, mm_capture, mm_capture_rotations, lmm_capture, lmm_capture_rotations, mm_feature_data, lmm_feature_data, start_f, num_f);
                 }
 
                 // Compute per-frame local MPJPE for plotting
@@ -7017,25 +7128,29 @@ int main(int argc, char** argv)
                 };
                 vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
 
-                // Export walkpath CSV and run Python walkpath plotting script
-                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
-                FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
-                if (walkpath_csvf)
-                {
+                // Export walkpath CSV (Full and 1000 frames)
+                auto write_walkpath_csv = [&](const std::string& path, int start_frame, int limit_frames) {
+                    FILE* csv_file = fopen(path.c_str(), "w");
+                    if (!csv_file) return;
+
                     std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
                     if (mm_ok) header += ",mm_x,mm_z,mm_yaw";
                     if (lmm_ok) header += ",lmm_x,lmm_z,lmm_yaw";
                     if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
-                    fprintf(walkpath_csvf, "%s\n", header.c_str());
+                    fprintf(csv_file, "%s\n", header.c_str());
 
-                    int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
-                    
+                    int total_frames = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                    int end_frame = total_frames;
+                    if (limit_frames > 0 && start_frame + limit_frames < total_frames) {
+                        end_frame = start_frame + limit_frames;
+                    }
+
                     auto extract_yaw = [](quat q) -> float {
                         vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
                         return atan2f(fwd.x, fwd.z);
                     };
 
-                    for (int f = 0; f < nframes; f++)
+                    for (int f = start_frame; f < end_frame; f++)
                     {
                         int clip_id = -1;
                         for (int r = 0; r < test_db.nranges(); r++) {
@@ -7047,26 +7162,26 @@ int main(int argc, char** argv)
                         if (clip_id == -1 && test_db.nranges() > 0) {
                             clip_id = test_db.nranges() - 1;
                         }
-                        
-                        fprintf(walkpath_csvf, "%d,%d", f, clip_id);
-                        
+
+                        fprintf(csv_file, "%d,%d", f, clip_id);
+
                         if (f < (int)database_test_reference_poses.size()) {
                             vec3 pos = database_test_reference_poses[f](0);
                             float yaw = extract_yaw(database_test_reference_rotations[f](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         } else {
-                            fprintf(walkpath_csvf, ",0.0,0.0,0.0");
+                            fprintf(csv_file, ",0.0,0.0,0.0");
                         }
-                        
+
                         if (mm_ok) {
                             if (f < (int)mm_capture.size()) {
                                 vec3 pos = mm_capture[f](0);
                                 float yaw = extract_yaw(mm_capture_rotations[f](0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             } else {
                                 vec3 pos = mm_capture.back()(0);
                                 float yaw = extract_yaw(mm_capture_rotations.back()(0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             }
                         }
 
@@ -7074,46 +7189,73 @@ int main(int argc, char** argv)
                             if (f < (int)lmm_capture.size()) {
                                 vec3 pos = lmm_capture[f](0);
                                 float yaw = extract_yaw(lmm_capture_rotations[f](0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             } else {
                                 vec3 pos = lmm_capture.back()(0);
                                 float yaw = extract_yaw(lmm_capture_rotations.back()(0));
-                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                                fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                             }
                         }
 
                         if (frozen_pose.size > 0) {
                             vec3 pos = frozen_pose(0);
                             float yaw = extract_yaw(database_test_reference_rotations[0](0));
-                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            fprintf(csv_file, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
                         }
-                        fprintf(walkpath_csvf, "\n");
+                        fprintf(csv_file, "\n");
                     }
-                    fclose(walkpath_csvf);
+                    fclose(csv_file);
+                };
 
-                    std::cout << "[history] Running walkpath analysis plotting script..." << std::endl;
-                    std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
-                    system(plot_walkpath_cmd.c_str());
+                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
+                std::string walkpath_1000_csv_path = out_dir + "/" + vsuffix + "_walkpath_1000.csv";
 
-                    // Rename generated walkpath files for this variant
-                    auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
-                        std::string src = out_dir + "/walkpath/" + basename + ext;
-                        std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
-                        if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
-                    };
-                    rename_walkpath_file("walkpath", ".png");
-                    rename_walkpath_file("rte_histogram", ".png");
-                    rename_walkpath_file("rre_deg_histogram", ".png");
-                    rename_walkpath_file("are_full_deg_histogram", ".png");
-                    rename_walkpath_file("are_1s_deg_histogram", ".png");
-                    rename_walkpath_file("are_2s_deg_histogram", ".png");
-                    rename_walkpath_file("are_5s_deg_histogram", ".png");
-                    rename_walkpath_file("ade_full_m_histogram", ".png");
-                    rename_walkpath_file("ade_1s_m_histogram", ".png");
-                    rename_walkpath_file("ade_2s_m_histogram", ".png");
-                    rename_walkpath_file("ade_5s_m_histogram", ".png");
-                    rename_walkpath_file("walkpath_report", ".md");
-                }
+                write_walkpath_csv(walkpath_csv_path, 0, -1);
+                int total_f = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                int start_f = (total_f > 0) ? std::max(0, std::min(analyze_1000_start_frame, total_f - 1)) : 0;
+                write_walkpath_csv(walkpath_1000_csv_path, start_f, 1000);
+
+                std::cout << "[history] Running walkpath analysis plotting script..." << std::endl;
+                std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
+                system(plot_walkpath_cmd.c_str());
+
+                std::string plot_walkpath_1000_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_1000_csv_path + "\" \"" + out_dir + "\"";
+                system(plot_walkpath_1000_cmd.c_str());
+
+                // Rename generated walkpath files for this variant
+                auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
+                    std::string src = out_dir + "/walkpath/" + basename + ext;
+                    std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                    if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                };
+                
+                // Rename full plots
+                rename_walkpath_file("walkpath", ".png");
+                rename_walkpath_file("rte_histogram", ".png");
+                rename_walkpath_file("rre_deg_histogram", ".png");
+                rename_walkpath_file("are_full_deg_histogram", ".png");
+                rename_walkpath_file("are_1s_deg_histogram", ".png");
+                rename_walkpath_file("are_2s_deg_histogram", ".png");
+                rename_walkpath_file("are_5s_deg_histogram", ".png");
+                rename_walkpath_file("ade_full_m_histogram", ".png");
+                rename_walkpath_file("ade_1s_m_histogram", ".png");
+                rename_walkpath_file("ade_2s_m_histogram", ".png");
+                rename_walkpath_file("ade_5s_m_histogram", ".png");
+                rename_walkpath_file("walkpath_report", ".md");
+
+                // Rename 1000-frame plots
+                rename_walkpath_file("walkpath_1000", ".png");
+                rename_walkpath_file("rte_histogram_1000", ".png");
+                rename_walkpath_file("rre_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_full_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_1s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_2s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are_5s_deg_histogram_1000", ".png");
+                rename_walkpath_file("ade_full_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_1s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_2s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade_5s_m_histogram_1000", ".png");
+                rename_walkpath_file("walkpath_report_1000", ".md");
 
                 // Compute Memory Footprint Breakdown
                 const int feature_cols_total = db.features.cols;
@@ -7190,6 +7332,7 @@ int main(int argc, char** argv)
             std::cout << "\n[history] Global y-axis max: " << global_ymax << std::endl;
 
             // ---- Call plot script for each variant CSV ----
+            // ---- Call plot script for each variant CSV ----
             for (auto& vs : all_stats)
             {
                 if (vs.csv_path_mm.empty()) continue;
@@ -7207,6 +7350,75 @@ int main(int argc, char** argv)
                 rename_png("lmm_local");
                 rename_png("frozen_local");
                 rename_png("mm_lmm_local_diff");
+
+                // Export individual mpjpe_report for this variant
+                std::string report_path = out_dir + "/mpjpe/mpjpe_report_" + vs.label + ".md";
+                FILE* report = fopen(report_path.c_str(), "w");
+                if (report)
+                {
+                    auto bytes_to_mb = [](size_t bytes) -> double {
+                        return (double)bytes / (1024.0 * 1024.0);
+                    };
+
+                    std::string db_filename = "database_test.bin";
+                    size_t slash_pos = std::string(analyze_input_path).find_last_of("/\\");
+                    if (slash_pos != std::string::npos)
+                    {
+                        db_filename = std::string(analyze_input_path).substr(slash_pos + 1);
+                    }
+                    else if (strlen(analyze_input_path) > 0)
+                    {
+                        db_filename = analyze_input_path;
+                    }
+
+                    fprintf(report, "%s:\n", db_filename.c_str());
+                    
+                    // MM
+                    fprintf(report, "MM:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", vs.mm_local_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n", vs.mm_world_mpjpe);
+                    fprintf(report, "- time (ms) = %.3f\n", vs.mm_time_ms);
+                    fprintf(report, "- average memory (MB) = %.3f\n", vs.mm_mem_avg);
+                    fprintf(report, "- peak memory (MB) = %.3f\n", vs.mm_mem_peak);
+                    fprintf(report, "- memory by components = %.3f MB (total with additional) / %.3f MB (total without additional)\n", 
+                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), bytes_to_mb(vs.mm_memory_total_without_additional_bytes));
+                    fprintf(report, "   - X (Animation features): db.features = %.3f MB (total)\n", bytes_to_mb(vs.feature_total_bytes));
+                    fprintf(report, "      - non history: %.3f MB\n", bytes_to_mb(vs.feature_non_history_bytes));
+                    fprintf(report, "      - history: %.3f MB\n", bytes_to_mb(vs.feature_history_bytes));
+                    fprintf(report, "   - Y (Animation database) = %.3f MB (total)\n", bytes_to_mb(vs.anim_database_total_bytes));
+                    fprintf(report, "      - bone_positions: %.3f MB\n", bytes_to_mb(vs.anim_bone_positions_bytes));
+                    fprintf(report, "      - bone_velocities: %.3f MB\n", bytes_to_mb(vs.anim_bone_velocities_bytes));
+                    fprintf(report, "      - bone_rotations: %.3f MB\n", bytes_to_mb(vs.anim_bone_rotations_bytes));
+                    fprintf(report, "      - bone_angular_velocities: %.3f MB\n", bytes_to_mb(vs.anim_bone_angular_velocities_bytes));
+                    fprintf(report, "      - contact_states: %.3f MB\n", bytes_to_mb(vs.anim_contact_states_bytes));
+                    fprintf(report, "      - future_toe_positions: %.3f MB\n", bytes_to_mb(vs.anim_future_toe_positions_bytes));
+                    fprintf(report, "   - additional:\n");
+                    fprintf(report, "      - range: %.6f MB\n\n", bytes_to_mb(vs.additional_range_total_bytes));
+
+                    // LMM
+                    if (vs.lmm_network_total_bytes > 0)
+                    {
+                        fprintf(report, "LMM:\n");
+                        fprintf(report, "- MPJPE (local) = %.6e\n", vs.lmm_local_mpjpe);
+                        fprintf(report, "- MPJPE (world) = %.6e\n", vs.lmm_world_mpjpe);
+                        fprintf(report, "- MPJPE (MM gt vs LMM pred) = %.6e\n", vs.lmm_mm_diff_mpjpe);
+                        fprintf(report, "- time (ms) = %.3f\n", vs.lmm_time_ms);
+                        fprintf(report, "- average memory (MB) = %.3f\n", vs.lmm_mem_avg);
+                        fprintf(report, "- peak memory (MB) = %.3f\n", vs.lmm_mem_peak);
+                        fprintf(report, "- memory by components (MB) = %.3f (total)\n", bytes_to_mb(vs.lmm_network_total_bytes));
+                        fprintf(report, "   - D (Decompressor) = %.3f\n", bytes_to_mb(vs.lmm_decompressor_bytes));
+                        fprintf(report, "   - S (Stepper) = %.3f\n", bytes_to_mb(vs.lmm_stepper_bytes));
+                        fprintf(report, "   - P (Projector) = %.3f\n\n", bytes_to_mb(vs.lmm_projector_bytes));
+                    }
+
+                    // Frozen
+                    fprintf(report, "Frozen:\n");
+                    fprintf(report, "- MPJPE (local) = %.6e\n", vs.frozen_local_mpjpe);
+                    fprintf(report, "- MPJPE (world) = %.6e\n\n", vs.frozen_world_mpjpe);
+
+                    fclose(report);
+                    std::cout << "[history] Exported detailed memory report to: " << report_path << std::endl;
+                }
             }
 
             // ---- Write history_metrics_summary.csv for Python plotting ----
@@ -7214,22 +7426,33 @@ int main(int argc, char** argv)
             FILE* sf = fopen(summary_csv_path.c_str(), "w");
             if (sf)
             {
-                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_static_mb,memory_avg_mb,memory_peak_mb,time_ms\n");
+                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_static_mb,memory_avg_mb,memory_peak_mb,time_ms,"
+                            "mm_feat_tot,mm_feat_non_hist,mm_feat_hist,mm_anim_tot,mm_anim_pos,mm_anim_vel,mm_anim_rot,mm_anim_ang,mm_anim_cont,mm_anim_toe,mm_add_range,"
+                            "lmm_dec,lmm_step,lmm_proj\n");
                 auto bytes_to_mb = [](size_t bytes) -> double {
                     return (double)bytes / (1024.0 * 1024.0);
                 };
                 for (auto& vs : all_stats)
                 {
                     // MM
-                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                "0.0,0.0,0.0\n",
                         vs.label.c_str(), vs.mm_local_mpjpe, vs.mm_world_mpjpe,
-                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_mem_avg, vs.mm_mem_peak, vs.mm_time_ms);
+                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_mem_avg, vs.mm_mem_peak, vs.mm_time_ms,
+                        bytes_to_mb(vs.feature_total_bytes), bytes_to_mb(vs.feature_non_history_bytes), bytes_to_mb(vs.feature_history_bytes),
+                        bytes_to_mb(vs.anim_database_total_bytes), bytes_to_mb(vs.anim_bone_positions_bytes), bytes_to_mb(vs.anim_bone_velocities_bytes),
+                        bytes_to_mb(vs.anim_bone_rotations_bytes), bytes_to_mb(vs.anim_bone_angular_velocities_bytes), bytes_to_mb(vs.anim_contact_states_bytes),
+                        bytes_to_mb(vs.anim_future_toe_positions_bytes), bytes_to_mb(vs.additional_range_total_bytes));
                     // LMM
                     if (vs.lmm_network_total_bytes > 0)
                     {
-                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                    "0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,"
+                                    "%.6f,%.6f,%.6f\n",
                             vs.label.c_str(), vs.lmm_local_mpjpe, vs.lmm_world_mpjpe,
-                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_mem_avg, vs.lmm_mem_peak, vs.lmm_time_ms);
+                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_mem_avg, vs.lmm_mem_peak, vs.lmm_time_ms,
+                            bytes_to_mb(vs.lmm_decompressor_bytes), bytes_to_mb(vs.lmm_stepper_bytes), bytes_to_mb(vs.lmm_projector_bytes));
                     }
                 }
                 fclose(sf);

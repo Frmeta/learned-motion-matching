@@ -38,6 +38,9 @@ def main():
     walkpath_dir = os.path.join(out_dir, 'walkpath')
     os.makedirs(walkpath_dir, exist_ok=True)
 
+    basename = os.path.splitext(os.path.basename(csv_path))[0]
+    suffix = "_1000" if "_1000" in basename else ""
+
     fieldnames, rows = read_csv(csv_path)
     if not fieldnames or not rows:
         print("No data to plot.")
@@ -94,11 +97,40 @@ def main():
         axes = [axes]
     
     for ax, (label, x_col, z_col, color, lw, ls, is_frozen) in zip(axes, plots):
-        xs = [to_float(r[x_col]) for r in rows]
-        zs = [to_float(r[z_col]) for r in rows]
-        ax.plot(xs, zs, label=label, color=color, linewidth=lw, linestyle=ls, alpha=0.8)
-        if is_frozen and xs and zs:
-            ax.plot([xs[0]], [zs[0]], marker='o', color='red', markersize=5)
+        segments = []
+        curr_xs = []
+        curr_zs = []
+        curr_clip = None
+        
+        for r in rows:
+            clip_val = int(r['clip_id']) if ('clip_id' in fieldnames and r['clip_id']) else 0
+            x_val = to_float(r[x_col])
+            z_val = to_float(r[z_col])
+            
+            if curr_clip is None:
+                curr_clip = clip_val
+            
+            if clip_val != curr_clip:
+                if curr_xs:
+                    segments.append((curr_xs, curr_zs))
+                curr_xs = [x_val]
+                curr_zs = [z_val]
+                curr_clip = clip_val
+            else:
+                curr_xs.append(x_val)
+                curr_zs.append(z_val)
+                
+        if curr_xs:
+            segments.append((curr_xs, curr_zs))
+            
+        first = True
+        for seg_xs, seg_zs in segments:
+            lbl = label if first else None
+            ax.plot(seg_xs, seg_zs, label=lbl, color=color, linewidth=lw, linestyle=ls, alpha=0.8)
+            first = False
+
+        if is_frozen and segments and segments[0][0] and segments[0][1]:
+            ax.plot([segments[0][0][0]], [segments[0][1][0]], marker='o', color='red', markersize=5)
         
         ax.set_xlabel('X (m)')
         ax.set_ylabel('Z (m)')
@@ -109,7 +141,7 @@ def main():
         ax.set_ylim(lim_min_z, lim_max_z)
         ax.set_aspect('equal', adjustable='box')
 
-    out_path = os.path.join(walkpath_dir, "walkpath.png")
+    out_path = os.path.join(walkpath_dir, f"walkpath{suffix}.png")
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -368,16 +400,16 @@ def main():
         plt.grid(True, linestyle='--', alpha=0.4)
         plt.legend()
         plt.tight_layout()
-        fname = metric_name.lower().replace(' ', '_').replace('(', '').replace(')', '') + "_histogram.png"
+        fname = metric_name.lower().replace(' ', '_').replace('(', '').replace(')', '') + f"_histogram{suffix}.png"
         plot_path = os.path.join(walkpath_dir, fname)
         plt.savefig(plot_path, dpi=200)
         plt.close()
         print(f"Saved {metric_name} plot: {plot_path}")
         
     # Write Report
-    report_path = os.path.join(walkpath_dir, "walkpath_report.md")
+    report_path = os.path.join(walkpath_dir, f"walkpath_report{suffix}.md")
     with open(report_path, "w", encoding="utf-8") as rf:
-        rf.write("# Walkpath Analysis Report\n\n")
+        rf.write(f"# Walkpath Analysis Report{suffix.replace('_', ' ')}\n\n")
         
         # Build Table
         all_metrics = list(metrics_results.keys())
