@@ -1458,7 +1458,7 @@ int main(int argc, char** argv)
     float ik_max_length_buffer = 0.015f;
     float ik_foot_height = 0.02f;
     float ik_toe_length = 0.15f;
-    float ik_unlock_radius = 0.1f;
+    float ik_unlock_radius = 0.5f;
     float ik_blending_halflife = 0.1f;
     
     // Contact and Foot Locking data
@@ -7214,22 +7214,22 @@ int main(int argc, char** argv)
             FILE* sf = fopen(summary_csv_path.c_str(), "w");
             if (sf)
             {
-                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_mb,time_ms\n");
+                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_static_mb,memory_avg_mb,memory_peak_mb,time_ms\n");
                 auto bytes_to_mb = [](size_t bytes) -> double {
                     return (double)bytes / (1024.0 * 1024.0);
                 };
                 for (auto& vs : all_stats)
                 {
                     // MM
-                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f\n",
+                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
                         vs.label.c_str(), vs.mm_local_mpjpe, vs.mm_world_mpjpe,
-                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_time_ms);
+                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_mem_avg, vs.mm_mem_peak, vs.mm_time_ms);
                     // LMM
                     if (vs.lmm_network_total_bytes > 0)
                     {
-                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f\n",
+                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
                             vs.label.c_str(), vs.lmm_local_mpjpe, vs.lmm_world_mpjpe,
-                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_time_ms);
+                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_mem_avg, vs.lmm_mem_peak, vs.lmm_time_ms);
                     }
                 }
                 fclose(sf);
