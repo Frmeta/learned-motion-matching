@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Comparison Playback</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            color: #00ffcc;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+        .video-box {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            text-align: center;
+            width: 90%;
+            max-width: 1200px;
+        }
+        video {
+            width: 100%;
+            border-radius: 4px;
+            margin-top: 10px;
+            background-color: #000;
+        }
+        h2 {
+            margin: 0;
+            color: #ff9900;
+        }
+    </style>
+</head>
+<body>
+    <h1>LMM Big vs Small Video Playback</h1>
+    <div class="container">
+        <div class="video-box">
+            <h2>Variant: Big (video_big.mp4)</h2>
+            <video controls src="./score/20260519_1929_big_small/video_big.mp4"></video>
+        </div>
+        <div class="video-box">
+            <h2>Variant: Small (video_small.mp4)</h2>
+            <video controls src="./score/20260519_1929_big_small/video_small.mp4"></video>
+        </div>
+    </div>
+</body>
+</html>

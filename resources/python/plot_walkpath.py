@@ -223,29 +223,23 @@ def main():
                     # RRE
                     gt_rot_disp = angle_diff(gy, gy_prev)
                     p_rot_disp = angle_diff(py, py_prev)
-                    err_rre = abs(angle_diff(gt_rot_disp, p_rot_disp))
+                    err_rre = abs(angle_diff(p_rot_disp, gt_rot_disp))
                     err_rre_deg = math.degrees(err_rre)
                     
                     rre_curve.append(err_rre_deg)
-                    rre_sum += (err_rre_deg ** 2)
+                    rre_sum += err_rre_deg
                     valid_rre += 1
                     
                     # RTE
                     gt_disp_x = gx - gx_prev
                     gt_disp_z = gz - gz_prev
-                    gt_disp_sq = gt_disp_x**2 + gt_disp_z**2
                     
                     p_disp_x = px - px_prev
                     p_disp_z = pz - pz_prev
                     
-                    diff_disp_x = gt_disp_x - p_disp_x
-                    diff_disp_z = gt_disp_z - p_disp_z
-                    diff_disp_sq = diff_disp_x**2 + diff_disp_z**2
-                    
-                    if gt_disp_sq > 1e-6:
-                        err_rte = diff_disp_sq / gt_disp_sq
-                    else:
-                        err_rte = 0.0 # Ignore if GT didn't move
+                    diff_disp_x = p_disp_x - gt_disp_x
+                    diff_disp_z = p_disp_z - gt_disp_z
+                    err_rte = math.sqrt(diff_disp_x**2 + diff_disp_z**2)
                         
                     rte_curve.append(err_rte)
                     rte_sum += err_rte
@@ -258,7 +252,7 @@ def main():
                 metrics_results['RTE'][label] = rte_sum / valid_rte
                 curves['RTE'][label] = rte_curve
             if valid_rre > 0:
-                metrics_results['RRE (deg)'][label] = math.sqrt(rre_sum / valid_rre)
+                metrics_results['RRE (deg)'][label] = rre_sum / valid_rre
                 curves['RRE (deg)'][label] = rre_curve
             if valid_are_full > 0:
                 metrics_results['ARE Full (deg)'][label] = math.sqrt(are_full_sum / valid_are_full)

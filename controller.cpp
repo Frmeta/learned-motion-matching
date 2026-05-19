@@ -7121,9 +7121,18 @@ int main(int argc, char** argv)
                 const int history_feature_cols = std::max(0, std::min((int)MM_HISTORY_FEATURE_COUNT, feature_cols_total - (int)MM_HISTORY_FEATURE_START));
                 const int non_history_feature_cols = std::max(0, feature_cols_total - history_feature_cols);
 
-                vs.feature_total_bytes = (size_t)feature_rows_total * (size_t)feature_cols_total * sizeof(float);
-                vs.feature_non_history_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
-                vs.feature_history_bytes = (size_t)feature_rows_total * (size_t)history_feature_cols * sizeof(float);
+                if (vi == 0) // nohistory
+                {
+                    vs.feature_total_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
+                    vs.feature_non_history_bytes = vs.feature_total_bytes;
+                    vs.feature_history_bytes = 0;
+                }
+                else // history
+                {
+                    vs.feature_total_bytes = (size_t)feature_rows_total * (size_t)feature_cols_total * sizeof(float);
+                    vs.feature_non_history_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
+                    vs.feature_history_bytes = (size_t)feature_rows_total * (size_t)history_feature_cols * sizeof(float);
+                }
 
                 vs.anim_bone_positions_bytes = (size_t)db.bone_positions.rows * (size_t)db.bone_positions.cols * sizeof(vec3);
                 vs.anim_bone_velocities_bytes = (size_t)db.bone_velocities.rows * (size_t)db.bone_velocities.cols * sizeof(vec3);
