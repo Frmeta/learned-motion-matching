@@ -105,7 +105,11 @@ Analyze
 ./controller.exe --analyze-lmm ./resources/bin/database_test.bin --playback
 ./controller.exe --analyze-both ./resources/bin/database_test.bin --playback
 
+./controller.exe --analyze-both-big-small ./resources/bin/database_test.bin
 ./controller.exe --analyze-both-big-small ./resources/bin/database_test.bin --playback
+
+./controller.exe --analyze-both-history ./resources/bin/database_test.bin
+./controller.exe --analyze-both-history ./resources/bin/database_test.bin --playback
 ```
 
 Convert character fbx to bin

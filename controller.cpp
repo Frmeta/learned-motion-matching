@@ -851,6 +851,7 @@ int main(int argc, char** argv)
             APP_MODE_ANALYZE_MM,
             APP_MODE_ANALYZE_LMM,
             APP_MODE_ANALYZE_BOTH_BIG_SMALL,
+            APP_MODE_ANALYZE_BOTH_HISTORY,
         };
         app_mode mode = APP_MODE_WINDOW;
         char analyze_input_path[512] = "./resources/input-recording";
@@ -903,6 +904,10 @@ int main(int argc, char** argv)
             else if (strcmp(argv[argi], "--analyze-both-big-small") == 0)
             {
                 mode = APP_MODE_ANALYZE_BOTH_BIG_SMALL;
+            }
+            else if (strcmp(argv[argi], "--analyze-both-history") == 0)
+            {
+                mode = APP_MODE_ANALYZE_BOTH_HISTORY;
             }
             else if (strncmp(argv[argi], "--mode=", 7) == 0)
             {
@@ -1517,9 +1522,42 @@ int main(int argc, char** argv)
     bool lmm_enabled = start_with_lmm_enabled;
     
     nnet decompressor, stepper, projector;
-    const char* dec_path_default = "./resources/model/decompressor_big.bin";
-    const char* stp_path_default = "./resources/model/stepper_big.bin";
-    const char* prj_path_default = "./resources/model/projector_big.bin";
+    std::string dec_path = "./resources/model/decompressor_big.bin";
+    std::string stp_path = "./resources/model/stepper_big.bin";
+    std::string prj_path = "./resources/model/projector_big.bin";
+    int lmm_features_size = 45;
+
+    if (FileExists("./resources/model/decompressor_big.bin") &&
+        FileExists("./resources/model/stepper_big.bin") &&
+        FileExists("./resources/model/projector_big.bin"))
+    {
+        dec_path = "./resources/model/decompressor_big.bin";
+        stp_path = "./resources/model/stepper_big.bin";
+        prj_path = "./resources/model/projector_big.bin";
+        lmm_features_size = 45;
+    }
+    else if (FileExists("./resources/model/decompressor_small.bin") &&
+             FileExists("./resources/model/stepper_small.bin") &&
+             FileExists("./resources/model/projector_small.bin"))
+    {
+        dec_path = "./resources/model/decompressor_small.bin";
+        stp_path = "./resources/model/stepper_small.bin";
+        prj_path = "./resources/model/projector_small.bin";
+        lmm_features_size = 45;
+    }
+    else if (FileExists("./resources/model/decompressor_history.bin") &&
+             FileExists("./resources/model/stepper_history.bin") &&
+             FileExists("./resources/model/projector_history.bin"))
+    {
+        dec_path = "./resources/model/decompressor_history.bin";
+        stp_path = "./resources/model/stepper_history.bin";
+        prj_path = "./resources/model/projector_history.bin";
+        lmm_features_size = db.nfeatures();
+    }
+
+    const char* dec_path_default = dec_path.c_str();
+    const char* stp_path_default = stp_path.c_str();
+    const char* prj_path_default = prj_path.c_str();
 
     bool dec_exists_default = FileExists(dec_path_default);
     bool stp_exists_default = FileExists(stp_path_default);
@@ -1548,8 +1586,8 @@ int main(int argc, char** argv)
     }
 
     const int lmm_latent_size = 32;
-    const int expected_features = db.nfeatures();
-    const int expected_features_plus_latent = db.nfeatures() + lmm_latent_size;
+    const int expected_features = lmm_features_size;
+    const int expected_features_plus_latent = lmm_features_size + lmm_latent_size;
 
     const bool decompressor_input_match =
         decompressor.input_mean.size == expected_features_plus_latent;
@@ -1571,7 +1609,7 @@ int main(int argc, char** argv)
 
     if (networks_exist && !lmm_networks_compatible)
     {
-        printf("Warning: LMM network dimensions do not match feature count (db.nfeatures=%d). Retrain decompressor/projector/stepper for this feature layout.\n", db.nfeatures());
+        printf("Warning: LMM network dimensions do not match expected feature size (expected=%d). Retrain decompressor/projector/stepper for this feature layout.\n", lmm_features_size);
         printf("  [%-8s] decompressor.input_mean.size : actual=%d expected=%d\n",
             decompressor_input_match ? "MATCH" : "MISMATCH",
             decompressor.input_mean.size,
@@ -1605,8 +1643,13 @@ int main(int argc, char** argv)
     }
     
     if (debug) std::cout << "Initializing features..." << std::endl;
-    array1d<float> features_proj = db.features(frame_index);
-    array1d<float> features_curr = db.features(frame_index);
+    array1d<float> features_proj(lmm_features_size);
+    array1d<float> features_curr(lmm_features_size);
+    for (int i = 0; i < lmm_features_size; i++)
+    {
+        features_proj(i) = db.features(frame_index, i);
+        features_curr(i) = db.features(frame_index, i);
+    }
     array1d<float> latent_proj(lmm_latent_size); latent_proj.zero();
     array1d<float> latent_curr(lmm_latent_size); latent_curr.zero();
     
@@ -1903,8 +1946,8 @@ int main(int argc, char** argv)
     const array1d<float> base_smoothed_clamp_offset_velocities = smoothed_clamp_offset_velocities;
     const array1d<vec3> base_adjusted_bone_positions = adjusted_bone_positions;
     const array1d<quat> base_adjusted_bone_rotations = adjusted_bone_rotations;
-    const array1d<float> base_features_proj = features_proj;
-    const array1d<float> base_features_curr = features_curr;
+    array1d<float> base_features_proj = features_proj;
+    array1d<float> base_features_curr = features_curr;
     const array1d<float> base_latent_proj = latent_proj;
     const array1d<float> base_latent_curr = latent_curr;
     const array1d<vec2> base_future_toe_position = future_toe_position;
@@ -2093,8 +2136,8 @@ int main(int argc, char** argv)
         history_terrain_heights.clear();
         push_runtime_history();
 
-        if (test_frame < test_db.features.rows && test_db.features.cols == features_curr.size) {
-            for (int i = 0; i < test_db.nfeatures(); i++) {
+        if (test_frame < test_db.features.rows && test_db.features.cols >= features_curr.size) {
+            for (int i = 0; i < features_curr.size; i++) {
                 features_curr(i) = test_db.features(test_frame, i);
                 features_proj(i) = test_db.features(test_frame, i);
             }
@@ -5113,6 +5156,12 @@ int main(int argc, char** argv)
                 draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
                 draw_part(3, frozen_pose, frozen_rotation, "Frozen", mm_feature_data, i);
             }
+            else if (mode == APP_MODE_ANALYZE_BOTH_BIG_SMALL || mode == APP_MODE_ANALYZE_BOTH_HISTORY)
+            {
+                draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
+                draw_part(1, i < mm_poses.size() ? mm_poses[i] : mm_poses.back(), i < mm_rotations.size() ? mm_rotations[i] : mm_rotations.back(), "Motion Matching", mm_feature_data, i);
+                draw_part(2, i < lmm_poses.size() ? lmm_poses[i] : lmm_poses.back(), i < lmm_rotations.size() ? lmm_rotations[i] : lmm_rotations.back(), "Learned Motion Matching", lmm_feature_data, i);
+            }
             else if (mode == APP_MODE_ANALYZE_MM)
             {
                 draw_part(0, i < gt_poses.size() ? gt_poses[i] : gt_poses.back(), i < gt_rotations.size() ? gt_rotations[i] : gt_rotations.back(), "Ground Truth", mm_feature_data, i);
@@ -5149,7 +5198,7 @@ int main(int argc, char** argv)
     std::function<void()> u{update_func};
     emscripten_set_main_loop_arg(update_callback, &u, 0, 1);
 #else
-    if (mode != APP_MODE_WINDOW && mode != APP_MODE_ANALYZE_BOTH_BIG_SMALL)
+    if (mode != APP_MODE_WINDOW && mode != APP_MODE_ANALYZE_BOTH_BIG_SMALL && mode != APP_MODE_ANALYZE_BOTH_HISTORY)
     {
         char cwd[1024];
         if (GetCurrentDirectoryA(sizeof(cwd), cwd))
@@ -6116,7 +6165,28 @@ int main(int argc, char** argv)
                     nnet_load(decompressor, dec_path.c_str());
                     nnet_load(stepper,      stp_path.c_str());
                     nnet_load(projector,    prj_path.c_str());
-                    std::cout << "[big-small] LMM networks loaded for " << vsuffix << std::endl;
+
+                    const int expected_features = 45; // always 45 for big/small
+                    const int expected_features_plus_latent = 45 + 32;
+                    bool compatible = (decompressor.input_mean.size == expected_features_plus_latent) &&
+                                      (stepper.input_mean.size == expected_features_plus_latent) &&
+                                      (stepper.output_mean.size == expected_features_plus_latent) &&
+                                      (projector.input_mean.size == expected_features) &&
+                                      (projector.output_mean.size == expected_features_plus_latent);
+                    if (!compatible)
+                    {
+                        std::cout << "[big-small] WARNING: Neural network sizes are incompatible for " << vsuffix << ". LMM will be skipped." << std::endl;
+                        var_nets_ok = false;
+                        lmm_networks_compatible = false;
+                    }
+                    else
+                    {
+                        decompressor_evaluation.resize(decompressor);
+                        stepper_evaluation.resize(stepper);
+                        projector_evaluation.resize(projector);
+                        lmm_networks_compatible = true;
+                        std::cout << "[big-small] LMM networks loaded and verified for " << vsuffix << std::endl;
+                    }
                 }
                 else
                 {
@@ -6125,6 +6195,7 @@ int main(int argc, char** argv)
                     if (!dec_exists) std::cout << "  - Missing: " << dec_path << std::endl;
                     if (!stp_exists) std::cout << "  - Missing: " << stp_path << std::endl;
                     if (!prj_exists) std::cout << "  - Missing: " << prj_path << std::endl;
+                    lmm_networks_compatible = false;
                 }
 
                 // Precompute reference poses for this test db
@@ -6606,6 +6677,561 @@ int main(int argc, char** argv)
             }
 
             std::cout << "[big-small] Analysis complete. Output: " << out_dir << std::endl;
+        }
+    }
+    else if (mode == APP_MODE_ANALYZE_BOTH_HISTORY)
+    {
+        // -------------------------------------------------------
+        // --analyze-both-history: 4-way comparison
+        //   MM-nohistory, MM-history, LMM-nohistory, LMM-history
+        // -------------------------------------------------------
+
+        if (!analyze_input_is_database)
+        {
+            std::cout << "ERROR: --analyze-both-history requires a .bin test database input." << std::endl;
+            std::cout << "Usage: controller.exe --analyze-both-history resources/bin/database_test.bin" << std::endl;
+        }
+        else
+        {
+            // Generate timestamped output folder
+            time_t rawtime; time(&rawtime);
+            struct tm* ti = localtime(&rawtime);
+            char ts[32]; strftime(ts, sizeof(ts), "%Y%m%d_%H%M_history", ti);
+            std::string out_dir = std::string("./score/") + ts;
+            CreateDirectoryA(out_dir.c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/mpjpe").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/history_comparison").c_str(), nullptr);
+
+            // ---- Per-variant stats container ----
+            struct variant_stats {
+                std::string label;
+                double mm_mean = -1, mm_median = -1, mm_std = -1, mm_min = -1, mm_max = -1;
+                double lmm_mean = -1, lmm_median = -1, lmm_std = -1, lmm_min = -1, lmm_max = -1;
+                double frozen_mean = -1, frozen_median = -1, frozen_std = -1, frozen_min = -1, frozen_max = -1;
+                double ade_mm = -1, fde_mm = -1, ade_lmm = -1, fde_lmm = -1;
+                std::string csv_path_mm;
+
+                double mm_world_mpjpe = -1.0;
+                double mm_local_mpjpe = -1.0;
+                double mm_time_ms = -1.0;
+                double mm_mem_avg = -1.0;
+                double mm_mem_peak = -1.0;
+
+                double lmm_world_mpjpe = -1.0;
+                double lmm_local_mpjpe = -1.0;
+                double lmm_mm_diff_mpjpe = -1.0;
+                double lmm_time_ms = -1.0;
+                double lmm_mem_avg = -1.0;
+                double lmm_mem_peak = -1.0;
+
+                double frozen_world_mpjpe = -1.0;
+                double frozen_local_mpjpe = -1.0;
+
+                size_t feature_total_bytes = 0;
+                size_t feature_non_history_bytes = 0;
+                size_t feature_history_bytes = 0;
+                size_t anim_database_total_bytes = 0;
+                size_t anim_bone_positions_bytes = 0;
+                size_t anim_bone_velocities_bytes = 0;
+                size_t anim_bone_rotations_bytes = 0;
+                size_t anim_bone_angular_velocities_bytes = 0;
+                size_t anim_contact_states_bytes = 0;
+                size_t anim_future_toe_positions_bytes = 0;
+                size_t additional_range_total_bytes = 0;
+                size_t mm_memory_total_with_additional_bytes = 0;
+                size_t mm_memory_total_without_additional_bytes = 0;
+
+                size_t lmm_network_total_bytes = 0;
+                size_t lmm_decompressor_bytes = 0;
+                size_t lmm_stepper_bytes = 0;
+                size_t lmm_projector_bytes = 0;
+            };
+            std::vector<variant_stats> all_stats;
+
+            // Collect all per-frame local MPJPE series for global y-axis scaling
+            std::vector<double> global_mpjpe_vals;
+
+            const char* variants[2] = { "nohistory", "history" };
+
+            // For both runs we use database_big.bin
+            const char* train_db_path = "./resources/bin/database_big.bin";
+            const char* train_feat_path = "./resources/bin/features_big.bin";
+
+            std::cout << "[history] Loading train db: " << train_db_path << std::endl;
+            database_load(db, train_db_path);
+
+            // Load/build features for train db
+            bool rebuild = force_rebuild_features || should_rebuild_features(train_db_path, train_feat_path);
+            if (!rebuild)
+            {
+                database_load_matching_features(db, train_feat_path);
+                if (db.nfeatures() != db.nfeatures()) rebuild = true;
+            }
+            if (rebuild)
+            {
+                std::cout << "[history] Building features for training db..." << std::endl;
+                database_build_matching_features(
+                    db,
+                    feature_weight_foot_position, feature_weight_foot_velocity,
+                    feature_weight_hip_velocity,
+                    feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                    feature_weight_terrain_heights,
+                    feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                    feature_weight_cartwheel,
+                    feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                    feature_weight_history_hip_velocity,
+                    feature_weight_history_trajectory_positions,
+                    feature_weight_history_trajectory_directions,
+                    feature_weight_history_terrain_heights);
+                database_save_matching_features(db, train_feat_path, false);
+            }
+            database_build_bounds(db);
+
+            // Load test db
+            std::cout << "[history] Loading test db: " << analyze_input_path << std::endl;
+            database_load(test_db, analyze_input_path);
+            
+            // Build test features normalized against the training db
+            std::string tfp = "./resources/bin/database_test_features_history_run.bin";
+            bool rebuild_test = force_rebuild_features || should_rebuild_features(analyze_input_path, tfp.c_str());
+            if (!rebuild_test)
+            {
+                database_load_matching_features(test_db, tfp.c_str());
+                if (test_db.nfeatures() != db.nfeatures()) rebuild_test = true;
+            }
+            if (rebuild_test)
+            {
+                database_build_matching_features(
+                    test_db,
+                    feature_weight_foot_position, feature_weight_foot_velocity,
+                    feature_weight_hip_velocity,
+                    feature_weight_trajectory_positions, feature_weight_trajectory_directions,
+                    feature_weight_terrain_heights,
+                    feature_weight_idle, feature_weight_crouch, feature_weight_jump,
+                    feature_weight_cartwheel,
+                    feature_weight_history_foot_position, feature_weight_history_foot_velocity,
+                    feature_weight_history_hip_velocity,
+                    feature_weight_history_trajectory_positions,
+                    feature_weight_history_trajectory_directions,
+                    feature_weight_history_terrain_heights);
+                database_apply_reference_normalization(test_db, db);
+                database_save_matching_features(test_db, tfp.c_str(), false);
+            }
+
+            // Precompute reference poses for this test db
+            database_test_reference_poses.clear();
+            database_test_reference_rotations.clear();
+            database_test_reference_poses.reserve(test_db.nframes());
+            database_test_reference_rotations.reserve(test_db.nframes());
+            frozen_pose = array1d<vec3>(test_db.nbones());
+            frozen_rotation = array1d<quat>(test_db.nbones());
+            for (int i = 0; i < test_db.nframes(); i++)
+            {
+                array1d<vec3> pose(test_db.nbones());
+                array1d<quat> rot(test_db.nbones());
+                forward_kinematics_full(pose, rot,
+                    test_db.bone_positions(i),
+                    test_db.bone_rotations(i),
+                    test_db.bone_parents);
+                database_test_reference_poses.push_back(pose);
+                database_test_reference_rotations.push_back(rot);
+                if (i == 0) { frozen_pose = pose; frozen_rotation = rot; }
+            }
+
+            for (int vi = 0; vi < 2; vi++)
+            {
+                const char* vsuffix = variants[vi];
+                std::cout << "\n[history] ===== Variant: " << vsuffix << " =====" << std::endl;
+
+                variant_stats vs;
+                vs.label = vsuffix;
+
+                // Configure dynamic sizing
+                lmm_features_size = (vi == 0) ? 45 : db.nfeatures();
+                features_proj.resize(lmm_features_size);
+                features_curr.resize(lmm_features_size);
+                for (int i = 0; i < lmm_features_size; i++)
+                {
+                    features_proj(i) = db.features(frame_index, i);
+                    features_curr(i) = db.features(frame_index, i);
+                }
+                base_features_proj = features_proj;
+                base_features_curr = features_curr;
+
+                // Load networks (reusing outer variables to avoid shadowing)
+                std::string dec_p = (vi == 0) ? "./resources/model/decompressor_big.bin" : "./resources/model/decompressor_history.bin";
+                std::string stp_p = (vi == 0) ? "./resources/model/stepper_big.bin" : "./resources/model/stepper_history.bin";
+                std::string prj_p = (vi == 0) ? "./resources/model/projector_big.bin" : "./resources/model/projector_history.bin";
+
+                const int expected_features = lmm_features_size;
+                const int expected_features_plus_latent = lmm_features_size + lmm_latent_size;
+
+                bool var_nets_ok = FileExists(dec_p.c_str()) && FileExists(stp_p.c_str()) && FileExists(prj_p.c_str());
+                if (var_nets_ok)
+                {
+                    nnet_load(decompressor, dec_p.c_str());
+                    nnet_load(stepper, stp_p.c_str());
+                    nnet_load(projector, prj_p.c_str());
+
+                    bool compatible = (decompressor.input_mean.size == expected_features_plus_latent) &&
+                                      (stepper.input_mean.size == expected_features_plus_latent) &&
+                                      (stepper.output_mean.size == expected_features_plus_latent) &&
+                                      (projector.input_mean.size == expected_features) &&
+                                      (projector.output_mean.size == expected_features_plus_latent);
+                    if (!compatible)
+                    {
+                        std::cout << "[history] WARNING: Neural network sizes are incompatible for " << vsuffix << ". LMM will be skipped." << std::endl;
+                        var_nets_ok = false;
+                        lmm_networks_compatible = false;
+                    }
+                    else
+                    {
+                        decompressor_evaluation.resize(decompressor);
+                        stepper_evaluation.resize(stepper);
+                        projector_evaluation.resize(projector);
+                        lmm_networks_compatible = true;
+                        std::cout << "[history] LMM networks loaded and verified for " << vsuffix << std::endl;
+                    }
+                }
+                else
+                {
+                    std::cout << "[history] WARNING: Neural networks not found for " << vsuffix << ". LMM will be skipped." << std::endl;
+                    lmm_networks_compatible = false;
+                }
+
+                // Search mode configuration
+                mm_history_mode = (vi == 0) ? MM_HISTORY_SEARCH_OFF : MM_HISTORY_SEARCH_ON;
+
+                // Run MM and LMM simulation captures
+                std::vector<array1d<vec3>> mm_capture;
+                std::vector<array1d<quat>> mm_capture_rotations;
+                std::vector<feature_draw_data> mm_feature_data;
+                std::vector<array1d<vec3>> lmm_capture;
+                std::vector<array1d<quat>> lmm_capture_rotations;
+                std::vector<feature_draw_data> lmm_feature_data;
+                capture_stats mm_stats;
+                capture_stats lmm_stats;
+
+                std::vector<joystick_record_sample> samples; // Empty for database simulation
+                std::cout << "[history] Simulating Motion Matching capture..." << std::endl;
+                bool mm_ok = run_capture_for_mode(samples, false, mm_capture, mm_capture_rotations, mm_feature_data, mm_stats);
+
+                bool lmm_ok = false;
+                if (var_nets_ok)
+                {
+                    std::cout << "[history] Simulating Learned Motion Matching capture..." << std::endl;
+                    lmm_ok = run_capture_for_mode(samples, true, lmm_capture, lmm_capture_rotations, lmm_feature_data, lmm_stats);
+                }
+
+                // Compute global benchmarks
+                int used_frames = 0, used_joints = 0;
+                if (mm_ok)
+                {
+                    vs.mm_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, false);
+                    vs.mm_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, mm_capture, used_frames, used_joints, true);
+                    vs.mm_time_ms = mm_stats.elapsed_ms;
+                    vs.mm_mem_avg = mm_stats.mem_avg_mb;
+                    vs.mm_mem_peak = mm_stats.mem_peak_mb;
+                }
+
+                if (lmm_ok)
+                {
+                    vs.lmm_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, false);
+                    vs.lmm_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, lmm_capture, used_frames, used_joints, true);
+                    vs.lmm_mm_diff_mpjpe = compute_mpjpe(mm_capture, lmm_capture, used_frames, used_joints, false);
+                    vs.lmm_time_ms = lmm_stats.elapsed_ms;
+                    vs.lmm_mem_avg = lmm_stats.mem_avg_mb;
+                    vs.lmm_mem_peak = lmm_stats.mem_peak_mb;
+                }
+
+                // Compute frozen baseline
+                std::vector<array1d<vec3>> frozen_repeated(database_test_reference_poses.size(), frozen_pose);
+                vs.frozen_world_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, false);
+                vs.frozen_local_mpjpe = compute_reference_mpjpe(database_test_reference_poses, frozen_repeated, used_frames, used_joints, true);
+
+                // Render video comparison side-by-side if playback_video is true
+                if (playback_video)
+                {
+                    std::string video_name = out_dir + "/comparison_" + vsuffix + ".mp4";
+                    std::cout << "[history] Recording side-by-side video to: " << video_name << std::endl;
+                    render_video_comparison(video_name.c_str(), mode, database_test_reference_poses, database_test_reference_rotations, mm_capture, mm_capture_rotations, lmm_capture, lmm_capture_rotations, mm_feature_data, lmm_feature_data, (int)database_test_reference_poses.size());
+                }
+
+                // Compute per-frame local MPJPE for plotting
+                std::vector<double> mm_local  = compute_per_frame_mpjpe(database_test_reference_poses, mm_capture,  true);
+                std::vector<double> lmm_local = lmm_ok ?
+                    compute_per_frame_mpjpe(database_test_reference_poses, lmm_capture, true) :
+                    std::vector<double>{};
+                std::vector<double> frz_local = compute_per_frame_mpjpe(database_test_reference_poses, frozen_repeated, true);
+
+                // Collect for global y-axis
+                for (double v : mm_local)  if (v >= 0) global_mpjpe_vals.push_back(v);
+                for (double v : lmm_local) if (v >= 0) global_mpjpe_vals.push_back(v);
+                for (double v : frz_local) if (v >= 0) global_mpjpe_vals.push_back(v);
+
+                // Compute stats helper
+                auto compute_stats = [](const std::vector<double>& v,
+                    double& mean_, double& median_, double& std_, double& min_, double& max_)
+                {
+                    std::vector<double> valid;
+                    for (double x : v) if (x >= 0) valid.push_back(x);
+                    if (valid.empty()) { mean_ = median_ = std_ = min_ = max_ = -1.0; return; }
+                    std::sort(valid.begin(), valid.end());
+                    min_ = valid.front(); max_ = valid.back();
+                    double sum = 0; for (double x : valid) sum += x;
+                    mean_ = sum / valid.size();
+                    median_ = valid.size() % 2 == 0 ?
+                        (valid[valid.size()/2-1] + valid[valid.size()/2]) / 2.0 :
+                        valid[valid.size()/2];
+                    double sq = 0; for (double x : valid) sq += (x - mean_)*(x - mean_);
+                    std_ = sqrt(sq / valid.size());
+                };
+
+                compute_stats(mm_local,  vs.mm_mean,     vs.mm_median,     vs.mm_std,     vs.mm_min,     vs.mm_max);
+                compute_stats(lmm_local, vs.lmm_mean,    vs.lmm_median,    vs.lmm_std,    vs.lmm_min,    vs.lmm_max);
+                compute_stats(frz_local, vs.frozen_mean,  vs.frozen_median,  vs.frozen_std,  vs.frozen_min,  vs.frozen_max);
+
+                // Write per-frame local MPJPE CSV for Python plotting
+                auto write_var_csv = [&](const std::string& label_suffix,
+                    const std::vector<double>& mm_v,
+                    const std::vector<double>& lmm_v,
+                    const std::vector<double>& frz_v) -> std::string
+                {
+                    std::string cp = out_dir + "/" + label_suffix + "_mpjpe.csv";
+                    FILE* f = fopen(cp.c_str(), "w");
+                    if (!f) return "";
+                    fprintf(f, "frame,time_seconds,mm_local,lmm_local,frozen_local,mm_lmm_local_diff\n");
+                    int nf = (int)std::max({mm_v.size(), lmm_v.size(), frz_v.size()});
+                    for (int i = 0; i < nf; i++)
+                    {
+                        double t  = i / 60.0;
+                        double ml = i < (int)mm_v.size()  ? mm_v[i]  : -1.0;
+                        double ll = i < (int)lmm_v.size() ? lmm_v[i] : -1.0;
+                        double fl = i < (int)frz_v.size() ? frz_v[i] : -1.0;
+                        double df = (ml >= 0 && ll >= 0) ? fabs(ml - ll) : -1.0;
+                        fprintf(f, "%d,%.6f,%.6e,%.6e,%.6e,%.6e\n", i, t, ml, ll, fl, df);
+                    }
+                    fclose(f);
+                    return cp;
+                };
+                vs.csv_path_mm = write_var_csv(std::string(vsuffix), mm_local, lmm_local, frz_local);
+
+                // Export walkpath CSV and run Python walkpath plotting script
+                std::string walkpath_csv_path = out_dir + "/" + vsuffix + "_walkpath.csv";
+                FILE* walkpath_csvf = fopen(walkpath_csv_path.c_str(), "w");
+                if (walkpath_csvf)
+                {
+                    std::string header = "frame,clip_id,gt_x,gt_z,gt_yaw";
+                    if (mm_ok) header += ",mm_x,mm_z,mm_yaw";
+                    if (lmm_ok) header += ",lmm_x,lmm_z,lmm_yaw";
+                    if (frozen_pose.size > 0) header += ",frozen_x,frozen_z,frozen_yaw";
+                    fprintf(walkpath_csvf, "%s\n", header.c_str());
+
+                    int nframes = (int)std::max({mm_capture.size(), lmm_capture.size(), database_test_reference_poses.size()});
+                    
+                    auto extract_yaw = [](quat q) -> float {
+                        vec3 fwd = quat_mul_vec3(q, vec3(0.0f, 0.0f, 1.0f));
+                        return atan2f(fwd.x, fwd.z);
+                    };
+
+                    for (int f = 0; f < nframes; f++)
+                    {
+                        int clip_id = -1;
+                        for (int r = 0; r < test_db.nranges(); r++) {
+                            if (f >= test_db.range_starts(r) && f < test_db.range_stops(r)) {
+                                clip_id = r;
+                                break;
+                            }
+                        }
+                        if (clip_id == -1 && test_db.nranges() > 0) {
+                            clip_id = test_db.nranges() - 1;
+                        }
+                        
+                        fprintf(walkpath_csvf, "%d,%d", f, clip_id);
+                        
+                        if (f < (int)database_test_reference_poses.size()) {
+                            vec3 pos = database_test_reference_poses[f](0);
+                            float yaw = extract_yaw(database_test_reference_rotations[f](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        } else {
+                            fprintf(walkpath_csvf, ",0.0,0.0,0.0");
+                        }
+                        
+                        if (mm_ok) {
+                            if (f < (int)mm_capture.size()) {
+                                vec3 pos = mm_capture[f](0);
+                                float yaw = extract_yaw(mm_capture_rotations[f](0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            } else {
+                                vec3 pos = mm_capture.back()(0);
+                                float yaw = extract_yaw(mm_capture_rotations.back()(0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            }
+                        }
+
+                        if (lmm_ok) {
+                            if (f < (int)lmm_capture.size()) {
+                                vec3 pos = lmm_capture[f](0);
+                                float yaw = extract_yaw(lmm_capture_rotations[f](0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            } else {
+                                vec3 pos = lmm_capture.back()(0);
+                                float yaw = extract_yaw(lmm_capture_rotations.back()(0));
+                                fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                            }
+                        }
+
+                        if (frozen_pose.size > 0) {
+                            vec3 pos = frozen_pose(0);
+                            float yaw = extract_yaw(database_test_reference_rotations[0](0));
+                            fprintf(walkpath_csvf, ",%.6f,%.6f,%.6f", pos.x, pos.z, yaw);
+                        }
+                        fprintf(walkpath_csvf, "\n");
+                    }
+                    fclose(walkpath_csvf);
+
+                    std::cout << "[history] Running walkpath analysis plotting script..." << std::endl;
+                    std::string plot_walkpath_cmd = std::string("python \"resources/python/plot_walkpath.py\" \"") + walkpath_csv_path + "\" \"" + out_dir + "\"";
+                    system(plot_walkpath_cmd.c_str());
+
+                    // Rename generated walkpath files for this variant
+                    auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
+                        std::string src = out_dir + "/walkpath/" + basename + ext;
+                        std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                        if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                    };
+                    rename_walkpath_file("walkpath", ".png");
+                    rename_walkpath_file("rte_histogram", ".png");
+                    rename_walkpath_file("rre_deg_histogram", ".png");
+                    rename_walkpath_file("are_full_deg_histogram", ".png");
+                    rename_walkpath_file("are_1s_deg_histogram", ".png");
+                    rename_walkpath_file("are_2s_deg_histogram", ".png");
+                    rename_walkpath_file("are_5s_deg_histogram", ".png");
+                    rename_walkpath_file("ade_full_m_histogram", ".png");
+                    rename_walkpath_file("ade_1s_m_histogram", ".png");
+                    rename_walkpath_file("ade_2s_m_histogram", ".png");
+                    rename_walkpath_file("ade_5s_m_histogram", ".png");
+                    rename_walkpath_file("walkpath_report", ".md");
+                }
+
+                // Compute Memory Footprint Breakdown
+                const int feature_cols_total = db.features.cols;
+                const int feature_rows_total = db.features.rows;
+                const int history_feature_cols = std::max(0, std::min((int)MM_HISTORY_FEATURE_COUNT, feature_cols_total - (int)MM_HISTORY_FEATURE_START));
+                const int non_history_feature_cols = std::max(0, feature_cols_total - history_feature_cols);
+
+                vs.feature_total_bytes = (size_t)feature_rows_total * (size_t)feature_cols_total * sizeof(float);
+                vs.feature_non_history_bytes = (size_t)feature_rows_total * (size_t)non_history_feature_cols * sizeof(float);
+                vs.feature_history_bytes = (size_t)feature_rows_total * (size_t)history_feature_cols * sizeof(float);
+
+                vs.anim_bone_positions_bytes = (size_t)db.bone_positions.rows * (size_t)db.bone_positions.cols * sizeof(vec3);
+                vs.anim_bone_velocities_bytes = (size_t)db.bone_velocities.rows * (size_t)db.bone_velocities.cols * sizeof(vec3);
+                vs.anim_bone_rotations_bytes = (size_t)db.bone_rotations.rows * (size_t)db.bone_rotations.cols * sizeof(quat);
+                vs.anim_bone_angular_velocities_bytes = (size_t)db.bone_angular_velocities.rows * (size_t)db.bone_angular_velocities.cols * sizeof(vec3);
+                vs.anim_contact_states_bytes = (size_t)db.contact_states.rows * (size_t)db.contact_states.cols * sizeof(bool);
+                vs.anim_future_toe_positions_bytes = (size_t)db.future_toe_positions.rows * (size_t)db.future_toe_positions.cols * sizeof(float);
+                vs.anim_database_total_bytes =
+                    vs.anim_bone_positions_bytes +
+                    vs.anim_bone_velocities_bytes +
+                    vs.anim_bone_rotations_bytes +
+                    vs.anim_bone_angular_velocities_bytes +
+                    vs.anim_contact_states_bytes +
+                    vs.anim_future_toe_positions_bytes;
+
+                vs.additional_range_total_bytes = (size_t)db.range_starts.size * sizeof(int) + (size_t)db.range_stops.size * sizeof(int);
+
+                vs.mm_memory_total_without_additional_bytes = vs.feature_total_bytes + vs.anim_database_total_bytes;
+                vs.mm_memory_total_with_additional_bytes = vs.mm_memory_total_without_additional_bytes + vs.additional_range_total_bytes;
+
+                auto nnet_total_bytes = [](const nnet& nn) -> size_t
+                {
+                    size_t total = 0;
+                    total += (size_t)nn.input_mean.size * sizeof(float);
+                    total += (size_t)nn.input_std.size * sizeof(float);
+                    total += (size_t)nn.output_mean.size * sizeof(float);
+                    total += (size_t)nn.output_std.size * sizeof(float);
+                    for (const auto& w : nn.weights)
+                        total += (size_t)w.rows * (size_t)w.cols * sizeof(float);
+                    for (const auto& b : nn.biases)
+                        total += (size_t)b.size * sizeof(float);
+                    return total;
+                };
+
+                if (var_nets_ok)
+                {
+                    vs.lmm_decompressor_bytes = nnet_total_bytes(decompressor);
+                    vs.lmm_stepper_bytes = nnet_total_bytes(stepper);
+                    vs.lmm_projector_bytes = nnet_total_bytes(projector);
+                    vs.lmm_network_total_bytes = vs.lmm_decompressor_bytes + vs.lmm_stepper_bytes + vs.lmm_projector_bytes;
+                }
+
+                all_stats.push_back(vs);
+            } // end variant loop
+
+            // ---- Compute global y-axis ----
+            double global_ymax = 0.1;
+            if (!global_mpjpe_vals.empty())
+            {
+                std::sort(global_mpjpe_vals.begin(), global_mpjpe_vals.end());
+                size_t p99_idx = (size_t)(global_mpjpe_vals.size() * 0.99);
+                if (p99_idx >= global_mpjpe_vals.size()) p99_idx = global_mpjpe_vals.size() - 1;
+                global_ymax = global_mpjpe_vals[p99_idx] * 1.05;
+            }
+            std::cout << "\n[history] Global y-axis max: " << global_ymax << std::endl;
+
+            // ---- Call plot script for each variant CSV ----
+            for (auto& vs : all_stats)
+            {
+                if (vs.csv_path_mm.empty()) continue;
+                std::string cmd = std::string("python \"resources/python/plot_mpjpe.py\" \"")
+                    + vs.csv_path_mm + "\" \"" + out_dir
+                    + "\" --ymax=" + std::to_string(global_ymax);
+                system(cmd.c_str());
+                // Rename output PNGs to include variant suffix
+                auto rename_png = [&](const std::string& metric) {
+                    std::string src = out_dir + "/mpjpe/" + metric + ".png";
+                    std::string dst = out_dir + "/mpjpe/" + metric + "_" + vs.label + ".png";
+                    if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
+                };
+                rename_png("mm_local");
+                rename_png("lmm_local");
+                rename_png("frozen_local");
+                rename_png("mm_lmm_local_diff");
+            }
+
+            // ---- Write history_metrics_summary.csv for Python plotting ----
+            std::string summary_csv_path = out_dir + "/history_metrics_summary.csv";
+            FILE* sf = fopen(summary_csv_path.c_str(), "w");
+            if (sf)
+            {
+                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_mb,time_ms\n");
+                auto bytes_to_mb = [](size_t bytes) -> double {
+                    return (double)bytes / (1024.0 * 1024.0);
+                };
+                for (auto& vs : all_stats)
+                {
+                    // MM
+                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f\n",
+                        vs.label.c_str(), vs.mm_local_mpjpe, vs.mm_world_mpjpe,
+                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_time_ms);
+                    // LMM
+                    if (vs.lmm_network_total_bytes > 0)
+                    {
+                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f\n",
+                            vs.label.c_str(), vs.lmm_local_mpjpe, vs.lmm_world_mpjpe,
+                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_time_ms);
+                    }
+                }
+                fclose(sf);
+            }
+
+            // ---- Run history comparison plotting script ----
+            std::cout << "[history] Running history comparison plotting script..." << std::endl;
+            std::string plot_cmd = std::string("python \"resources/python/plot_history_comparison.py\" \"") + out_dir + "\"";
+            system(plot_cmd.c_str());
+
+            std::cout << "[history] Analysis complete. Output: " << out_dir << std::endl;
         }
     }
     else while (!WindowShouldClose())

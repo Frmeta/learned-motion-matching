@@ -90,13 +90,11 @@ if __name__ == '__main__':
     cartwheel_states = database['cartwheel_states']
     
     X = load_features(train_features_filename())['features'].astype(np.float32)
-    # LMM networks use non-history features only (first 45 of 68).
-    # History features are a MM extension and are excluded from LMM training
-    # so the networks generalise across history-on/off modes.
-    if X.shape[1] > NON_HISTORY_FEATURE_COUNT:
+    # LMM networks use non-history features only (first 45 of 68) unless training with history.
+    if get_train_type() != 'TRAIN_HISTORY' and X.shape[1] > NON_HISTORY_FEATURE_COUNT:
         print(f'[train_decompressor] Trimming features: {X.shape[1]} -> {NON_HISTORY_FEATURE_COUNT} (dropping history)')
         X = X[:, :NON_HISTORY_FEATURE_COUNT]
-    nfeatures = X.shape[1]  # now always NON_HISTORY_FEATURE_COUNT
+    nfeatures = X.shape[1]
     Ypos = database['bone_positions'].astype(np.float32)
     Yrot = database['bone_rotations'].astype(np.float32)
     Yvel = database['bone_velocities'].astype(np.float32)

@@ -49,12 +49,13 @@ def model_path(filename):
 
 TRAIN_BIG   = 'TRAIN_BIG'
 TRAIN_SMALL = 'TRAIN_SMALL'
+TRAIN_HISTORY = 'TRAIN_HISTORY'
 
-_VALID_TRAIN_TYPES = {TRAIN_BIG, TRAIN_SMALL}
+_VALID_TRAIN_TYPES = {TRAIN_BIG, TRAIN_SMALL, TRAIN_HISTORY}
 
 
 def get_train_type() -> str:
-    """Return the active training type (TRAIN_BIG or TRAIN_SMALL)."""
+    """Return the active training type (TRAIN_BIG, TRAIN_SMALL or TRAIN_HISTORY)."""
     raw = os.environ.get('MOTION_MATCHING_TRAIN_TYPE', TRAIN_BIG).strip().upper()
     if raw not in _VALID_TRAIN_TYPES:
         print(f"Warning: unknown MOTION_MATCHING_TRAIN_TYPE='{raw}', defaulting to TRAIN_BIG")
@@ -64,7 +65,9 @@ def get_train_type() -> str:
 
 def _train_suffix() -> str:
     """Return the file suffix for the active training type ('big' or 'small')."""
-    return 'big' if get_train_type() == TRAIN_BIG else 'small'
+    if get_train_type() in (TRAIN_BIG, TRAIN_HISTORY):
+        return 'big'
+    return 'small'
 
 
 def train_db_filename() -> str:
@@ -83,11 +86,14 @@ def train_features_filename() -> str:
 
 def train_latent_filename() -> str:
     """Return the full path to the latent .bin for the active type."""
-    return bin_path(f'latent_{_train_suffix()}.bin')
+    suffix = 'history' if get_train_type() == TRAIN_HISTORY else _train_suffix()
+    return bin_path(f'latent_{suffix}.bin')
 
 
 def train_network_suffix() -> str:
-    """Return the suffix to append to saved network names, e.g. '_big' or '_small'."""
+    """Return the suffix to append to saved network names, e.g. '_big', '_small', or '_history'."""
+    if get_train_type() == TRAIN_HISTORY:
+        return '_history'
     return f'_{_train_suffix()}'
 
 
@@ -248,3 +254,4 @@ def save_network(filename, layers, mean_in, std_in, mean_out, std_out):
             for layer in layers:
                 f.write(struct.pack('II', *layer.weight.T.shape) + layer.weight.T.cpu().numpy().astype(np.float32).ravel().tobytes())
                 f.write(struct.pack('I', *layer.bias.shape) + layer.bias.cpu().numpy().astype(np.float32).ravel().tobytes())
+    print("Network saved to", filename)

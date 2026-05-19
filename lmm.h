@@ -215,7 +215,7 @@ void projector_evaluate(
     
     // Copy query features to input
     
-    for (int i = 0; i < query.size; i++)
+    for (int i = 0; i < input_layer.size; i++)
     {
         input_layer(i) = (query(i) - features_offset(i)) / features_scale(i);      
     }
