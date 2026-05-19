@@ -212,7 +212,7 @@ def main():
                 err_are = abs(angle_diff(gy, py))
                 err_are_deg = math.degrees(err_are)
                 are_full_curve.append(err_are_deg)
-                are_full_sum += (err_are_deg ** 2)
+                are_full_sum += err_are_deg
                 valid_are_full += 1
                 
                 # RTE & RRE
@@ -255,7 +255,7 @@ def main():
                 metrics_results['RRE (deg)'][label] = rre_sum / valid_rre
                 curves['RRE (deg)'][label] = rre_curve
             if valid_are_full > 0:
-                metrics_results['ARE Full (deg)'][label] = math.sqrt(are_full_sum / valid_are_full)
+                metrics_results['ARE Full (deg)'][label] = are_full_sum / valid_are_full
                 curves['ARE Full (deg)'][label] = are_full_curve
             if valid_ade_full > 0:
                 metrics_results['ADE Full (m)'][label] = ade_full_sum / valid_ade_full
@@ -266,7 +266,7 @@ def main():
                 curve_ade = [float('nan')] * len(gt_xs)
                 curve_are = [float('nan')] * len(gt_xs)
                 sum_ade = 0.0
-                sum_are_sq = 0.0
+                sum_are = 0.0
                 valid_w = 0
                 
                 for t in range(len(gt_xs) - W):
@@ -284,7 +284,7 @@ def main():
                     sin_r = math.sin(rot_diff)
                     
                     w_err_ade_sum = 0.0
-                    w_err_are_sq_sum = 0.0
+                    w_err_are_sum = 0.0
                     w_valid = 0
                     
                     for tau in range(1, W + 1):
@@ -313,20 +313,20 @@ def main():
                         err_are_deg = math.degrees(err_are)
                         
                         w_err_ade_sum += err_ade
-                        w_err_are_sq_sum += (err_are_deg ** 2)
+                        w_err_are_sum += err_are_deg
                         w_valid += 1
                         
                     if w_valid > 0:
                         window_ade = w_err_ade_sum / w_valid
-                        window_are = math.sqrt(w_err_are_sq_sum / w_valid)
+                        window_are = w_err_are_sum / w_valid
                         curve_ade[t] = window_ade
                         curve_are[t] = window_are
                         sum_ade += window_ade
-                        sum_are_sq += (window_are ** 2)
+                        sum_are += window_are
                         valid_w += 1
                         
                 if valid_w > 0:
-                    return sum_ade / valid_w, curve_ade, math.sqrt(sum_are_sq / valid_w), curve_are
+                    return sum_ade / valid_w, curve_ade, sum_are / valid_w, curve_are
                 return None, None, None, None
 
             metrics_1s = calc_sliding_window_metrics(60)
