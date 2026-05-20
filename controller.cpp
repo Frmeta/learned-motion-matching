@@ -4220,8 +4220,8 @@ int main(int argc, char** argv)
         // Draw Ground Plane
 
         // Visual reference cube for scene scale (1.0f tall).
-        // DrawCube((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, GRAY);
-        // DrawCubeWires((Vector3){2.0f, 0.5f, 0.0f}, 1.0f, 1.0f, 1.0f, DARKGRAY);
+        DrawCube((Vector3){joystick_recording_start_position.x + 2.0f, 0.5f, joystick_recording_start_position.z}, 1.0f, 1.0f, 1.0f, LIGHTGRAY);
+        DrawCubeWires((Vector3){joystick_recording_start_position.x + 2.0f, 0.5f, joystick_recording_start_position.z}, 1.0f, 1.0f, 1.0f, DARKGRAY);
         
         if (has_glb_ground)
         {

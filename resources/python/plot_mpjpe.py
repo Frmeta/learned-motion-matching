@@ -96,7 +96,43 @@ def main():
 
         plt.xlabel('Time (s)')
         plt.ylabel('MPJPE (m)')
-        plt.title(metric)
+        
+        # Map metric keys to highly descriptive names
+        metric_descriptions = {
+            "mm_local": "Motion Matching (MM) Root-Relative Pose Error (Local MPJPE)",
+            "mm_world": "Motion Matching (MM) World Space Pose Error (World MPJPE)",
+            "lmm_local": "Learned Motion Matching (LMM) Root-Relative Pose Error (Local MPJPE)",
+            "lmm_world": "Learned Motion Matching (LMM) World Space Pose Error (World MPJPE)",
+            "frozen_local": "Frozen Frame Baseline Root-Relative Pose Error (Local MPJPE)",
+            "frozen_world": "Frozen Frame Baseline World Space Pose Error (World MPJPE)",
+            "mm_lmm_local_diff": "Absolute Difference between MM and LMM (Local MPJPE)",
+            "mm_lmm_world_diff": "Absolute Difference between MM and LMM (World MPJPE)",
+        }
+        
+        desc_metric = metric_descriptions.get(metric, metric)
+        
+        # Parse variant from CSV filename
+        csv_filename = os.path.basename(csv_path)
+        variant_title = ""
+        if csv_filename.endswith("_mpjpe.csv"):
+            label = csv_filename[:-10]  # strip '_mpjpe.csv'
+            if label == "nohistory":
+                variant_title = "Without History Search Feature"
+            elif label == "history":
+                variant_title = "With History Search Feature"
+            elif label == "big":
+                variant_title = "Big Motion Database"
+            elif label == "small":
+                variant_title = "Small Motion Database"
+            else:
+                variant_title = f"Test Recording: {label}"
+        
+        if variant_title:
+            full_title = f"{desc_metric}\n[{variant_title}]"
+        else:
+            full_title = desc_metric
+
+        plt.title(full_title, fontsize=11, fontweight='bold', pad=10)
         plt.grid(True, linestyle='--', alpha=0.4)
 
         # Apply shared y-axis limit when provided

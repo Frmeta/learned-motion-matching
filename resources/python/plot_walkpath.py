@@ -41,6 +41,45 @@ def main():
     basename = os.path.splitext(os.path.basename(csv_path))[0]
     suffix = "_1000" if "_1000" in basename else ""
 
+    # Parse variant from CSV filename
+    variant_title = ""
+    if basename.startswith("walkpath_"):
+        label = basename[9:]  # strip 'walkpath_'
+        if "nohistory" in label:
+            variant_title = "Without History Search Feature"
+        elif "history" in label:
+            variant_title = "With History Search Feature"
+        elif "big" in label:
+            variant_title = "Big Motion Database"
+        elif "small" in label:
+            variant_title = "Small Motion Database"
+        else:
+            variant_title = f"Test Recording: {label}"
+    elif basename.startswith("walkpath_1000_"):
+        label = basename[14:]  # strip 'walkpath_1000_'
+        if "nohistory" in label:
+            variant_title = "Without History Search Feature (1000 frames)"
+        elif "history" in label:
+            variant_title = "With History Search Feature (1000 frames)"
+        elif "big" in label:
+            variant_title = "Big Motion Database (1000 frames)"
+        elif "small" in label:
+            variant_title = "Small Motion Database (1000 frames)"
+        else:
+            variant_title = f"Test Recording: {label} (1000 frames)"
+    else:
+        # Default fallback
+        if "nohistory" in basename:
+            variant_title = "Without History Search Feature"
+        elif "history" in basename:
+            variant_title = "With History Search Feature"
+        elif "big" in basename:
+            variant_title = "Big Motion Database"
+        elif "small" in basename:
+            variant_title = "Small Motion Database"
+        else:
+            variant_title = f"Test Recording: {basename}"
+
     fieldnames, rows = read_csv(csv_path)
     if not fieldnames or not rows:
         print("No data to plot.")
@@ -144,7 +183,11 @@ def main():
     scribble_dir = os.path.join(walkpath_dir, 'scribble')
     os.makedirs(scribble_dir, exist_ok=True)
     out_path = os.path.join(scribble_dir, f"walkpath{suffix}.png")
-    plt.tight_layout()
+    if variant_title:
+        fig.suptitle(f"2D Trajectory Comparison\n[{variant_title}]", fontsize=12, fontweight='bold', y=0.98)
+        plt.tight_layout(rect=[0, 0, 1, 0.9])
+    else:
+        plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
     print(f"Saved plot: {out_path}")
@@ -153,7 +196,7 @@ def main():
 
     # --- Advanced Walkpath Metrics ---
     metrics_results = {
-        'RTE': {},
+        'RTE (m)': {},
         'RRE (deg)': {},
         'ARE Full (deg)': {},
         'ARE 1s (deg)': {},
@@ -167,7 +210,7 @@ def main():
     
     # Store curves for plotting
     curves = {
-        'RTE': {},
+        'RTE (m)': {},
         'RRE (deg)': {},
         'ARE Full (deg)': {},
         'ARE 1s (deg)': {},
@@ -283,8 +326,8 @@ def main():
                     rre_curve.append(float('nan'))
                     
             if valid_rte > 0:
-                metrics_results['RTE'][label] = rte_sum / valid_rte
-                curves['RTE'][label] = rte_curve
+                metrics_results['RTE (m)'][label] = rte_sum / valid_rte
+                curves['RTE (m)'][label] = rte_curve
             if valid_rre > 0:
                 metrics_results['RRE (deg)'][label] = rre_sum / valid_rre
                 curves['RRE (deg)'][label] = rre_curve
@@ -398,7 +441,10 @@ def main():
                 
         plt.xlabel('Frame')
         plt.ylabel(metric_name)
-        plt.title(f'Per-Frame {metric_name}')
+        if variant_title:
+            plt.title(f'Per-Frame {metric_name}\n[{variant_title}]')
+        else:
+            plt.title(f'Per-Frame {metric_name}')
         plt.grid(True, linestyle='--', alpha=0.4)
         plt.legend()
         plt.tight_layout()
