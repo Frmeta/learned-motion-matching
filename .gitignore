@@ -17,12 +17,18 @@ database.bin
 database_small.bin
 database_big.bin
 database_history.bin
+database_test.bin
 
+database_test_features_big.bin
+database_test_features_small.bin
+database_test_features_history_run.bin
 
 database.csv
 database_small.csv
 database_big.csv
 database_history.csv
+
+
 
 build_features.exe
 

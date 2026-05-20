@@ -134,13 +134,13 @@ test_files = [
     # Tuple gait flags order: (is_crouch, is_idle, is_jump, is_cartwheel)
 
     # small clip for experimenting
-    ('resources/bvh/test/run2_subject1.bvh', 4700, 5000),
-    ('resources/bvh/test/walk3_subject2.bvh', 3800, 4000), 
+    # ('resources/bvh/test/run2_subject1.bvh', 4700, 5000),
+    # ('resources/bvh/test/walk3_subject2.bvh', 3800, 4000), 
 
-    # ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
-    # ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
-    # ('resources/bvh/test/run1_subject2.bvh', 100, 7100),
-    # ('resources/bvh/test/run2_subject1.bvh', 100, 7300),
+    ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
+    ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
+    ('resources/bvh/test/run1_subject2.bvh', 100, 7100),
+    ('resources/bvh/test/run2_subject1.bvh', 100, 7300),
 ]
 
 
