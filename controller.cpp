@@ -5999,6 +5999,12 @@ int main(int argc, char** argv)
             CreateDirectoryA(out_dir.c_str(), nullptr);
             CreateDirectoryA((out_dir + "/mpjpe").c_str(), nullptr);
             CreateDirectoryA((out_dir + "/walkpath").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/ade").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/are").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/rre").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/rte").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/scribble").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/big_small_comparison").c_str(), nullptr);
 
             // Helper: load+rebuild test features normalised against a given training db
             auto prepare_test_db_for_variant = [&](database& train_variant_db,
@@ -6512,39 +6518,39 @@ int main(int argc, char** argv)
                 system(plot_walkpath_1000_cmd.c_str());
 
                 // Rename generated walkpath files for this variant
-                auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
-                    std::string src = out_dir + "/walkpath/" + basename + ext;
-                    std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                auto rename_walkpath_file = [&](const std::string& subfolder, const std::string& basename, const std::string& ext) {
+                    std::string src = out_dir + "/walkpath/" + (subfolder.empty() ? "" : subfolder + "/") + basename + ext;
+                    std::string dst = out_dir + "/walkpath/" + (subfolder.empty() ? "" : subfolder + "/") + basename + "_" + vsuffix + ext;
                     if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
                 };
                 
                 // Rename full plots
-                rename_walkpath_file("walkpath", ".png");
-                rename_walkpath_file("rte_histogram", ".png");
-                rename_walkpath_file("rre_deg_histogram", ".png");
-                rename_walkpath_file("are_full_deg_histogram", ".png");
-                rename_walkpath_file("are_1s_deg_histogram", ".png");
-                rename_walkpath_file("are_2s_deg_histogram", ".png");
-                rename_walkpath_file("are_5s_deg_histogram", ".png");
-                rename_walkpath_file("ade_full_m_histogram", ".png");
-                rename_walkpath_file("ade_1s_m_histogram", ".png");
-                rename_walkpath_file("ade_2s_m_histogram", ".png");
-                rename_walkpath_file("ade_5s_m_histogram", ".png");
-                rename_walkpath_file("walkpath_report", ".md");
+                rename_walkpath_file("scribble", "walkpath", ".png");
+                rename_walkpath_file("rte", "rte_histogram", ".png");
+                rename_walkpath_file("rre", "rre_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_full_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_1s_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_2s_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_5s_deg_histogram", ".png");
+                rename_walkpath_file("ade", "ade_full_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_1s_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_2s_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_5s_m_histogram", ".png");
+                rename_walkpath_file("", "walkpath_report", ".md");
 
                 // Rename 1000-frame plots
-                rename_walkpath_file("walkpath_1000", ".png");
-                rename_walkpath_file("rte_histogram_1000", ".png");
-                rename_walkpath_file("rre_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_full_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_1s_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_2s_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_5s_deg_histogram_1000", ".png");
-                rename_walkpath_file("ade_full_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_1s_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_2s_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_5s_m_histogram_1000", ".png");
-                rename_walkpath_file("walkpath_report_1000", ".md");
+                rename_walkpath_file("scribble", "walkpath_1000", ".png");
+                rename_walkpath_file("rte", "rte_histogram_1000", ".png");
+                rename_walkpath_file("rre", "rre_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_full_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_1s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_2s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_5s_deg_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_full_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_1s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_2s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_5s_m_histogram_1000", ".png");
+                rename_walkpath_file("", "walkpath_report_1000", ".md");
 
                 // Compute Memory Footprint Breakdown
                 const int feature_cols_total = db.features.cols;
@@ -6778,6 +6784,48 @@ int main(int argc, char** argv)
                 std::cout << "[big-small] Comprehensive report written: " << report_path << std::endl;
             }
 
+            // ---- Write big_small_metrics_summary.csv for Python plotting ----
+            std::string summary_csv_path = out_dir + "/big_small_metrics_summary.csv";
+            FILE* sf = fopen(summary_csv_path.c_str(), "w");
+            if (sf)
+            {
+                fprintf(sf, "variant,model,mpjpe_local,mpjpe_world,memory_static_mb,memory_avg_mb,memory_peak_mb,time_ms,"
+                            "mm_feat_tot,mm_feat_non_hist,mm_feat_hist,mm_anim_tot,mm_anim_pos,mm_anim_vel,mm_anim_rot,mm_anim_ang,mm_anim_cont,mm_anim_toe,mm_add_range,"
+                            "lmm_dec,lmm_step,lmm_proj\n");
+                auto bytes_to_mb = [](size_t bytes) -> double {
+                    return (double)bytes / (1024.0 * 1024.0);
+                };
+                for (auto& vs : all_stats)
+                {
+                    // MM
+                    fprintf(sf, "%s,MM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                "0.0,0.0,0.0\n",
+                        vs.label.c_str(), vs.mm_local_mpjpe, vs.mm_world_mpjpe,
+                        bytes_to_mb(vs.mm_memory_total_with_additional_bytes), vs.mm_mem_avg, vs.mm_mem_peak, vs.mm_time_ms,
+                        bytes_to_mb(vs.feature_total_bytes), bytes_to_mb(vs.feature_non_history_bytes), bytes_to_mb(vs.feature_history_bytes),
+                        bytes_to_mb(vs.anim_database_total_bytes), bytes_to_mb(vs.anim_bone_positions_bytes), bytes_to_mb(vs.anim_bone_velocities_bytes),
+                        bytes_to_mb(vs.anim_bone_rotations_bytes), bytes_to_mb(vs.anim_bone_angular_velocities_bytes), bytes_to_mb(vs.anim_contact_states_bytes),
+                        bytes_to_mb(vs.anim_future_toe_positions_bytes), bytes_to_mb(vs.additional_range_total_bytes));
+                    // LMM
+                    if (vs.lmm_network_total_bytes > 0)
+                    {
+                        fprintf(sf, "%s,LMM,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                    "0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,"
+                                    "%.6f,%.6f,%.6f\n",
+                            vs.label.c_str(), vs.lmm_local_mpjpe, vs.lmm_world_mpjpe,
+                            bytes_to_mb(vs.lmm_network_total_bytes), vs.lmm_mem_avg, vs.lmm_mem_peak, vs.lmm_time_ms,
+                            bytes_to_mb(vs.lmm_decompressor_bytes), bytes_to_mb(vs.lmm_stepper_bytes), bytes_to_mb(vs.lmm_projector_bytes));
+                    }
+                }
+                fclose(sf);
+            }
+
+            // ---- Run big/small comparison plotting script ----
+            std::cout << "[big-small] Running big vs small comparison plotting script..." << std::endl;
+            std::string plot_cmd = std::string("python \"resources/python/plot_big_small_comparison.py\" \"") + out_dir + "\"";
+            system(plot_cmd.c_str());
+
             std::cout << "[big-small] Analysis complete. Output: " << out_dir << std::endl;
         }
     }
@@ -6803,6 +6851,11 @@ int main(int argc, char** argv)
             CreateDirectoryA(out_dir.c_str(), nullptr);
             CreateDirectoryA((out_dir + "/mpjpe").c_str(), nullptr);
             CreateDirectoryA((out_dir + "/walkpath").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/ade").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/are").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/rre").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/rte").c_str(), nullptr);
+            CreateDirectoryA((out_dir + "/walkpath/scribble").c_str(), nullptr);
             CreateDirectoryA((out_dir + "/history_comparison").c_str(), nullptr);
 
             // ---- Per-variant stats container ----
@@ -7223,39 +7276,39 @@ int main(int argc, char** argv)
                 system(plot_walkpath_1000_cmd.c_str());
 
                 // Rename generated walkpath files for this variant
-                auto rename_walkpath_file = [&](const std::string& basename, const std::string& ext) {
-                    std::string src = out_dir + "/walkpath/" + basename + ext;
-                    std::string dst = out_dir + "/walkpath/" + basename + "_" + vsuffix + ext;
+                auto rename_walkpath_file = [&](const std::string& subfolder, const std::string& basename, const std::string& ext) {
+                    std::string src = out_dir + "/walkpath/" + (subfolder.empty() ? "" : subfolder + "/") + basename + ext;
+                    std::string dst = out_dir + "/walkpath/" + (subfolder.empty() ? "" : subfolder + "/") + basename + "_" + vsuffix + ext;
                     if (FileExists(src.c_str())) MoveFileA(src.c_str(), dst.c_str());
                 };
                 
                 // Rename full plots
-                rename_walkpath_file("walkpath", ".png");
-                rename_walkpath_file("rte_histogram", ".png");
-                rename_walkpath_file("rre_deg_histogram", ".png");
-                rename_walkpath_file("are_full_deg_histogram", ".png");
-                rename_walkpath_file("are_1s_deg_histogram", ".png");
-                rename_walkpath_file("are_2s_deg_histogram", ".png");
-                rename_walkpath_file("are_5s_deg_histogram", ".png");
-                rename_walkpath_file("ade_full_m_histogram", ".png");
-                rename_walkpath_file("ade_1s_m_histogram", ".png");
-                rename_walkpath_file("ade_2s_m_histogram", ".png");
-                rename_walkpath_file("ade_5s_m_histogram", ".png");
-                rename_walkpath_file("walkpath_report", ".md");
+                rename_walkpath_file("scribble", "walkpath", ".png");
+                rename_walkpath_file("rte", "rte_histogram", ".png");
+                rename_walkpath_file("rre", "rre_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_full_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_1s_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_2s_deg_histogram", ".png");
+                rename_walkpath_file("are", "are_5s_deg_histogram", ".png");
+                rename_walkpath_file("ade", "ade_full_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_1s_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_2s_m_histogram", ".png");
+                rename_walkpath_file("ade", "ade_5s_m_histogram", ".png");
+                rename_walkpath_file("", "walkpath_report", ".md");
 
                 // Rename 1000-frame plots
-                rename_walkpath_file("walkpath_1000", ".png");
-                rename_walkpath_file("rte_histogram_1000", ".png");
-                rename_walkpath_file("rre_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_full_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_1s_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_2s_deg_histogram_1000", ".png");
-                rename_walkpath_file("are_5s_deg_histogram_1000", ".png");
-                rename_walkpath_file("ade_full_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_1s_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_2s_m_histogram_1000", ".png");
-                rename_walkpath_file("ade_5s_m_histogram_1000", ".png");
-                rename_walkpath_file("walkpath_report_1000", ".md");
+                rename_walkpath_file("scribble", "walkpath_1000", ".png");
+                rename_walkpath_file("rte", "rte_histogram_1000", ".png");
+                rename_walkpath_file("rre", "rre_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_full_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_1s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_2s_deg_histogram_1000", ".png");
+                rename_walkpath_file("are", "are_5s_deg_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_full_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_1s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_2s_m_histogram_1000", ".png");
+                rename_walkpath_file("ade", "ade_5s_m_histogram_1000", ".png");
+                rename_walkpath_file("", "walkpath_report_1000", ".md");
 
                 // Compute Memory Footprint Breakdown
                 const int feature_cols_total = db.features.cols;

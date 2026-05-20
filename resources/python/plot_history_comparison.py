@@ -89,8 +89,14 @@ def main():
     history_walk_metrics = parse_markdown_table_v2(history_report)
 
     mapping = {
-        'ADE Full (m)': 'ADE (m)',
-        'ARE Full (deg)': 'ARE (deg)',
+        'ADE Full (m)': 'ADE Full (m)',
+        'ADE 1s (m)': 'ADE 1s (m)',
+        'ADE 2s (m)': 'ADE 2s (m)',
+        'ADE 5s (m)': 'ADE 5s (m)',
+        'ARE Full (deg)': 'ARE Full (deg)',
+        'ARE 1s (deg)': 'ARE 1s (deg)',
+        'ARE 2s (deg)': 'ARE 2s (deg)',
+        'ARE 5s (deg)': 'ARE 5s (deg)',
         'RTE': 'RTE (m)',
         'RRE (deg)': 'RRE (deg)'
     }
@@ -109,10 +115,16 @@ def main():
         ('Memory Static (MB)', 'Static Memory Footprint (MB)', 'lower is better'),
         ('Memory Average (MB)', 'Dynamic Average RAM (MB)', 'lower is better'),
         ('Memory Peak (MB)', 'Dynamic Peak RAM (MB)', 'lower is better'),
-        ('ADE (m)', 'Average Displacement Error (m)', 'lower is better'),
-        ('ARE (deg)', 'Average Rotational Error (deg)', 'lower is better'),
-        ('RRE (deg)', 'Relative Rotational Error (deg)', 'lower is better'),
-        ('RTE (m)', 'Relative Translation Error (m)', 'lower is better')
+        ('ADE Full (m)', 'ADE Full (m)', 'lower is better'),
+        ('ADE 1s (m)', 'ADE 1s (m)', 'lower is better'),
+        ('ADE 2s (m)', 'ADE 2s (m)', 'lower is better'),
+        ('ADE 5s (m)', 'ADE 5s (m)', 'lower is better'),
+        ('ARE Full (deg)', 'ARE Full (deg)', 'lower is better'),
+        ('ARE 1s (deg)', 'ARE 1s (deg)', 'lower is better'),
+        ('ARE 2s (deg)', 'ARE 2s (deg)', 'lower is better'),
+        ('ARE 5s (deg)', 'ARE 5s (deg)', 'lower is better'),
+        ('RTE (m)', 'Relative Translation Error (m)', 'lower is better'),
+        ('RRE (deg)', 'Relative Rotational Error (deg)', 'lower is better')
     ]
 
     # Setup HSL-tailored premium colors
@@ -121,8 +133,8 @@ def main():
         'LMM': {'nohistory': '#F77F00', 'history': '#D62828'} # Orange and dark red
     }
 
-    # Generate Combined Plot (3x3 dashboard)
-    fig, axes = plt.subplots(3, 3, figsize=(22, 18))
+    # Generate Combined Plot (5x3 dashboard)
+    fig, axes = plt.subplots(5, 3, figsize=(22, 30))
     axes = axes.flatten()
 
     for idx, (m_key, m_title, m_desc) in enumerate(metrics_to_plot):
@@ -149,8 +161,14 @@ def main():
         ax.set_title(f"{m_title}\n({m_desc})", fontsize=13, fontweight='bold', pad=8)
         ax.set_xticks(x)
         ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=10, fontweight='bold')
-        ax.grid(True, linestyle='--', alpha=0.3)
-        ax.legend(frameon=True, facecolor='white', edgecolor='none')
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Without History)'),
+            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (With History)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Without History)'),
+            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (With History)')
+        ]
+        ax.legend(handles=legend_elements, frameon=True, facecolor='white', edgecolor='none')
 
         # Add values on top of bars
         def autolabel(rects):
@@ -194,7 +212,15 @@ def main():
         ax.set_xticks(x)
         ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=12, fontweight='bold')
         ax.grid(True, linestyle='--', alpha=0.3)
-        ax.legend(frameon=True, facecolor='white', edgecolor='none', fontsize=11)
+        
+        from matplotlib.patches import Patch
+        legend_elements_ind = [
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Without History)'),
+            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (With History)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Without History)'),
+            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (With History)')
+        ]
+        ax.legend(handles=legend_elements_ind, frameon=True, facecolor='white', edgecolor='none', fontsize=11)
 
         # Label bars
         for rect in rects1:
@@ -221,7 +247,7 @@ def main():
 
         rf.write("## 1. Metrics Comparison Summary\n\n")
         
-        headers = ["Model & Configuration", "MPJPE (local)", "Static Footprint (MB)", "Avg RAM (MB)", "Peak RAM (MB)", "Execution Time (ms)", "ADE (m)", "ARE (deg)", "RRE (deg)", "RTE (m)"]
+        headers = ["Model & Configuration", "MPJPE (local)", "Static Footprint (MB)", "Avg RAM (MB)", "Peak RAM (MB)", "Execution Time (ms)", "ADE Full (m)", "ADE 1s (m)", "ADE 2s (m)", "ADE 5s (m)", "ARE Full (deg)", "ARE 1s (deg)", "ARE 2s (deg)", "ARE 5s (deg)", "RRE (deg)", "RTE (m)"]
         rf.write("| " + " | ".join(headers) + " |\n")
         rf.write("|" + "|".join(["---" for _ in headers]) + "|\n")
 
@@ -241,20 +267,26 @@ def main():
             m_avg = data[var][model].get('Memory Average (MB)', float('nan'))
             m_peak = data[var][model].get('Memory Peak (MB)', float('nan'))
             m_time = data[var][model].get('Time (ms)', float('nan'))
-            m_ade = data[var][model].get('ADE (m)', float('nan'))
-            m_are = data[var][model].get('ARE (deg)', float('nan'))
+            m_ade = data[var][model].get('ADE Full (m)', float('nan'))
+            m_ade_1s = data[var][model].get('ADE 1s (m)', float('nan'))
+            m_ade_2s = data[var][model].get('ADE 2s (m)', float('nan'))
+            m_ade_5s = data[var][model].get('ADE 5s (m)', float('nan'))
+            m_are = data[var][model].get('ARE Full (deg)', float('nan'))
+            m_are_1s = data[var][model].get('ARE 1s (deg)', float('nan'))
+            m_are_2s = data[var][model].get('ARE 2s (deg)', float('nan'))
+            m_are_5s = data[var][model].get('ARE 5s (deg)', float('nan'))
             m_rre = data[var][model].get('RRE (deg)', float('nan'))
             m_rte = data[var][model].get('RTE (m)', float('nan'))
 
-            rf.write(f"| {label} | {fmt(m_local)} | {fmt(m_stat)} | {fmt(m_avg)} | {fmt(m_peak)} | {fmt(m_time)} | {fmt(m_ade)} | {fmt(m_are)} | {fmt(m_rre)} | {fmt(m_rte)} |\n")
+            rf.write(f"| {label} | {fmt(m_local)} | {fmt(m_stat)} | {fmt(m_avg)} | {fmt(m_peak)} | {fmt(m_time)} | {fmt(m_ade)} | {fmt(m_ade_1s)} | {fmt(m_ade_2s)} | {fmt(m_ade_5s)} | {fmt(m_are)} | {fmt(m_are_1s)} | {fmt(m_are_2s)} | {fmt(m_are_5s)} | {fmt(m_rre)} | {fmt(m_rte)} |\n")
 
         rf.write("\n## 2. Key Findings & Discussion\n\n")
         
         # Compute exact percentage improvements/impacts
-        mm_ade_no = data['nohistory']['MM'].get('ADE (m)', float('nan'))
-        mm_ade_yes = data['history']['MM'].get('ADE (m)', float('nan'))
-        lmm_ade_no = data['nohistory']['LMM'].get('ADE (m)', float('nan'))
-        lmm_ade_yes = data['history']['LMM'].get('ADE (m)', float('nan'))
+        mm_ade_no = data['nohistory']['MM'].get('ADE Full (m)', float('nan'))
+        mm_ade_yes = data['history']['MM'].get('ADE Full (m)', float('nan'))
+        lmm_ade_no = data['nohistory']['LMM'].get('ADE Full (m)', float('nan'))
+        lmm_ade_yes = data['history']['LMM'].get('ADE Full (m)', float('nan'))
 
         rf.write("### Trajectory Accuracy & Drift (ADE & RTE)\n")
         if not np.isnan(mm_ade_no) and not np.isnan(mm_ade_yes):

@@ -141,7 +141,9 @@ def main():
         ax.set_ylim(lim_min_z, lim_max_z)
         ax.set_aspect('equal', adjustable='box')
 
-    out_path = os.path.join(walkpath_dir, f"walkpath{suffix}.png")
+    scribble_dir = os.path.join(walkpath_dir, 'scribble')
+    os.makedirs(scribble_dir, exist_ok=True)
+    out_path = os.path.join(scribble_dir, f"walkpath{suffix}.png")
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -401,7 +403,21 @@ def main():
         plt.legend()
         plt.tight_layout()
         fname = metric_name.lower().replace(' ', '_').replace('(', '').replace(')', '') + f"_histogram{suffix}.png"
-        plot_path = os.path.join(walkpath_dir, fname)
+        metric_lower = metric_name.lower()
+        if 'ade' in metric_lower:
+            subfolder = 'ade'
+        elif 'are' in metric_lower:
+            subfolder = 'are'
+        elif 'rre' in metric_lower:
+            subfolder = 'rre'
+        elif 'rte' in metric_lower:
+            subfolder = 'rte'
+        else:
+            subfolder = ''
+        
+        target_dir = os.path.join(walkpath_dir, subfolder) if subfolder else walkpath_dir
+        os.makedirs(target_dir, exist_ok=True)
+        plot_path = os.path.join(target_dir, fname)
         plt.savefig(plot_path, dpi=200)
         plt.close()
         print(f"Saved {metric_name} plot: {plot_path}")
