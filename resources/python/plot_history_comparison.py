@@ -154,20 +154,20 @@ def main():
         nohist_vals = [mm_nohist, lmm_nohist]
         hist_vals = [mm_hist, lmm_hist]
 
-        # Draw bars
-        rects1 = ax.bar(x - width/2, nohist_vals, width, label='Without History', color=['#3A86C8', '#F77F00'], edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, hist_vals, width, label='With History', color=['#1C4A7E', '#D62828'], edgecolor='black', linewidth=0.7, alpha=0.9)
+        # Draw bars with two colors (no history vs with history) – MM and LMM share colors
+        rects1 = ax.bar(x - width/2, nohist_vals, width, label='Without History', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects2 = ax.bar(x + width/2, hist_vals, width, label='With History', color='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title}\n({m_desc})", fontsize=13, fontweight='bold', pad=8)
         ax.set_xticks(x)
         ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=10, fontweight='bold')
+        
+        # Simplified legend with only two entries
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Without History)'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (With History)'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Without History)'),
-            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (With History)')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Without History'),
+            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='With History')
         ]
         ax.legend(handles=legend_elements, frameon=True, facecolor='white', edgecolor='none')
 

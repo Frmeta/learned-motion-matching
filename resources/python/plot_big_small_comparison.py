@@ -146,9 +146,9 @@ def main():
         big_vals = [mm_big, lmm_big]
         small_vals = [mm_small, lmm_small]
 
-        # Draw bars
-        rects1 = ax.bar(x - width/2, big_vals, width, label='Big Database', color=['#3A86C8', '#F77F00'], edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, small_vals, width, label='Small Database', color=['#1C4A7E', '#D62828'], edgecolor='black', linewidth=0.7, alpha=0.9)
+        # Draw bars with two colors (big vs small) – MM and LMM share the same color within each variant
+        rects1 = ax.bar(x - width/2, big_vals, width, label='Big Database', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects2 = ax.bar(x + width/2, small_vals, width, label='Small Database', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title}\n({m_desc})", fontsize=13, fontweight='bold', pad=8)
@@ -156,12 +156,11 @@ def main():
         ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=10, fontweight='bold')
         ax.grid(True, linestyle='--', alpha=0.3)
         
+        # Simplified legend with only two entries
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Big Database)'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Small Database)'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Big Database)'),
-            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Small Database)')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Big Database'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Small Database')
         ]
         ax.legend(handles=legend_elements, frameon=True, facecolor='white', edgecolor='none')
 

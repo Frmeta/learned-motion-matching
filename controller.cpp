@@ -1137,6 +1137,14 @@ int main(int argc, char** argv)
     };
     int mm_history_mode = MM_HISTORY_SEARCH_OFF;
     bool mm_history_mode_dropdown_edit = false;
+    // NOTE: Do not forcibly zero history feature weights here.
+    // Motion matching supports excluding history features at query time
+    // via the `include_history_features` flag passed to `database_search`.
+    // Keep the history feature weights intact so feature files (`features.bin`)
+    // retain the full feature layout. To run MM without history, set
+    // `mm_history_mode = MM_HISTORY_SEARCH_OFF` which will call
+    // `database_search(..., include_history_features=false)` and skip
+    // history feature indices during the search.
     
     
     if (rebuild_features)
@@ -4630,14 +4638,14 @@ int main(int argc, char** argv)
         int ls_y = start_y + 60;
         DrawCircleLines(ls_x, ls_y, 20, BLACK);
         if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_THUMB)) DrawCircle(ls_x, ls_y, 20, Fade(RED, 0.3f));
-        DrawCircle(ls_x + (int)(gamepadstick_left.x * 20), ls_y - (int)(gamepadstick_left.z * 20), 4, RED);
+        DrawCircle(ls_x + (int)(gamepadstick_left.x * 20), ls_y + (int)(gamepadstick_left.z * 20), 4, RED);
         
         // Right Stick
         int rs_x = center_x + 50;
         int rs_y = start_y + 60;
         DrawCircleLines(rs_x, rs_y, 20, BLACK);
         if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_THUMB)) DrawCircle(rs_x, rs_y, 20, Fade(BLUE, 0.3f));
-        DrawCircle(rs_x + (int)(gamepadstick_right.x * 20), rs_y - (int)(gamepadstick_right.z * 20), 4, BLUE);
+        DrawCircle(rs_x + (int)(gamepadstick_right.x * 20), rs_y + (int)(gamepadstick_right.z * 20), 4, BLUE);
 
         // D-Pad
         int dp_x = center_x - 90;
