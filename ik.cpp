@@ -61,10 +61,15 @@ void contact_update(
         halflife,
         dt);
     
-    // If the contact point is too far from the current input position 
-    // then we need to unlock the contact
+    // If the contact point is too far from the current input position
+    // horizontally (XZ plane) then we need to unlock the contact.
+    // Use only the horizontal distance so small vertical differences
+    // (e.g. due to terrain sampling or foot-height clamping) don't
+    // cause unwanted unlock / sliding behavior.
+    vec3 diff = contact_point - input_contact_position;
+    diff.y = 0.0f; // ignore vertical offset
     bool unlock_contact = contact_lock && (
-        length(contact_point - input_contact_position) > unlock_radius || 
+        length(diff) > unlock_radius || 
         force_unlock);
     
     // If the contact was previously inactive but is now active we 

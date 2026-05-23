@@ -876,6 +876,7 @@ int main(int argc, char** argv)
         char analyze_input_path[512] = "./resources/input-recording";
         bool analyze_input_is_file = false;
         bool analyze_input_is_database = false;
+        int analyze_1000_start_frame = 0;
         bool force_rebuild_features = false;
         bool show_playback_features = true;
 
@@ -4054,52 +4055,58 @@ int main(int argc, char** argv)
         SetShaderValue(ground_plane_shader, ground_left_foot_loc, &leftFoot, SHADER_UNIFORM_VEC3);
         SetShaderValue(ground_plane_shader, ground_right_foot_loc, &rightFoot, SHADER_UNIFORM_VEC3);
 
-        if (!show_stickman)
-        
-        // Draw Simulation Object
-        
-        DrawCylinderWires(to_Vector3(simulation_position), 0.6f, 0.6f, 0.001f, 17, ORANGE);
-        DrawSphereWires(to_Vector3(simulation_position), 0.05f, 4, 10, ORANGE);
-        DrawLine3D(to_Vector3(simulation_position), to_Vector3(
-            simulation_position + 0.6f * quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f))), ORANGE);
-        
-        // Draw Clamping Radius/Angles
-        
-        if (clamping_enabled)
+        if (show_playback_features)
         {
-            DrawCylinderWires(
-                to_Vector3(simulation_position), 
-                clamping_max_distance, 
-                clamping_max_distance, 
-                0.001f, 17, SKYBLUE);
-            
-            quat rotation_clamp_0 = quat_mul(quat_from_angle_axis(+clamping_max_angle, vec3(0.0f, 1.0f, 0.0f)), simulation_rotation);
-            quat rotation_clamp_1 = quat_mul(quat_from_angle_axis(-clamping_max_angle, vec3(0.0f, 1.0f, 0.0f)), simulation_rotation);
-            
-            vec3 rotation_clamp_0_dir = simulation_position + 0.6f * quat_mul_vec3(rotation_clamp_0, vec3(0.0f, 0.0f, 1.0f));
-            vec3 rotation_clamp_1_dir = simulation_position + 0.6f * quat_mul_vec3(rotation_clamp_1, vec3(0.0f, 0.0f, 1.0f));
-
-            DrawLine3D(to_Vector3(simulation_position), to_Vector3(rotation_clamp_0_dir), SKYBLUE);
-            DrawLine3D(to_Vector3(simulation_position), to_Vector3(rotation_clamp_1_dir), SKYBLUE);
-        }
-        
-        // Draw IK foot lock positions
-        
-        if (ik_enabled)
-        {
-            for (int i = 0; i <  contact_positions.size; i++)
+            if (!show_stickman)
             {
-                if (contact_locks(i))
+                // Draw Simulation Object
+                DrawCylinderWires(to_Vector3(simulation_position), 0.6f, 0.6f, 0.001f, 17, ORANGE);
+                DrawSphereWires(to_Vector3(simulation_position), 0.05f, 4, 10, ORANGE);
+                DrawLine3D(to_Vector3(simulation_position), to_Vector3(
+                    simulation_position + 0.6f * quat_mul_vec3(simulation_rotation, vec3(0.0f, 0.0f, 1.0f))), ORANGE);
+            }
+            
+            // Draw Clamping Radius/Angles
+            
+            if (clamping_enabled)
+            {
+                DrawCylinderWires(
+                    to_Vector3(simulation_position), 
+                    clamping_max_distance, 
+                    clamping_max_distance, 
+                    0.001f, 17, SKYBLUE);
+                
+                quat rotation_clamp_0 = quat_mul(quat_from_angle_axis(+clamping_max_angle, vec3(0.0f, 1.0f, 0.0f)), simulation_rotation);
+                quat rotation_clamp_1 = quat_mul(quat_from_angle_axis(-clamping_max_angle, vec3(0.0f, 1.0f, 0.0f)), simulation_rotation);
+                
+                vec3 rotation_clamp_0_dir = simulation_position + 0.6f * quat_mul_vec3(rotation_clamp_0, vec3(0.0f, 0.0f, 1.0f));
+                vec3 rotation_clamp_1_dir = simulation_position + 0.6f * quat_mul_vec3(rotation_clamp_1, vec3(0.0f, 0.0f, 1.0f));
+
+                DrawLine3D(to_Vector3(simulation_position), to_Vector3(rotation_clamp_0_dir), SKYBLUE);
+                DrawLine3D(to_Vector3(simulation_position), to_Vector3(rotation_clamp_1_dir), SKYBLUE);
+            }
+            
+            // Draw IK foot lock positions
+            
+            if (ik_enabled)
+            {
+                for (int i = 0; i <  contact_positions.size; i++)
                 {
-                    DrawSphereWires(to_Vector3(contact_positions(i)), 0.05f, 4, 10, PINK);
+                    if (contact_locks(i))
+                    {
+                        DrawSphereWires(to_Vector3(contact_positions(i)), 0.05f, 4, 10, PINK);
+                    }
                 }
             }
         }
         
-        draw_trajectory(
-            trajectory_positions,
-            trajectory_rotations,
-            ORANGE);
+        if (show_playback_features)
+        {
+            draw_trajectory(
+                trajectory_positions,
+                trajectory_rotations,
+                ORANGE);
+        }
         
         deform_character_mesh(
             character_mesh, 
@@ -4658,20 +4665,23 @@ int main(int argc, char** argv)
         DrawRectangle(center_x + 50, start_y - 5, 30, 10, IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ? RED : LIGHTGRAY);
         DrawRectangleLines(center_x + 50, start_y - 5, 30, 10, BLACK);
 
-        // Sticks
-        // Left Stick
-        int ls_x = center_x - 50;
-        int ls_y = start_y + 60;
-        DrawCircleLines(ls_x, ls_y, 20, BLACK);
-        if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_THUMB)) DrawCircle(ls_x, ls_y, 20, Fade(RED, 0.3f));
-        DrawCircle(ls_x + (int)(gamepadstick_left.x * 20), ls_y + (int)(gamepadstick_left.z * 20), 4, RED);
-        
-        // Right Stick
-        int rs_x = center_x + 50;
-        int rs_y = start_y + 60;
-        DrawCircleLines(rs_x, rs_y, 20, BLACK);
-        if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_THUMB)) DrawCircle(rs_x, rs_y, 20, Fade(BLUE, 0.3f));
-        DrawCircle(rs_x + (int)(gamepadstick_right.x * 20), rs_y + (int)(gamepadstick_right.z * 20), 4, BLUE);
+        if (show_playback_features)
+        {
+            // Sticks
+            // Left Stick
+            int ls_x = center_x - 50;
+            int ls_y = start_y + 60;
+            DrawCircleLines(ls_x, ls_y, 20, BLACK);
+            if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_LEFT_THUMB)) DrawCircle(ls_x, ls_y, 20, Fade(RED, 0.3f));
+            DrawCircle(ls_x + (int)(gamepadstick_left.x * 20), ls_y + (int)(gamepadstick_left.z * 20), 4, RED);
+            
+            // Right Stick
+            int rs_x = center_x + 50;
+            int rs_y = start_y + 60;
+            DrawCircleLines(rs_x, rs_y, 20, BLACK);
+            if (IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_THUMB)) DrawCircle(rs_x, rs_y, 20, Fade(BLUE, 0.3f));
+            DrawCircle(rs_x + (int)(gamepadstick_right.x * 20), rs_y + (int)(gamepadstick_right.z * 20), 4, BLUE);
+        }
 
         // D-Pad
         int dp_x = center_x - 90;

@@ -114,7 +114,7 @@ Analyze
 Info
 - Replace `--playback` with `--playback-small` to export the configured clip ranges from `controller.cpp`.
 - Edit the hardcoded `playback_small_clip_ranges` in `controller.cpp` if you want different playback-small clips.
-- Use `--dont-draw-feature` to disable feature drawing.
+- Use `--dont-draw-feature` to disable feature drawing and the related debug overlays in window mode.
 
 Convert character fbx to bin
 ```
