@@ -111,7 +111,10 @@ Analyze
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin --playback
 ```
-(Replace  --playback with  --playback-small for rendering only 1000 frame in the 4700-th frame)
+Info
+- Replace `--playback` with `--playback-small` to export the configured clip ranges from `controller.cpp`.
+- Edit the hardcoded `playback_small_clip_ranges` in `controller.cpp` if you want different playback-small clips.
+- Use `--dont-draw-feature` to disable feature drawing.
 
 Convert character fbx to bin
 ```

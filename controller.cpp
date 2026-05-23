@@ -57,7 +57,25 @@
 
 static constexpr bool debug = false;
 static TerrainGrid ground_grid;
-static int analyze_1000_start_frame = 0;
+
+struct playback_small_clip_range
+{
+    int start_frame = 0;
+    int end_frame = 0;
+};
+
+// Edit this list to control which clips --playback-small exports.
+static const std::vector<playback_small_clip_range> playback_small_clip_ranges =
+{
+    { 1000, 2000 },
+    // { 2131, 3102 },
+    // { 5454, 6666 },
+};
+
+static std::string playback_small_clip_suffix(const playback_small_clip_range& clip)
+{
+    return std::to_string(clip.start_frame) + "_" + std::to_string(clip.end_frame);
+}
 
 #if defined(_WIN32)
 struct runtime_metrics
@@ -859,6 +877,7 @@ int main(int argc, char** argv)
         bool analyze_input_is_file = false;
         bool analyze_input_is_database = false;
         bool force_rebuild_features = false;
+        bool show_playback_features = true;
 
         database test_db;
         std::vector<array1d<vec3>> database_test_reference_poses;
@@ -955,6 +974,10 @@ int main(int argc, char** argv)
             {
                 playback_video_small = true;
             }
+            else if (strcmp(argv[argi], "--dont-draw-feature") == 0)
+            {
+                show_playback_features = false;
+            }
             else if (argv[argi][0] != '-')
             {
                 snprintf(analyze_input_path, sizeof(analyze_input_path), "%s", argv[argi]);
@@ -969,13 +992,14 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small] [--playback | --playback-small] [--input=<csv>]\n", argv[0]);
-                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback | --playback-small] --input=<csv>\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small | --analyze-both-history] [--playback | --playback-small] [--dont-draw-feature] [--input=<csv>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback | --playback-small] [--dont-draw-feature] --input=<csv>\n", argv[0]);
                 printf("\n");
                 printf("  --analyze-both-big-small  Run 4-way comparison: MM-big, MM-small, LMM-big, LMM-small\n");
                 printf("                            requires database_big.bin, database_small.bin,\n");
                 printf("                            decompressor_big.bin / stepper_big.bin / projector_big.bin,\n");
                 printf("                            decompressor_small.bin / stepper_small.bin / projector_small.bin\n");
+                printf("  --dont-draw-feature       Disable feature overlay drawing in the viewport and video exports\n");
                 return 0;
             }
             else
@@ -1829,9 +1853,6 @@ int main(int argc, char** argv)
     // Per-frame feature data for playback visualization
     std::vector<feature_draw_data> playback_mm_feature_data;
     std::vector<feature_draw_data> playback_lmm_feature_data;
-
-    // Safety toggle: set to false to skip all playback feature drawing
-    bool show_playback_features = true;
 
     bool show_stickman = false;
     int joystick_playback_index = 0;
@@ -4371,7 +4392,7 @@ int main(int argc, char** argv)
         //---------
         
         float ui_visual_hei = 330;
-        float ui_visual_height = joystick_playback_enabled ? 100.0f : 40.0f;
+        float ui_visual_height = joystick_playback_enabled ? 100.0f : 70.0f;
         
         GuiGroupBox((Rectangle){ ui_right_panel_x, ui_visual_hei, 290, ui_visual_height }, "visualization");
         
@@ -4379,6 +4400,11 @@ int main(int argc, char** argv)
             (Rectangle){ ui_right_panel_x + 30, ui_visual_hei + 10, 20, 20 }, 
             "stickman",
             &show_stickman);
+
+        GuiCheckBox(
+            (Rectangle){ ui_right_panel_x + 30, ui_visual_hei + 40, 20, 20 },
+            "draw features",
+            &show_playback_features);
         
         //---------
         
@@ -5146,7 +5172,6 @@ int main(int argc, char** argv)
 
                 if (show_playback_features && frame_idx >= 0 && frame_idx < (int)feature_data.size())
                 {
-                    // Draw features during recording video
                     draw_features(feature_data[frame_idx], pose(0), rot(0));
                 }
             }
@@ -5208,6 +5233,62 @@ int main(int argc, char** argv)
         UnloadRenderTexture(render_target);
         _pclose(ffmpeg);
         std::cout << "Analyze: Video playback saved to " << output_filename << std::endl;
+    };
+
+    auto render_playback_small_clips = [&](
+        const std::string& output_prefix,
+        int mode,
+        const std::vector<array1d<vec3>>& gt_poses,
+        const std::vector<array1d<quat>>& gt_rotations,
+        const std::vector<array1d<vec3>>& mm_poses,
+        const std::vector<array1d<quat>>& mm_rotations,
+        const std::vector<array1d<vec3>>& lmm_poses,
+        const std::vector<array1d<quat>>& lmm_rotations,
+        const std::vector<feature_draw_data>& mm_feature_data,
+        const std::vector<feature_draw_data>& lmm_feature_data,
+        int frame_count)
+    {
+        if (!playback_video_small)
+        {
+            return;
+        }
+
+        if (frame_count <= 0)
+        {
+            return;
+        }
+
+        for (const playback_small_clip_range& clip : playback_small_clip_ranges)
+        {
+            if (clip.end_frame < clip.start_frame)
+            {
+                continue;
+            }
+
+            int start_frame = std::max(0, std::min(clip.start_frame, frame_count - 1));
+            int end_frame = std::max(start_frame, std::min(clip.end_frame, frame_count - 1));
+            int num_frames = end_frame - start_frame + 1;
+            if (num_frames <= 0)
+            {
+                continue;
+            }
+
+            std::string video_path = output_prefix + "_" + playback_small_clip_suffix(clip) + ".mp4";
+            std::cout << "Analyze: Recording playback clip to: " << video_path << std::endl;
+            render_video_comparison(
+                video_path.c_str(),
+                mode,
+                gt_poses,
+                gt_rotations,
+                mm_poses,
+                mm_rotations,
+                lmm_poses,
+                lmm_rotations,
+                mm_feature_data,
+                lmm_feature_data,
+                start_frame,
+                num_frames);
+        }
     };
 
 #if defined(PLATFORM_WEB)
@@ -5589,11 +5670,8 @@ int main(int argc, char** argv)
             }
             else if (playback_video_small)
             {
-                std::string video_path = analysis_output_folder + "/video_1000.mp4";
-                int start_f = (res.frame_count > 0) ? std::max(0, std::min(analyze_1000_start_frame, res.frame_count - 1)) : 0;
-                int num_f = std::min(1000, res.frame_count - start_f);
-                render_video_comparison(
-                    video_path.c_str(),
+                render_playback_small_clips(
+                    analysis_output_folder + "/video",
                     mode,
                     analyze_input_is_database ? database_test_reference_poses : std::vector<array1d<vec3>>(1, base_bone_positions),
                     analyze_input_is_database ? database_test_reference_rotations : std::vector<array1d<quat>>(1, base_bone_rotations),
@@ -5603,8 +5681,7 @@ int main(int argc, char** argv)
                     lmm_capture_rotations,
                     mm_feature_data,
                     lmm_feature_data,
-                    start_f,
-                    num_f
+                    res.frame_count
                 );
             }
 
@@ -6358,12 +6435,8 @@ int main(int argc, char** argv)
                 }
                 else if (playback_video_small)
                 {
-                    std::string video_path = out_dir + "/video_" + vsuffix + "_1000.mp4";
-                    std::cout << "[big-small] Rendering side-by-side comparative playback (1000 frames) to: " << video_path << std::endl;
-                    int start_f = (used_frames > 0) ? std::max(0, std::min(analyze_1000_start_frame, used_frames - 1)) : 0;
-                    int num_f = std::min(1000, used_frames - start_f);
-                    render_video_comparison(
-                        video_path.c_str(),
+                    render_playback_small_clips(
+                        out_dir + "/video_" + vsuffix,
                         APP_MODE_ANALYZE_BOTH,
                         database_test_reference_poses,
                         database_test_reference_rotations,
@@ -6373,8 +6446,7 @@ int main(int argc, char** argv)
                         lmm_capture_rotations,
                         mm_feature_data,
                         lmm_feature_data,
-                        start_f,
-                        num_f
+                        used_frames
                     );
                 }
 
@@ -7154,12 +7226,18 @@ int main(int argc, char** argv)
                 }
                 else if (playback_video_small)
                 {
-                    std::string video_name = out_dir + "/comparison_" + vsuffix + "_1000.mp4";
-                    std::cout << "[history] Recording side-by-side video (1000 frames) to: " << video_name << std::endl;
-                    int total_f = (int)database_test_reference_poses.size();
-                    int start_f = (total_f > 0) ? std::max(0, std::min(analyze_1000_start_frame, total_f - 1)) : 0;
-                    int num_f = std::min(1000, total_f - start_f);
-                    render_video_comparison(video_name.c_str(), mode, database_test_reference_poses, database_test_reference_rotations, mm_capture, mm_capture_rotations, lmm_capture, lmm_capture_rotations, mm_feature_data, lmm_feature_data, start_f, num_f);
+                    render_playback_small_clips(
+                        out_dir + "/comparison_" + vsuffix,
+                        mode,
+                        database_test_reference_poses,
+                        database_test_reference_rotations,
+                        mm_capture,
+                        mm_capture_rotations,
+                        lmm_capture,
+                        lmm_capture_rotations,
+                        mm_feature_data,
+                        lmm_feature_data,
+                        (int)database_test_reference_poses.size());
                 }
 
                 // Compute per-frame local MPJPE for plotting
