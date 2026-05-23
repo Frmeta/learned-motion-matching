@@ -198,8 +198,8 @@ def main():
         x = np.arange(2)
         width = 0.35
 
-        rects1 = ax.bar(x - width/2, [mm_big, lmm_big], width, label='Big Database', color=['#3A86C8', '#F77F00'], edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, [mm_small, lmm_small], width, label='Small Database', color=['#1C4A7E', '#D62828'], edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects1 = ax.bar(x - width/2, [mm_big, lmm_big], width, label='Big Database', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects2 = ax.bar(x + width/2, [mm_small, lmm_small], width, label='Small Database', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title} - Impact of Database Size", fontsize=15, fontweight='bold', pad=15)
@@ -209,10 +209,8 @@ def main():
         
         from matplotlib.patches import Patch
         legend_elements_ind = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Big Database)'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Small Database)'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Big Database)'),
-            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Small Database)')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Big Database'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Small Database')
         ]
         ax.legend(handles=legend_elements_ind, frameon=True, facecolor='white', edgecolor='none', fontsize=11)
 

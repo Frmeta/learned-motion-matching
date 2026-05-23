@@ -205,8 +205,8 @@ def main():
         x = np.arange(2)
         width = 0.35
 
-        rects1 = ax.bar(x - width/2, [mm_nohist, lmm_nohist], width, label='Without History', color=['#3A86C8', '#F77F00'], edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, [mm_hist, lmm_hist], width, label='With History', color=['#1C4A7E', '#D62828'], edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects1 = ax.bar(x - width/2, [mm_nohist, lmm_nohist], width, label='Without History', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects2 = ax.bar(x + width/2, [mm_hist, lmm_hist], width, label='With History', color='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title} - Impact of History Feature", fontsize=15, fontweight='bold', pad=15)
@@ -216,10 +216,8 @@ def main():
         
         from matplotlib.patches import Patch
         legend_elements_ind = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (Without History)'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='MM (With History)'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (Without History)'),
-            Patch(facecolor='#D62828', edgecolor='black', linewidth=0.7, alpha=0.9, label='LMM (With History)')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Without History'),
+            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='With History')
         ]
         ax.legend(handles=legend_elements_ind, frameon=True, facecolor='white', edgecolor='none', fontsize=11)
 
