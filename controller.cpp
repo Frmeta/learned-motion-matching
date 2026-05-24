@@ -271,6 +271,12 @@ struct joystick_record_sample
     float time_seconds = 0.0f;
     vec3 left_stick;
     vec3 right_stick;
+    bool desired_walk = false;
+    bool desired_strafe = false;
+    bool desired_cartwheel = false;
+    bool cartwheel_pressed = false;
+    bool desired_crouch = false;
+    bool jump_pressed = false;
     vec3 player_position;
 };
 
@@ -298,20 +304,28 @@ static bool save_joystick_recording_csv(
         return false;
     }
 
-    fprintf(f, "frame,time_seconds,left_x,left_z,right_x,right_z,player_x,player_y,player_z\n");
+    fprintf(
+        f,
+        "frame,time_seconds,left_x,left_z,right_x,right_z,desired_walk,desired_strafe,desired_cartwheel,cartwheel_pressed,desired_crouch,jump_pressed,player_x,player_y,player_z\n");
 
     for (size_t i = 0; i < samples.size(); i++)
     {
         const joystick_record_sample& s = samples[i];
         fprintf(
             f,
-            "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%.6f\n",
             s.frame,
             s.time_seconds,
             s.left_stick.x,
             s.left_stick.z,
             s.right_stick.x,
             s.right_stick.z,
+            s.desired_walk ? 1 : 0,
+            s.desired_strafe ? 1 : 0,
+            s.desired_cartwheel ? 1 : 0,
+            s.cartwheel_pressed ? 1 : 0,
+            s.desired_crouch ? 1 : 0,
+            s.jump_pressed ? 1 : 0,
             s.player_position.x,
             s.player_position.y,
             s.player_position.z);
@@ -354,27 +368,69 @@ static bool load_joystick_recording_csv(
 
         joystick_record_sample s;
         float left_x, left_z, right_x, right_z;
+        int desired_walk, desired_strafe, desired_cartwheel, cartwheel_pressed, desired_crouch, jump_pressed;
         float player_x, player_y, player_z;
 
         int parsed = sscanf(
             line,
-            "%d,%f,%f,%f,%f,%f,%f,%f,%f",
+            "%d,%f,%f,%f,%f,%f,%d,%d,%d,%d,%d,%d,%f,%f,%f",
             &s.frame,
             &s.time_seconds,
             &left_x,
             &left_z,
             &right_x,
             &right_z,
+            &desired_walk,
+            &desired_strafe,
+            &desired_cartwheel,
+            &cartwheel_pressed,
+            &desired_crouch,
+            &jump_pressed,
             &player_x,
             &player_y,
             &player_z);
 
-        if (parsed == 9)
+        if (parsed == 15)
         {
+            s.desired_walk = desired_walk != 0;
+            s.desired_strafe = desired_strafe != 0;
+            s.desired_cartwheel = desired_cartwheel != 0;
+            s.cartwheel_pressed = cartwheel_pressed != 0;
+            s.desired_crouch = desired_crouch != 0;
+            s.jump_pressed = jump_pressed != 0;
             s.left_stick = vec3(left_x, 0.0f, left_z);
             s.right_stick = vec3(right_x, 0.0f, right_z);
             s.player_position = vec3(player_x, player_y, player_z);
             samples.push_back(s);
+        }
+        else
+        {
+            parsed = sscanf(
+                line,
+                "%d,%f,%f,%f,%f,%f,%f,%f,%f",
+                &s.frame,
+                &s.time_seconds,
+                &left_x,
+                &left_z,
+                &right_x,
+                &right_z,
+                &player_x,
+                &player_y,
+                &player_z);
+
+            if (parsed == 9)
+            {
+                s.left_stick = vec3(left_x, 0.0f, left_z);
+                s.right_stick = vec3(right_x, 0.0f, right_z);
+                s.desired_walk = false;
+                s.desired_strafe = false;
+                s.desired_cartwheel = false;
+                s.cartwheel_pressed = false;
+                s.desired_crouch = false;
+                s.jump_pressed = false;
+                s.player_position = vec3(player_x, player_y, player_z);
+                samples.push_back(s);
+            }
         }
     }
 
@@ -993,8 +1049,8 @@ int main(int argc, char** argv)
             }
             else if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0)
             {
-                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small | --analyze-both-history] [--playback | --playback-small] [--dont-draw-feature] [--input=<csv>]\n", argv[0]);
-                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback | --playback-small] [--dont-draw-feature] --input=<csv>\n", argv[0]);
+                printf("Usage: %s [--learned] [--rebuild-features] [--window | --analyze-both | --analyze-mm | --analyze-lmm | --analyze-both-big-small | --analyze-both-history] [--playback | --playback-small] [--dont-draw-feature] [--input=<csv|bin>]\n", argv[0]);
+                printf("       %s --mode=<window|analyze-both|analyze-mm|analyze-lmm> [--playback | --playback-small] [--dont-draw-feature] --input=<csv|bin>\n", argv[0]);
                 printf("\n");
                 printf("  --analyze-both-big-small  Run 4-way comparison: MM-big, MM-small, LMM-big, LMM-small\n");
                 printf("                            requires database_big.bin, database_small.bin,\n");
@@ -2209,6 +2265,13 @@ int main(int argc, char** argv)
         // Get gamepad stick states
         vec3 gamepadstick_left = gamepad_get_stick(GAMEPAD_STICK_LEFT);
         vec3 gamepadstick_right = gamepad_get_stick(GAMEPAD_STICK_RIGHT);
+        bool playback_desired_walk = false;
+        bool playback_desired_strafe = false;
+        bool playback_desired_cartwheel = false;
+        bool playback_cartwheel_pressed = false;
+        bool playback_desired_crouch = false;
+        bool playback_jump_pressed = false;
+        bool playback_sample_active = false;
 
         if (joystick_playback_enabled)
         {
@@ -2217,6 +2280,13 @@ int main(int argc, char** argv)
                 const joystick_record_sample& sample = joystick_playback_samples[joystick_playback_index];
                 gamepadstick_left = sample.left_stick;
                 gamepadstick_right = sample.right_stick;
+                playback_desired_walk = sample.desired_walk;
+                playback_desired_strafe = sample.desired_strafe;
+                playback_desired_cartwheel = sample.desired_cartwheel;
+                playback_cartwheel_pressed = sample.cartwheel_pressed;
+                playback_desired_crouch = sample.desired_crouch;
+                playback_jump_pressed = sample.jump_pressed;
+                playback_sample_active = true;
                 joystick_playback_index += 1;
             }
             else
@@ -2238,12 +2308,35 @@ int main(int argc, char** argv)
 
         if (joystick_recording_enabled)
         {
+            bool record_desired_strafe = desired_strafe_update();
+            bool record_desired_walk =
+                IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
+                IsKeyDown(KEY_J);
+            bool record_desired_crouch =
+                IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
+                IsKeyDown(KEY_K);
+            bool record_cartwheel_pressed =
+                IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
+                IsKeyDown(KEY_L);
+            bool record_desired_cartwheel =
+                IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
+                IsKeyDown(KEY_L);
+            bool record_jump_pressed =
+                IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
+                IsKeyDown(KEY_SPACE);
+
             joystick_recording_samples.push_back(
                 joystick_record_sample{
                     joystick_recording_frame,
                     joystick_recording_time,
                     gamepadstick_left,
                     gamepadstick_right,
+                    record_desired_walk,
+                    record_desired_strafe,
+                    record_desired_cartwheel,
+                    record_cartwheel_pressed,
+                    record_desired_crouch,
+                    record_jump_pressed,
                     simulation_position
                 });
             joystick_recording_frame += 1;
@@ -2255,23 +2348,23 @@ int main(int argc, char** argv)
         push_runtime_history();
         
         // Get if strafe is desired
-        bool desired_strafe = desired_strafe_update();
-        bool desired_walk =
+        bool desired_strafe = playback_sample_active ? playback_desired_strafe : desired_strafe_update();
+        bool desired_walk = playback_sample_active ? playback_desired_walk : (
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
-            IsKeyDown(KEY_J);
-        bool desired_crouch =
+            IsKeyDown(KEY_J));
+        bool desired_crouch = playback_sample_active ? playback_desired_crouch : (
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_UP) ||
-            IsKeyDown(KEY_K);
-        bool cartwheel_pressed =
+            IsKeyDown(KEY_K));
+        bool cartwheel_pressed = playback_sample_active ? playback_cartwheel_pressed : (
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
-            IsKeyPressed(KEY_L);
-        bool desired_cartwheel =
+            IsKeyPressed(KEY_L));
+        bool desired_cartwheel = playback_sample_active ? playback_desired_cartwheel : (
             IsGamepadButtonDown(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_LEFT) ||
-            IsKeyDown(KEY_L);
+            IsKeyDown(KEY_L));
         bool crouch_pressed = desired_crouch;
-        bool jump_pressed =
+        bool jump_pressed = playback_sample_active ? playback_jump_pressed : (
             IsGamepadButtonPressed(GAMEPAD_PLAYER, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
-            IsKeyPressed(KEY_SPACE);
+            IsKeyPressed(KEY_SPACE));
 
         if (cartwheel_pressed)
         {
@@ -2284,15 +2377,7 @@ int main(int argc, char** argv)
 
         if (joystick_playback_enabled)
         {
-            desired_strafe = false;
-            desired_walk = false;
-            desired_crouch = false;
-            desired_cartwheel = false;
-            cartwheel_auto_timer = 0.0f;
-            cartwheel_auto_active = false;
-            crouch_pressed = false;
-            jump_pressed = false;
-            jump_buffer_timer = 0.0f;
+            // Playback uses recorded inputs directly above.
         }
 
         cartwheel_query_lock_active = desired_cartwheel;
@@ -2563,7 +2648,8 @@ int main(int argc, char** argv)
 
         // desired_jump is locked for the full 0.7s from space press — nothing can interrupt it
         bool desired_jump = jump_pressed || jump_gait_timer > 0.0f;
-        if (joystick_playback_enabled)
+        // When playback is active, allow recorded samples to set desired_jump (playback_sample_active)
+        if (joystick_playback_enabled && !playback_sample_active)
         {
             desired_jump = false;
         }
@@ -2784,7 +2870,7 @@ int main(int argc, char** argv)
 
         // If future trajectory rises upward, reduce horizontal reach for that point.
         const float uphill_horizontal_reduce_gain = 1.1f;
-        const float uphill_horizontal_reduce_max = 0.5f;
+        const float uphill_horizontal_reduce_max = 0.8f;
         float min_trajectory_scale_xz = 1.0f;
         for (int i = 1; i < trajectory_positions.size; i++)
         {
@@ -4118,7 +4204,8 @@ int main(int argc, char** argv)
         // During playback, render only MM/LMM selections to avoid a third
         // duplicate character from the default draw path.
         // Also hide the default character when comparing both MM search modes.
-        bool render_playback_characters = joystick_playback_enabled || (!lmm_runtime_enabled && mm_history_mode == MM_HISTORY_SEARCH_BOTH);
+        bool has_playback_poses = !playback_mm_bone_positions.empty() || !playback_lmm_bone_positions.empty();
+        bool render_playback_characters = (joystick_playback_enabled && has_playback_poses) || (!lmm_runtime_enabled && mm_history_mode == MM_HISTORY_SEARCH_BOTH);
 
         if (!render_playback_characters)
         {

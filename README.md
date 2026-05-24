@@ -45,7 +45,7 @@ Arguments:
 - `--analyze-mm` runs analysis for motion matching only.
 - `--analyze-lmm` runs analysis for learned motion matching only.
 - `--mode=...` is an alternate way to choose the mode. Valid values are `window`, `analyze-both`, `analyze-mm`, and `analyze-lmm`.
-- `--input=<csv>` sets the input recording path
+- `--input=<csv|bin>` sets the input path. CSV files are treated as joystick recordings, while `.bin` files are treated as test databases.
 - `--csv=<csv>` is accepted as an alias for `--input=<csv>`.
 - A bare positional argument is also treated as the input path.
 - `-h` or `--help` prints the built-in usage text.
@@ -110,11 +110,15 @@ Analyze
 
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin
 ./controller.exe --analyze-both-history ./resources/bin/database_test.bin --playback
+
+./controller.exe --analyze-both ./resources/input-recording/joystick_recording_20260523_161732.csv
+./controller.exe --analyze-both ./resources/input-recording/joystick_recording_20260523_161732.csv --playback
 ```
 Info
 - Replace `--playback` with `--playback-small` to export the configured clip ranges from `controller.cpp`.
 - Edit the hardcoded `playback_small_clip_ranges` in `controller.cpp` if you want different playback-small clips.
 - Use `--dont-draw-feature` to disable feature drawing and the related debug overlays in window mode.
+- CSV recordings now store both stick input and action inputs (`walk`, `strafe`, `cartwheel`, `crouch`, `jump`) so they can be replayed more faithfully.
 
 Convert character fbx to bin
 ```
