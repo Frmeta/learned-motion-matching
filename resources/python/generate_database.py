@@ -138,18 +138,15 @@ test_files = [
     # ('resources/bvh/test/walk3_subject2.bvh', 3800, 4000), 
 
     # clip for user study
-    # ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
-    # ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
-    ('resources/bvh/test/run1_subject2.bvh', 2044, 2844), # run
+    # ('resources/bvh/test/run1_subject2.bvh', 2044, 2844), # run
     # ('resources/bvh/test/run1_subject2.bvh', 5160, 6022), # abrupt turn
-    # ('resources/bvh/test/run2_subject1.bvh', 100, 7300),
-]
 
-#     ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
-#     ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
-#     ('resources/bvh/test/run1_subject2.bvh', 100, 7100),
-#     ('resources/bvh/test/run2_subject1.bvh', 100, 7300),
-# ]
+    # for final
+    ('resources/bvh/test/walk1_subject1.bvh', 115, 3600), 
+    ('resources/bvh/test/walk3_subject2.bvh', 830, 7350), 
+    ('resources/bvh/test/run1_subject2.bvh', 100, 7100),
+    ('resources/bvh/test/run2_subject1.bvh', 100, 7300),
+]
 
 
 

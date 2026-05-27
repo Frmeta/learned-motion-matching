@@ -98,6 +98,7 @@ def main():
         'ARE 1s (deg)': 'ARE 1s (deg)',
         'ARE 2s (deg)': 'ARE 2s (deg)',
         'ARE 5s (deg)': 'ARE 5s (deg)',
+        'RTE (m)': 'RTE (m)',
         'RTE': 'RTE (m)',
         'RRE (deg)': 'RRE (deg)'
     }

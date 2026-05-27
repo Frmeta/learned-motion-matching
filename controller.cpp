@@ -67,7 +67,7 @@ struct playback_small_clip_range
 // Edit this list to control which clips --playback-small exports.
 static const std::vector<playback_small_clip_range> playback_small_clip_ranges =
 {
-    { 1000, 2000 },
+    { 20, 1020 },
     // { 2131, 3102 },
     // { 5454, 6666 },
 };
@@ -6709,7 +6709,7 @@ int main(int argc, char** argv)
                 
                 // Rename full plots
                 rename_walkpath_file("scribble", "walkpath", ".png");
-                rename_walkpath_file("rte", "rte_histogram", ".png");
+                rename_walkpath_file("rte", "rte_m_histogram", ".png");
                 rename_walkpath_file("rre", "rre_deg_histogram", ".png");
                 rename_walkpath_file("are", "are_full_deg_histogram", ".png");
                 rename_walkpath_file("are", "are_1s_deg_histogram", ".png");
@@ -6723,7 +6723,7 @@ int main(int argc, char** argv)
 
                 // Rename 1000-frame plots
                 rename_walkpath_file("scribble", "walkpath_1000", ".png");
-                rename_walkpath_file("rte", "rte_histogram_1000", ".png");
+                rename_walkpath_file("rte", "rte_m_histogram_1000", ".png");
                 rename_walkpath_file("rre", "rre_deg_histogram_1000", ".png");
                 rename_walkpath_file("are", "are_full_deg_histogram_1000", ".png");
                 rename_walkpath_file("are", "are_1s_deg_histogram_1000", ".png");
@@ -7499,7 +7499,7 @@ int main(int argc, char** argv)
                 
                 // Rename full plots
                 rename_walkpath_file("scribble", "walkpath", ".png");
-                rename_walkpath_file("rte", "rte_histogram", ".png");
+                rename_walkpath_file("rte", "rte_m_histogram", ".png");
                 rename_walkpath_file("rre", "rre_deg_histogram", ".png");
                 rename_walkpath_file("are", "are_full_deg_histogram", ".png");
                 rename_walkpath_file("are", "are_1s_deg_histogram", ".png");
@@ -7513,7 +7513,7 @@ int main(int argc, char** argv)
 
                 // Rename 1000-frame plots
                 rename_walkpath_file("scribble", "walkpath_1000", ".png");
-                rename_walkpath_file("rte", "rte_histogram_1000", ".png");
+                rename_walkpath_file("rte", "rte_m_histogram_1000", ".png");
                 rename_walkpath_file("rre", "rre_deg_histogram_1000", ".png");
                 rename_walkpath_file("are", "are_full_deg_histogram_1000", ".png");
                 rename_walkpath_file("are", "are_1s_deg_histogram_1000", ".png");
