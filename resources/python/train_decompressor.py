@@ -171,16 +171,33 @@ if __name__ == '__main__':
     Yextra_scale = Yextra.std()
     Yfuture_toe_xy_scale = Yfuture_toe_xy.std()
     
-    # Decompressor output layout per frame:
-    #   positions              = 3 * (nbones - 1)
-    #   two-column transforms  = 6 * (nbones - 1)
-    #   velocities             = 3 * (nbones - 1)
-    #   angular velocities     = 3 * (nbones - 1)
-    #   root linear velocity   = 3
-    #   root angular velocity  = 3
-    #   contact states         = nextra = 2?
-    #   future toe positions   = 12
-    # For nbones = 23, the total output width is 15 * 22 + 20 = 350.
+    # Network I/O sizes:
+    #   Compressor input per frame:
+    #     15 * (nbones - 1) from Y-space bone state
+    #   + 15 * (nbones - 1) from Q-space bone state
+    #   + 3 root linear velocity
+    #   + 3 root angular velocity
+    #   + nextra contact channels
+    #   + 12 future toe floats
+    #   = 30 * (nbones - 1) + 18 + nextra floats.
+    #   With nbones = 23 and nextra = 2, that is 680 floats.
+    #
+    #   Decompressor input per frame:
+    #   = nfeatures + nlatent.
+    #   For non-history training nfeatures = 45, so the input width is 77.
+    #   For history training nfeatures = 68, so the input width is 100.
+    #
+    #   Decompressor output per frame:
+    #     positions             = 3 * (nbones - 1)
+    #     two-column transforms = 6 * (nbones - 1)
+    #     velocities            = 3 * (nbones - 1)
+    #     angular velocities    = 3 * (nbones - 1)
+    #     root linear velocity  = 3
+    #     root angular velocity = 3
+    #     contact states        = nextra
+    #     future toe positions  = 12
+    #   = 15 * (nbones - 1) + 18 + nextra floats.
+    #   With nbones = 23 and nextra = 2, that is 350 floats.
     decompressor_mean_out = torch.as_tensor(np.hstack([
         Ypos[:,1:].mean(axis=0).ravel(),
         Ytxy[:,1:].mean(axis=0).ravel(),
@@ -262,10 +279,93 @@ if __name__ == '__main__':
     if cartwheel_states.shape[1] > 0:
         frame_weights += 9.0 * cartwheel_states[:, 0].astype(np.float32)
     
-    # Make networks
-    
-    network_compressor = Compressor(len(compressor_mean_in), nlatent)
-    network_decompressor = Decompressor(nfeatures + nlatent, len(decompressor_mean_out))
+    # Make networks using the explicit sizes above.
+    compressor_input_size = len(compressor_mean_in)
+    decompressor_input_size = nfeatures + nlatent
+    decompressor_output_size = len(decompressor_mean_out)
+
+    compressor_y_pos_size = Ypos[:,1:].shape[1] * 3
+    compressor_y_txy_size = Ytxy[:,1:].shape[1] * 6
+    compressor_y_vel_size = Yvel[:,1:].shape[1] * 3
+    compressor_y_ang_size = Yang[:,1:].shape[1] * 3
+    compressor_q_pos_size = Qpos[:,1:].shape[1] * 3
+    compressor_q_txy_size = Qtxy[:,1:].shape[1] * 6
+    compressor_q_vel_size = Qvel[:,1:].shape[1] * 3
+    compressor_q_ang_size = Qang[:,1:].shape[1] * 3
+    compressor_root_vel_size = Yrvel.shape[1]
+    compressor_root_ang_size = Yrang.shape[1]
+    compressor_extra_size = Yextra.shape[1]
+    compressor_future_toe_size = Yfuture_toe_xy.shape[1]
+
+    decompressor_pos_size = Ypos[:,1:].shape[1] * 3
+    decompressor_txy_size = Ytxy[:,1:].shape[1] * 6
+    decompressor_vel_size = Yvel[:,1:].shape[1] * 3
+    decompressor_ang_size = Yang[:,1:].shape[1] * 3
+    decompressor_root_vel_size = Yrvel.shape[1]
+    decompressor_root_ang_size = Yrang.shape[1]
+    decompressor_extra_size = Yextra.shape[1]
+    decompressor_future_toe_size = Yfuture_toe_xy.shape[1]
+
+    print(
+        "Compressor input size:",
+        compressor_input_size,
+        "=",
+        compressor_y_pos_size,
+        "+",
+        compressor_y_txy_size,
+        "+",
+        compressor_y_vel_size,
+        "+",
+        compressor_y_ang_size,
+        "+",
+        compressor_q_pos_size,
+        "+",
+        compressor_q_txy_size,
+        "+",
+        compressor_q_vel_size,
+        "+",
+        compressor_q_ang_size,
+        "+",
+        compressor_root_vel_size,
+        "+",
+        compressor_root_ang_size,
+        "+",
+        compressor_extra_size,
+        "+",
+        compressor_future_toe_size,
+    )
+    print("Compressor output size:", nlatent)
+    print(
+        "Decompressor input size:",
+        decompressor_input_size,
+        "=",
+        nfeatures,
+        "+",
+        nlatent,
+    )
+    print(
+        "Decompressor output size:",
+        decompressor_output_size,
+        "=",
+        decompressor_pos_size,
+        "+",
+        decompressor_txy_size,
+        "+",
+        decompressor_vel_size,
+        "+",
+        decompressor_ang_size,
+        "+",
+        decompressor_root_vel_size,
+        "+",
+        decompressor_root_ang_size,
+        "+",
+        decompressor_extra_size,
+        "+",
+        decompressor_future_toe_size,
+    )
+
+    network_compressor = Compressor(compressor_input_size, nlatent)
+    network_decompressor = Decompressor(decompressor_input_size, decompressor_output_size)
     
     # Function to save compressed database
     
