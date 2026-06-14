@@ -140,28 +140,25 @@ def main():
         lmm_big = data['big']['LMM'].get(m_key, float('nan'))
         lmm_small = data['small']['LMM'].get(m_key, float('nan'))
 
-        x = np.arange(2)  # [MM, LMM]
+        # Updated bar plotting: groups = Small then Big, colors differentiate MM vs LMM
+        x = np.arange(2)  # [Small, Big]
         width = 0.35      # width of bars
 
-        # Bar values
-        big_vals = [mm_big, lmm_big]
-        small_vals = [mm_small, lmm_small]
-
-        # Draw bars with two colors (big vs small) – MM and LMM share the same color within each variant
-        rects1 = ax.bar(x - width/2, big_vals, width, label='Big Database', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, small_vals, width, label='Small Database', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
+        # Draw bars: MM (blue) and LMM (orange) within each group
+        rects_mm = ax.bar(x - width/2, [mm_small, mm_big], width, label='Motion Matching (MM)', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_lmm = ax.bar(x + width/2, [lmm_small, lmm_big], width, label='Learned Motion Matching (LMM)', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title}\n({m_desc})", fontsize=13, fontweight='bold', pad=8)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=10, fontweight='bold')
+        ax.set_xticklabels(['Small Database', 'Big Database'], fontsize=10, fontweight='bold')
         ax.grid(True, linestyle='--', alpha=0.3)
         
-        # Simplified legend with only two entries
+        # Simplified legend showing algorithm colors only
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Big Database'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Small Database')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Motion Matching (MM)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Learned Motion Matching (LMM)')
         ]
         ax.legend(handles=legend_elements, frameon=True, facecolor='white', edgecolor='none')
 
@@ -176,8 +173,8 @@ def main():
                                 textcoords="offset points",
                                 ha='center', va='bottom', fontsize=9, fontweight='bold')
 
-        autolabel(rects1)
-        autolabel(rects2)
+        autolabel(rects_mm)
+        autolabel(rects_lmm)
 
     plt.suptitle("Big vs. Small Database Impact Analysis Dashboard (MM vs. LMM)", fontsize=22, fontweight='bold', y=0.98)
     plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -199,28 +196,28 @@ def main():
         x = np.arange(2)
         width = 0.35
 
-        rects1 = ax.bar(x - width/2, [mm_big, lmm_big], width, label='Big Database', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, [mm_small, lmm_small], width, label='Small Database', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_mm = ax.bar(x - width/2, [mm_small, mm_big], width, label='Motion Matching (MM)', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_lmm = ax.bar(x + width/2, [lmm_small, lmm_big], width, label='Learned Motion Matching (LMM)', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title} - Impact of Database Size", fontsize=15, fontweight='bold', pad=15)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=12, fontweight='bold')
+        ax.set_xticklabels(['Small Database', 'Big Database'], fontsize=12, fontweight='bold')
         ax.grid(True, linestyle='--', alpha=0.3)
         
         from matplotlib.patches import Patch
         legend_elements_ind = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Big Database'),
-            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Small Database')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Motion Matching (MM)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Learned Motion Matching (LMM)')
         ]
         ax.legend(handles=legend_elements_ind, frameon=True, facecolor='white', edgecolor='none', fontsize=11)
 
         # Label bars
-        for rect in rects1:
+        for rect in rects_mm:
             height = rect.get_height()
             if not np.isnan(height):
                 ax.annotate(f'{height:.4f}', xy=(rect.get_x() + rect.get_width() / 2, height), xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=11, fontweight='bold')
-        for rect in rects2:
+        for rect in rects_lmm:
             height = rect.get_height()
             if not np.isnan(height):
                 ax.annotate(f'{height:.4f}', xy=(rect.get_x() + rect.get_width() / 2, height), xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=11, fontweight='bold')

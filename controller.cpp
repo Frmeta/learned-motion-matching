@@ -5211,6 +5211,22 @@ int main(int argc, char** argv)
     {
         if (num_frames <= 0) return;
 
+#if defined(PLATFORM_WEB)
+        std::cout << "Analyze: video export is not supported in web builds" << std::endl;
+        (void)output_filename;
+        (void)mode;
+        (void)gt_poses;
+        (void)gt_rotations;
+        (void)mm_poses;
+        (void)mm_rotations;
+        (void)lmm_poses;
+        (void)lmm_rotations;
+        (void)mm_feature_data;
+        (void)lmm_feature_data;
+        (void)start_frame;
+        return;
+#else
+
         char command[1024];
         snprintf(command, sizeof(command), "ffmpeg -y -f rawvideo -vcodec rawvideo -s %dx%d -pix_fmt rgba -r 60 -i - -c:v libx264 -preset fast -pix_fmt yuv420p \"%s\"", screen_width, screen_height, output_filename);
         
@@ -5330,6 +5346,7 @@ int main(int argc, char** argv)
         UnloadRenderTexture(render_target);
         _pclose(ffmpeg);
         std::cout << "Analyze: Video playback saved to " << output_filename << std::endl;
+#endif
     };
 
     auto render_playback_small_clips = [&](

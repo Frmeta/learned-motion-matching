@@ -147,27 +147,25 @@ def main():
         lmm_nohist = data['nohistory']['LMM'].get(m_key, float('nan'))
         lmm_hist = data['history']['LMM'].get(m_key, float('nan'))
 
-        x = np.arange(2)  # [MM, LMM]
+        # Updated bar plotting: groups = Without History then With History, colors differentiate MM vs LMM
+        x = np.arange(2)  # [Without History, With History]
         width = 0.35      # width of bars
 
-        # Bar values
-        nohist_vals = [mm_nohist, lmm_nohist]
-        hist_vals = [mm_hist, lmm_hist]
-
-        # Draw bars with two colors (no history vs with history) – MM and LMM share colors
-        rects1 = ax.bar(x - width/2, nohist_vals, width, label='Without History', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, hist_vals, width, label='With History', color='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9)
+        # Draw bars: MM (blue) and LMM (orange) within each group
+        rects_mm = ax.bar(x - width/2, [mm_nohist, mm_hist], width, label='Motion Matching (MM)', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_lmm = ax.bar(x + width/2, [lmm_nohist, lmm_hist], width, label='Learned Motion Matching (LMM)', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title}\n({m_desc})", fontsize=13, fontweight='bold', pad=8)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=10, fontweight='bold')
-        
-        # Simplified legend with only two entries
+        ax.set_xticklabels(['Without History', 'With History'], fontsize=10, fontweight='bold')
+        ax.grid(True, linestyle='--', alpha=0.3)
+
+        # Simplified legend showing algorithm colors only
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Without History'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='With History')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Motion Matching (MM)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Learned Motion Matching (LMM)')
         ]
         ax.legend(handles=legend_elements, frameon=True, facecolor='white', edgecolor='none')
 
@@ -182,8 +180,8 @@ def main():
                                 textcoords="offset points",
                                 ha='center', va='bottom', fontsize=9, fontweight='bold')
 
-        autolabel(rects1)
-        autolabel(rects2)
+        autolabel(rects_mm)
+        autolabel(rects_lmm)
 
     plt.suptitle("History Feature Impact Analysis Dashboard (MM vs. LMM)", fontsize=22, fontweight='bold', y=0.98)
     plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -205,28 +203,28 @@ def main():
         x = np.arange(2)
         width = 0.35
 
-        rects1 = ax.bar(x - width/2, [mm_nohist, lmm_nohist], width, label='Without History', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
-        rects2 = ax.bar(x + width/2, [mm_hist, lmm_hist], width, label='With History', color='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_mm = ax.bar(x - width/2, [mm_nohist, mm_hist], width, label='Motion Matching (MM)', color='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9)
+        rects_lmm = ax.bar(x + width/2, [lmm_nohist, lmm_hist], width, label='Learned Motion Matching (LMM)', color='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9)
 
         ax.set_ylabel(m_title, fontsize=12, fontweight='bold')
         ax.set_title(f"{m_title} - Impact of History Feature", fontsize=15, fontweight='bold', pad=15)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Motion Matching (MM)', 'Learned Motion Matching (LMM)'], fontsize=12, fontweight='bold')
+        ax.set_xticklabels(['Without History', 'With History'], fontsize=12, fontweight='bold')
         ax.grid(True, linestyle='--', alpha=0.3)
         
         from matplotlib.patches import Patch
         legend_elements_ind = [
-            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Without History'),
-            Patch(facecolor='#1C4A7E', edgecolor='black', linewidth=0.7, alpha=0.9, label='With History')
+            Patch(facecolor='#3A86C8', edgecolor='black', linewidth=0.7, alpha=0.9, label='Motion Matching (MM)'),
+            Patch(facecolor='#F77F00', edgecolor='black', linewidth=0.7, alpha=0.9, label='Learned Motion Matching (LMM)')
         ]
         ax.legend(handles=legend_elements_ind, frameon=True, facecolor='white', edgecolor='none', fontsize=11)
 
         # Label bars
-        for rect in rects1:
+        for rect in rects_mm:
             height = rect.get_height()
             if not np.isnan(height):
                 ax.annotate(f'{height:.4f}', xy=(rect.get_x() + rect.get_width() / 2, height), xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=11, fontweight='bold')
-        for rect in rects2:
+        for rect in rects_lmm:
             height = rect.get_height()
             if not np.isnan(height):
                 ax.annotate(f'{height:.4f}', xy=(rect.get_x() + rect.get_width() / 2, height), xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=11, fontweight='bold')
